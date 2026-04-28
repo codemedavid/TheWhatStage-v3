@@ -1,10 +1,23 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useTransition } from 'react'
 import Link from 'next/link'
 import { useUrlState } from './_useUrlState'
 import { LeadDrawer } from './LeadDrawer'
+import { exportLeadsCsv } from '../actions/export'
 import type { LeadsQuery } from '../_lib/schemas'
 import type { StageRow, FieldDefRow } from '../_lib/queries'
+
+function downloadCsv(filename: string, csv: string) {
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+}
 
 export function Toolbar({
   params, stages, fieldDefs,
@@ -16,6 +29,14 @@ export function Toolbar({
   const { set } = useUrlState()
   const [q, setQ] = useState(params.q ?? '')
   const [openAdd, setOpenAdd] = useState(false)
+  const [exporting, startExport] = useTransition()
+
+  const onExport = (scope: 'filtered' | 'all') =>
+    startExport(async () => {
+      const csv = await exportLeadsCsv(params, scope)
+      const stamp = new Date().toISOString().slice(0, 10)
+      downloadCsv(`leads-${scope}-${stamp}.csv`, csv)
+    })
 
   useEffect(() => {
     const t = setTimeout(() => set({ q: q || undefined }), 300)
@@ -54,6 +75,20 @@ export function Toolbar({
         <option value="value_desc">Value high–low</option>
       </select>
       <div className="ml-auto flex items-center gap-2">
+        <button
+          onClick={() => onExport('filtered')}
+          disabled={exporting}
+          className="px-3 py-1.5 text-sm border rounded-md disabled:opacity-50"
+        >
+          Export filtered
+        </button>
+        <button
+          onClick={() => onExport('all')}
+          disabled={exporting}
+          className="px-3 py-1.5 text-sm border rounded-md disabled:opacity-50"
+        >
+          Export all
+        </button>
         <Link href="/dashboard/leads/stages" className="px-3 py-1.5 text-sm border rounded-md">
           Manage stages
         </Link>
