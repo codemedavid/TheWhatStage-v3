@@ -69,7 +69,7 @@ describe('facebook/oauth', () => {
     vi.stubGlobal('fetch', vi.fn(async () =>
       new Response(JSON.stringify({
         data: [
-          { id: 'p1', name: 'Page One', category: 'Business', access_token: 'pt1' },
+          { id: 'p1', name: 'Page One', category: 'Business', access_token: 'pt1', picture: { data: { url: 'https://cdn/p1.jpg' } } },
           { id: 'p2', name: 'Page Two', category: null, access_token: 'pt2' },
         ],
       }), { status: 200 }),
@@ -77,8 +77,8 @@ describe('facebook/oauth', () => {
     const { fetchUserPages } = await import('./oauth')
     const pages = await fetchUserPages('long-1')
     expect(pages).toEqual([
-      { id: 'p1', name: 'Page One', category: 'Business', accessToken: 'pt1' },
-      { id: 'p2', name: 'Page Two', category: null, accessToken: 'pt2' },
+      { id: 'p1', name: 'Page One', category: 'Business', accessToken: 'pt1', pictureUrl: 'https://cdn/p1.jpg' },
+      { id: 'p2', name: 'Page Two', category: null, accessToken: 'pt2', pictureUrl: null },
     ])
   })
 

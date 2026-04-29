@@ -8,6 +8,7 @@ export type FacebookPage = {
   name: string
   category: string | null
   accessToken: string
+  pictureUrl: string | null
 }
 
 function appId(): string {
@@ -78,15 +79,22 @@ export async function fetchMe(longLivedToken: string): Promise<string> {
 
 export async function fetchUserPages(longLivedToken: string): Promise<FacebookPage[]> {
   const u = new URL(`${GRAPH}/me/accounts`)
-  u.searchParams.set('fields', 'id,name,category,access_token')
+  u.searchParams.set('fields', 'id,name,category,access_token,picture{url}')
   u.searchParams.set('access_token', longLivedToken)
   const data = await getJson<{
-    data: Array<{ id: string; name: string; category?: string | null; access_token: string }>
+    data: Array<{
+      id: string
+      name: string
+      category?: string | null
+      access_token: string
+      picture?: { data?: { url?: string } }
+    }>
   }>(u.toString())
   return data.data.map((p) => ({
     id: p.id,
     name: p.name,
     category: p.category ?? null,
     accessToken: p.access_token,
+    pictureUrl: p.picture?.data?.url ?? null,
   }))
 }

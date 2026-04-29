@@ -1,5 +1,6 @@
 import type { FacebookPage } from '@/lib/facebook/oauth'
 import { savePagesForm, disconnectForm } from '../actions'
+import { PageAvatar } from './page-avatar'
 
 export function PagePicker({ pages }: { pages: FacebookPage[] }) {
   if (pages.length === 0) {
@@ -34,21 +35,31 @@ export function PagePicker({ pages }: { pages: FacebookPage[] }) {
       <p className="text-[13px] text-[#6B7280] mb-4">
         Select one or more pages to connect.
       </p>
-      <ul className="space-y-2 mb-4">
+      <ul className="mb-4 divide-y divide-[#F3F4F6] rounded-lg border border-[#E5E7EB]">
         {pages.map((p) => (
-          <li key={p.id} className="flex items-center gap-3">
-            <input
-              type="checkbox"
-              name="page_id"
-              value={p.id}
-              id={`pg-${p.id}`}
-              className="h-4 w-4 rounded border-[#D1D5DB]"
-            />
-            <label htmlFor={`pg-${p.id}`} className="text-[14px] text-[#111827]">
-              {p.name}
-              {p.category && (
-                <span className="ml-2 text-[12px] text-[#6B7280]">{p.category}</span>
-              )}
+          <li key={p.id}>
+            <label
+              htmlFor={`pg-${p.id}`}
+              className="flex cursor-pointer items-center gap-3 px-3 py-2.5 hover:bg-[#F9FAFB]"
+            >
+              <input
+                type="checkbox"
+                name="page_id"
+                value={p.id}
+                id={`pg-${p.id}`}
+                className="h-4 w-4 shrink-0 rounded border-[#D1D5DB] text-[#059669] focus:ring-[#059669]"
+              />
+              <PageAvatar src={p.pictureUrl} name={p.name} size={36} />
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-[14px] font-medium text-[#111827]">
+                  {p.name}
+                </div>
+                {p.category && (
+                  <div className="truncate text-[12px] text-[#6B7280]">
+                    {p.category}
+                  </div>
+                )}
+              </div>
             </label>
           </li>
         ))}

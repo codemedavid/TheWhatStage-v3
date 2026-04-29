@@ -34,7 +34,7 @@ export default async function FacebookSettingsPage({
   } else {
     const { data: pages } = await supabase
       .from('facebook_pages')
-      .select('id, fb_page_id, name, category')
+      .select('id, fb_page_id, name, category, picture_url')
       .eq('connection_id', conn.id)
       .order('created_at', { ascending: true })
 

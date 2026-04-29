@@ -1,10 +1,12 @@
 import { disconnectForm } from '../actions'
+import { PageAvatar } from './page-avatar'
 
 type Page = {
   id: string
   fb_page_id: string
   name: string
   category: string | null
+  picture_url: string | null
 }
 
 export function ConnectedView({ pages }: { pages: Page[] }) {
@@ -30,11 +32,18 @@ export function ConnectedView({ pages }: { pages: Page[] }) {
       </div>
       <ul className="divide-y divide-[#E5E7EB]">
         {pages.map((p) => (
-          <li key={p.id} className="py-3">
-            <div className="text-[14px] font-medium text-[#111827]">{p.name}</div>
-            {p.category && (
-              <div className="text-[12px] text-[#6B7280]">{p.category}</div>
-            )}
+          <li key={p.id} className="flex items-center gap-3 py-3">
+            <PageAvatar src={p.picture_url} name={p.name} size={40} />
+            <div className="min-w-0">
+              <div className="truncate text-[14px] font-medium text-[#111827]">
+                {p.name}
+              </div>
+              {p.category && (
+                <div className="truncate text-[12px] text-[#6B7280]">
+                  {p.category}
+                </div>
+              )}
+            </div>
           </li>
         ))}
       </ul>

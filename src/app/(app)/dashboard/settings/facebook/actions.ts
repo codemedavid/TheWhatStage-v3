@@ -59,6 +59,7 @@ export async function savePagesForm(formData: FormData): Promise<void> {
     fb_page_id: p.id,
     name: p.name,
     category: p.category,
+    picture_url: p.pictureUrl,
     page_access_token: encryptToken(p.accessToken),
   }))
 
