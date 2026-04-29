@@ -20,12 +20,20 @@ export async function saveSelectedPages(pageIds: string[]): Promise<void> {
     .select('id, long_lived_token')
     .eq('user_id', session.userId)
     .single()
-  if (cErr || !conn) return
+  if (cErr) {
+    console.error('[saveSelectedPages] load connection failed:', cErr)
+    throw new Error(`Could not load Facebook connection: ${cErr.message}`)
+  }
+  if (!conn) {
+    throw new Error('No Facebook connection found for this user')
+  }
 
   const longLived = decryptToken(conn.long_lived_token)
   const allPages = await fetchUserPages(longLived)
   const selected = allPages.filter((p) => pageIds.includes(p.id))
-  if (selected.length === 0) return
+  if (selected.length === 0) {
+    throw new Error('None of the selected pages were returned by Facebook')
+  }
 
   const rows = selected.map((p) => ({
     connection_id: conn.id,
@@ -35,7 +43,14 @@ export async function saveSelectedPages(pageIds: string[]): Promise<void> {
     page_access_token: encryptToken(p.accessToken),
   }))
 
-  await supabase.from('facebook_pages').insert(rows)
+  const { error: insertErr } = await supabase.from('facebook_pages').insert(rows)
+  if (insertErr) {
+    console.error('[saveSelectedPages] insert failed:', insertErr)
+    throw new Error(
+      `Could not save pages: ${insertErr.message}${insertErr.details ? ' — ' + insertErr.details : ''}`,
+    )
+  }
+
   revalidatePath(SETTINGS_PATH)
 }
 
@@ -44,6 +59,13 @@ export async function disconnect(): Promise<void> {
   if (!session) redirect('/login')
 
   const supabase = await createClient()
-  await supabase.from('facebook_connections').delete().eq('user_id', session.userId)
+  const { error } = await supabase
+    .from('facebook_connections')
+    .delete()
+    .eq('user_id', session.userId)
+  if (error) {
+    console.error('[disconnect] failed:', error)
+    throw new Error(`Could not disconnect: ${error.message}`)
+  }
   revalidatePath(SETTINGS_PATH)
 }

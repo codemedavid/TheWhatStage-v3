@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
   }
 
   const url = new URL(req.url)
-  if (url.searchParams.get('error')) {
+  if (url.searchParams.get('error') || url.searchParams.get('error_code')) {
     return settingsRedirect('denied')
   }
 
