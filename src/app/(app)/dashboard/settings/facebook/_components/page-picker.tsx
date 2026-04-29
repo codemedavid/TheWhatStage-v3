@@ -40,7 +40,12 @@ export function PagePicker({ pages }: { pages: FacebookPage[] }) {
             return
           }
           setError(null)
-          await saveSelectedPages(ids)
+          try {
+            await saveSelectedPages(ids)
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : 'Failed to save pages.'
+            if (!/NEXT_REDIRECT/.test(msg)) setError(msg)
+          }
         })
       }
       className="rounded-xl border border-[#E5E7EB] bg-white p-6 shadow-[0_1px_2px_rgba(16,24,40,0.04)]"

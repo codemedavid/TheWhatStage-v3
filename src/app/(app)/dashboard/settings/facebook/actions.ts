@@ -52,6 +52,7 @@ export async function saveSelectedPages(pageIds: string[]): Promise<void> {
   }
 
   revalidatePath(SETTINGS_PATH)
+  redirect(SETTINGS_PATH)
 }
 
 export async function disconnect(): Promise<void> {
@@ -68,4 +69,5 @@ export async function disconnect(): Promise<void> {
     throw new Error(`Could not disconnect: ${error.message}`)
   }
   revalidatePath(SETTINGS_PATH)
+  redirect(SETTINGS_PATH)
 }
