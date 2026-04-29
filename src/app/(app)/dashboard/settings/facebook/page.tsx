@@ -57,10 +57,9 @@ export default async function FacebookSettingsPage({
   }
 
   return (
-    <div className="p-8 max-w-2xl">
-      <h1 className="text-[20px] font-semibold text-[#111827] mb-4">Facebook</h1>
+    <section className="space-y-4">
       <ErrorBanner code={error} />
       {body}
-    </div>
+    </section>
   )
 }

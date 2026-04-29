@@ -10,7 +10,7 @@ export function PagePicker({ pages }: { pages: FacebookPage[] }) {
 
   if (pages.length === 0) {
     return (
-      <div className="rounded-lg border border-[#E5E7EB] bg-white p-6">
+      <div className="rounded-xl border border-[#E5E7EB] bg-white p-6 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
         <h2 className="text-[16px] font-semibold text-[#111827] mb-2">
           No pages found
         </h2>
@@ -43,7 +43,7 @@ export function PagePicker({ pages }: { pages: FacebookPage[] }) {
           await saveSelectedPages(ids)
         })
       }
-      className="rounded-lg border border-[#E5E7EB] bg-white p-6"
+      className="rounded-xl border border-[#E5E7EB] bg-white p-6 shadow-[0_1px_2px_rgba(16,24,40,0.04)]"
     >
       <h2 className="text-[16px] font-semibold text-[#111827] mb-1">
         Pick pages to track

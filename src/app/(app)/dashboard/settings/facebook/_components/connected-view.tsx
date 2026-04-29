@@ -13,7 +13,7 @@ type Page = {
 export function ConnectedView({ pages }: { pages: Page[] }) {
   const [pending, start] = useTransition()
   return (
-    <div className="rounded-lg border border-[#E5E7EB] bg-white p-6">
+    <div className="rounded-xl border border-[#E5E7EB] bg-white p-6 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
       <div className="flex items-start justify-between mb-4">
         <div>
           <h2 className="text-[16px] font-semibold text-[#111827] mb-1">
