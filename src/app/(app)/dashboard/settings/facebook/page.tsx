@@ -8,7 +8,7 @@ import { ConnectButton } from './_components/connect-button'
 import { PagePicker } from './_components/page-picker'
 import { ConnectedView } from './_components/connected-view'
 
-type SearchParams = { error?: string }
+type SearchParams = { error?: string; detail?: string }
 
 export default async function FacebookSettingsPage({
   searchParams,
@@ -17,7 +17,7 @@ export default async function FacebookSettingsPage({
 }) {
   const session = await getSession()
   if (!session) redirect('/login')
-  const { error } = await searchParams
+  const { error, detail } = await searchParams
 
   const supabase = await createClient()
 
@@ -58,7 +58,7 @@ export default async function FacebookSettingsPage({
 
   return (
     <section className="space-y-4">
-      <ErrorBanner code={error} />
+      <ErrorBanner code={error} detail={detail} />
       {body}
     </section>
   )

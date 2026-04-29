@@ -1,13 +1,7 @@
-'use client'
-
-import { useState, useTransition } from 'react'
 import type { FacebookPage } from '@/lib/facebook/oauth'
-import { saveSelectedPages, disconnect } from '../actions'
+import { savePagesForm, disconnectForm } from '../actions'
 
 export function PagePicker({ pages }: { pages: FacebookPage[] }) {
-  const [error, setError] = useState<string | null>(null)
-  const [pending, start] = useTransition()
-
   if (pages.length === 0) {
     return (
       <div className="rounded-xl border border-[#E5E7EB] bg-white p-6 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
@@ -17,10 +11,9 @@ export function PagePicker({ pages }: { pages: FacebookPage[] }) {
         <p className="text-[13px] text-[#6B7280] mb-4">
           Your Facebook account doesn&apos;t manage any pages.
         </p>
-        <form action={() => start(async () => { await disconnect() })}>
+        <form action={disconnectForm}>
           <button
             type="submit"
-            disabled={pending}
             className="inline-flex items-center rounded-md border border-[#E5E7EB] px-3 py-1.5 text-[13px] font-medium text-[#374151] hover:bg-[#F3F4F6]"
           >
             Disconnect
@@ -32,22 +25,7 @@ export function PagePicker({ pages }: { pages: FacebookPage[] }) {
 
   return (
     <form
-      action={(formData) =>
-        start(async () => {
-          const ids = formData.getAll('page_id') as string[]
-          if (ids.length === 0) {
-            setError('Pick at least one page.')
-            return
-          }
-          setError(null)
-          try {
-            await saveSelectedPages(ids)
-          } catch (e) {
-            const msg = e instanceof Error ? e.message : 'Failed to save pages.'
-            if (!/NEXT_REDIRECT/.test(msg)) setError(msg)
-          }
-        })
-      }
+      action={savePagesForm}
       className="rounded-xl border border-[#E5E7EB] bg-white p-6 shadow-[0_1px_2px_rgba(16,24,40,0.04)]"
     >
       <h2 className="text-[16px] font-semibold text-[#111827] mb-1">
@@ -75,15 +53,11 @@ export function PagePicker({ pages }: { pages: FacebookPage[] }) {
           </li>
         ))}
       </ul>
-      {error && (
-        <p className="mb-3 text-[13px] text-[#991B1B]">{error}</p>
-      )}
       <button
         type="submit"
-        disabled={pending}
-        className="inline-flex items-center rounded-md bg-[#059669] px-4 py-2 text-[14px] font-medium text-white hover:bg-[#047857] disabled:opacity-50"
+        className="inline-flex items-center rounded-md bg-[#059669] px-4 py-2 text-[14px] font-medium text-white hover:bg-[#047857]"
       >
-        {pending ? 'Saving…' : 'Save pages'}
+        Save pages
       </button>
     </form>
   )

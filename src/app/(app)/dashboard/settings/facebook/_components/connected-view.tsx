@@ -1,7 +1,4 @@
-'use client'
-
-import { useTransition } from 'react'
-import { disconnect } from '../actions'
+import { disconnectForm } from '../actions'
 
 type Page = {
   id: string
@@ -11,7 +8,6 @@ type Page = {
 }
 
 export function ConnectedView({ pages }: { pages: Page[] }) {
-  const [pending, start] = useTransition()
   return (
     <div className="rounded-xl border border-[#E5E7EB] bg-white p-6 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
       <div className="flex items-start justify-between mb-4">
@@ -23,13 +19,12 @@ export function ConnectedView({ pages }: { pages: Page[] }) {
             {pages.length} page{pages.length === 1 ? '' : 's'} connected.
           </p>
         </div>
-        <form action={() => start(async () => { await disconnect() })}>
+        <form action={disconnectForm}>
           <button
             type="submit"
-            disabled={pending}
             className="inline-flex items-center rounded-md border border-[#E5E7EB] px-3 py-1.5 text-[13px] font-medium text-[#374151] hover:bg-[#F3F4F6]"
           >
-            {pending ? 'Disconnecting…' : 'Disconnect'}
+            Disconnect
           </button>
         </form>
       </div>

@@ -9,10 +9,14 @@ import { fetchUserPages } from '@/lib/facebook/oauth'
 
 const SETTINGS_PATH = '/dashboard/settings/facebook'
 
-export async function saveSelectedPages(pageIds: string[]): Promise<void> {
+export async function savePagesForm(formData: FormData): Promise<void> {
+  const pageIds = formData.getAll('page_id').map(String).filter(Boolean)
+  if (pageIds.length === 0) {
+    redirect(`${SETTINGS_PATH}?error=no_selection`)
+  }
+
   const session = await getSession()
   if (!session) redirect('/login')
-  if (!Array.isArray(pageIds) || pageIds.length === 0) return
 
   const supabase = await createClient()
   const { data: conn, error: cErr } = await supabase
@@ -20,19 +24,16 @@ export async function saveSelectedPages(pageIds: string[]): Promise<void> {
     .select('id, long_lived_token')
     .eq('user_id', session.userId)
     .single()
-  if (cErr) {
-    console.error('[saveSelectedPages] load connection failed:', cErr)
-    throw new Error(`Could not load Facebook connection: ${cErr.message}`)
-  }
-  if (!conn) {
-    throw new Error('No Facebook connection found for this user')
+  if (cErr || !conn) {
+    console.error('[savePagesForm] load connection failed:', cErr)
+    redirect(`${SETTINGS_PATH}?error=no_connection`)
   }
 
   const longLived = decryptToken(conn.long_lived_token)
   const allPages = await fetchUserPages(longLived)
   const selected = allPages.filter((p) => pageIds.includes(p.id))
   if (selected.length === 0) {
-    throw new Error('None of the selected pages were returned by Facebook')
+    redirect(`${SETTINGS_PATH}?error=no_match`)
   }
 
   const rows = selected.map((p) => ({
@@ -43,11 +44,13 @@ export async function saveSelectedPages(pageIds: string[]): Promise<void> {
     page_access_token: encryptToken(p.accessToken),
   }))
 
-  const { error: insertErr } = await supabase.from('facebook_pages').insert(rows)
+  const { error: insertErr } = await supabase
+    .from('facebook_pages')
+    .upsert(rows, { onConflict: 'fb_page_id' })
   if (insertErr) {
-    console.error('[saveSelectedPages] insert failed:', insertErr)
-    throw new Error(
-      `Could not save pages: ${insertErr.message}${insertErr.details ? ' — ' + insertErr.details : ''}`,
+    console.error('[savePagesForm] insert failed:', insertErr)
+    redirect(
+      `${SETTINGS_PATH}?error=save_failed&detail=${encodeURIComponent(insertErr.message)}`,
     )
   }
 
@@ -55,7 +58,7 @@ export async function saveSelectedPages(pageIds: string[]): Promise<void> {
   redirect(SETTINGS_PATH)
 }
 
-export async function disconnect(): Promise<void> {
+export async function disconnectForm(): Promise<void> {
   const session = await getSession()
   if (!session) redirect('/login')
 
@@ -65,8 +68,10 @@ export async function disconnect(): Promise<void> {
     .delete()
     .eq('user_id', session.userId)
   if (error) {
-    console.error('[disconnect] failed:', error)
-    throw new Error(`Could not disconnect: ${error.message}`)
+    console.error('[disconnectForm] failed:', error)
+    redirect(
+      `${SETTINGS_PATH}?error=disconnect_failed&detail=${encodeURIComponent(error.message)}`,
+    )
   }
   revalidatePath(SETTINGS_PATH)
   redirect(SETTINGS_PATH)
