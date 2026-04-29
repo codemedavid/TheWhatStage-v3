@@ -9,32 +9,50 @@ import { fetchUserPages } from '@/lib/facebook/oauth'
 
 const SETTINGS_PATH = '/dashboard/settings/facebook'
 
+function errRedirect(code: string, detail?: string): never {
+  const qs = new URLSearchParams({ error: code })
+  if (detail) qs.set('detail', detail.slice(0, 300))
+  redirect(`${SETTINGS_PATH}?${qs.toString()}`)
+}
+
 export async function savePagesForm(formData: FormData): Promise<void> {
+  console.log('[savePagesForm] invoked')
+
   const pageIds = formData.getAll('page_id').map(String).filter(Boolean)
-  if (pageIds.length === 0) {
-    redirect(`${SETTINGS_PATH}?error=no_selection`)
-  }
+  console.log('[savePagesForm] pageIds:', pageIds)
+  if (pageIds.length === 0) errRedirect('no_selection')
 
   const session = await getSession()
   if (!session) redirect('/login')
+  console.log('[savePagesForm] session.userId:', session.userId)
 
   const supabase = await createClient()
+
   const { data: conn, error: cErr } = await supabase
     .from('facebook_connections')
     .select('id, long_lived_token')
     .eq('user_id', session.userId)
     .single()
-  if (cErr || !conn) {
+  if (cErr) {
     console.error('[savePagesForm] load connection failed:', cErr)
-    redirect(`${SETTINGS_PATH}?error=no_connection`)
+    errRedirect('no_connection', cErr.message)
+  }
+  if (!conn) errRedirect('no_connection')
+  console.log('[savePagesForm] connection.id:', conn.id)
+
+  let allPages: Awaited<ReturnType<typeof fetchUserPages>> = []
+  try {
+    const longLived = decryptToken(conn.long_lived_token)
+    allPages = await fetchUserPages(longLived)
+    console.log('[savePagesForm] fb returned', allPages.length, 'pages')
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    console.error('[savePagesForm] fetchUserPages failed:', msg)
+    errRedirect('fetch_failed', msg)
   }
 
-  const longLived = decryptToken(conn.long_lived_token)
-  const allPages = await fetchUserPages(longLived)
   const selected = allPages.filter((p) => pageIds.includes(p.id))
-  if (selected.length === 0) {
-    redirect(`${SETTINGS_PATH}?error=no_match`)
-  }
+  if (selected.length === 0) errRedirect('no_match')
 
   const rows = selected.map((p) => ({
     connection_id: conn.id,
@@ -44,21 +62,22 @@ export async function savePagesForm(formData: FormData): Promise<void> {
     page_access_token: encryptToken(p.accessToken),
   }))
 
-  const { error: insertErr } = await supabase
+  const { error: insertErr, data: inserted } = await supabase
     .from('facebook_pages')
     .upsert(rows, { onConflict: 'fb_page_id' })
+    .select('id')
   if (insertErr) {
     console.error('[savePagesForm] insert failed:', insertErr)
-    redirect(
-      `${SETTINGS_PATH}?error=save_failed&detail=${encodeURIComponent(insertErr.message)}`,
-    )
+    errRedirect('save_failed', insertErr.message)
   }
+  console.log('[savePagesForm] inserted/upserted', inserted?.length ?? 0, 'rows')
 
   revalidatePath(SETTINGS_PATH)
   redirect(SETTINGS_PATH)
 }
 
 export async function disconnectForm(): Promise<void> {
+  console.log('[disconnectForm] invoked')
   const session = await getSession()
   if (!session) redirect('/login')
 
@@ -69,9 +88,7 @@ export async function disconnectForm(): Promise<void> {
     .eq('user_id', session.userId)
   if (error) {
     console.error('[disconnectForm] failed:', error)
-    redirect(
-      `${SETTINGS_PATH}?error=disconnect_failed&detail=${encodeURIComponent(error.message)}`,
-    )
+    errRedirect('disconnect_failed', error.message)
   }
   revalidatePath(SETTINGS_PATH)
   redirect(SETTINGS_PATH)

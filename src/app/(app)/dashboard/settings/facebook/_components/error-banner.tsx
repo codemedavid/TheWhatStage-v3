@@ -7,6 +7,7 @@ const MESSAGES: Record<string, string> = {
   no_match: 'The selected page is no longer available on your Facebook account.',
   save_failed: 'Could not save the selected page(s).',
   disconnect_failed: 'Could not disconnect Facebook.',
+  fetch_failed: "Couldn't fetch your pages from Facebook. Token may be expired — disconnect and reconnect.",
 }
 
 export function ErrorBanner({ code, detail }: { code?: string; detail?: string }) {
