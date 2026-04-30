@@ -32,7 +32,49 @@ export const KIND_REGISTRY: Record<ActionPageKind, KindMeta> = {
     label: 'Booking',
     blurb: 'Let leads pick an appointment slot. Embeddable or standalone.',
     supportsEmbed: true,
-    defaultConfig: { duration_min: 30, slots: [] },
+    defaultConfig: {
+      theme: {
+        background_color: '#FFFFFF',
+        accent_color: '#059669',
+        button_text_color: '#FFFFFF',
+      },
+      appointment: {
+        duration_min: 30,
+        buffer_min: 0,
+        timezone: 'Asia/Manila',
+      },
+      // Mon–Fri 09:00–17:00 enabled, weekends off.
+      availability: [
+        { weekday: 0, enabled: false, windows: [] },
+        { weekday: 1, enabled: true, windows: [{ start: '09:00', end: '17:00' }] },
+        { weekday: 2, enabled: true, windows: [{ start: '09:00', end: '17:00' }] },
+        { weekday: 3, enabled: true, windows: [{ start: '09:00', end: '17:00' }] },
+        { weekday: 4, enabled: true, windows: [{ start: '09:00', end: '17:00' }] },
+        { weekday: 5, enabled: true, windows: [{ start: '09:00', end: '17:00' }] },
+        { weekday: 6, enabled: false, windows: [] },
+      ],
+      date_range: { from: null, to: null },
+      slots_per_window: 1,
+      form: {
+        mode: 'inline',
+        fields: [
+          {
+            id: 'full_name',
+            key: 'full_name',
+            label: 'Full name',
+            field_kind: 'short_text',
+            required: true,
+          },
+          {
+            id: 'phone',
+            key: 'phone',
+            label: 'Phone',
+            field_kind: 'phone',
+            required: true,
+          },
+        ],
+      },
+    },
     defaultPipelineRules: [{ outcome: 'booked', reason: 'Appointment booked' }],
   },
   qualification: {
