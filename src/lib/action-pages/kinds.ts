@@ -40,10 +40,43 @@ export const KIND_REGISTRY: Record<ActionPageKind, KindMeta> = {
     label: 'Qualification',
     blurb: 'Short quiz that scores leads as qualified or not.',
     supportsEmbed: true,
-    defaultConfig: { questions: [], pass_threshold: 0 },
+    defaultConfig: {
+      theme: {
+        background_color: '#FFFFFF',
+        accent_color: '#059669',
+        button_text_color: '#FFFFFF',
+      },
+      progress_bar: true,
+      questions: [
+        {
+          id: 'q_starter',
+          prompt: 'Are you the decision maker?',
+          kind: 'single_choice',
+          required: true,
+          weight: 1,
+          options: [
+            { label: 'Yes', value: 'yes', score: 1 },
+            { label: 'No', value: 'no', score: 0 },
+          ],
+        },
+      ],
+      scoring: {
+        mode: 'rule_based',
+        threshold: 1,
+        qualified_outcome: 'qualified',
+        disqualified_outcome: 'disqualified',
+      },
+      intro: { headline: '', body: '' },
+      outro: {
+        qualified_message: '',
+        disqualified_message: '',
+        pending_message: '',
+      },
+    },
     defaultPipelineRules: [
       { outcome: 'qualified', reason: 'Passed qualification' },
       { outcome: 'disqualified', reason: 'Did not qualify' },
+      { outcome: 'pending_review', reason: 'Awaiting manual qualification review' },
     ],
   },
   sales: {
