@@ -24,7 +24,32 @@ export const KIND_REGISTRY: Record<ActionPageKind, KindMeta> = {
     label: 'Form',
     blurb: 'Collect structured info from a lead. Embeddable or standalone.',
     supportsEmbed: true,
-    defaultConfig: { fields: [] },
+    defaultConfig: {
+      theme: {
+        background_color: '#ffffff',
+        accent_color: '#059669',
+        button_text_color: '#ffffff',
+      },
+      branding: {},
+      blocks: [
+        {
+          id: 'starter-heading',
+          type: 'heading',
+          text: 'Tell us about yourself',
+          level: 2,
+        },
+        {
+          id: 'starter-name',
+          type: 'field',
+          key: 'full_name',
+          label: 'Your name',
+          field_kind: 'short_text',
+          required: true,
+        },
+      ],
+      submit_button_label: 'Submit',
+      success_message: 'Thanks! We got your submission.',
+    },
     defaultPipelineRules: [{ outcome: 'submitted', reason: 'Form submitted' }],
   },
   booking: {
