@@ -317,7 +317,7 @@ async function handleFeedChange(
         started_at: null,
         finished_at: null,
       },
-      { onConflict: 'fb_comment_id', ignoreDuplicates: true },
+      { onConflict: 'fb_comment_id', ignoreDuplicates: value.verb !== 'edited' },
     )
     .select('id')
     .maybeSingle()

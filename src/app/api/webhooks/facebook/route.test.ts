@@ -174,6 +174,46 @@ describe('facebook webhook comment events', () => {
     })
   })
 
+  it('requeues an edited Page feed comment event for an existing comment job', async () => {
+    const { commentUpsert } = makeCommentAdminMock()
+
+    const change = {
+      field: 'feed',
+      value: {
+        item: 'comment',
+        verb: 'edited',
+        comment_id: 'comment-1',
+        parent_id: 'parent-1',
+        post_id: 'post-1',
+        message: 'Updated interest',
+      },
+    }
+    const res = await postWebhook({
+      object: 'page',
+      entry: [{ id: 'fb-page-1', changes: [change] }],
+    })
+
+    await Promise.resolve()
+
+    expect(res.status).toBe(200)
+    await expect(res.json()).resolves.toEqual({ received: true })
+    expect(commentUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        fb_comment_id: 'comment-1',
+        webhook_event: change,
+        status: 'queued',
+        started_at: null,
+        finished_at: null,
+      }),
+      { onConflict: 'fb_comment_id', ignoreDuplicates: false },
+    )
+    expect(global.fetch).toHaveBeenCalledTimes(1)
+    expect(global.fetch).toHaveBeenCalledWith('https://app.test/api/comments/process', {
+      method: 'POST',
+      headers: { 'x-worker-secret': 'comment-secret' },
+    })
+  })
+
   it('ignores non-comment feed events', async () => {
     const res = await postWebhook({
       object: 'page',
