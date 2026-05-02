@@ -123,7 +123,9 @@ export async function classifyComment(input: CommentClassifierInput): Promise<Co
     'Spam means scams, repeated promotion, malicious links, fake giveaways, or irrelevant commercial spam. ' +
     'Abusive means clear harassment, threats, profane attacks, hate, or unsafe content. ' +
     'Mild negative feedback is not abuse. Destructive actions hide/delete require high confidence. ' +
-    'Use private_reply for customer questions when a private response would be useful.'
+    'Use private_reply for customer questions — the actual answer will be sent via DM by a separate RAG system; set private_reply to a short placeholder. ' +
+    'For good/positive engagement comments set moderation_action to public_reply and write a warm short public_reply to engage back. ' +
+    'For needs_no_action set both reply fields to null.'
 
   const user = `JSON data:\n${stringifyUntrustedData({ pageName: input.pageName, message: input.message })}`
   const complete =

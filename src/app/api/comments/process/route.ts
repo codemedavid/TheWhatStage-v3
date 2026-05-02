@@ -153,9 +153,9 @@ async function runJob(admin: AdminClient, job: CommentJob): Promise<void> {
 
     const action = chooseGraphAction({ decision, comment })
 
-    // For reply actions, regenerate the reply text using the RAG pipeline so it
-    // uses the bot's personality and knowledge base instead of the classifier stub.
-    if (action === 'private_reply' || action === 'public_reply') {
+    // Generate reply text via RAG for any comment that warrants a response.
+    const needsRagReply = action === 'private_reply' || action === 'public_reply'
+    if (needsRagReply) {
       const ragResult = await answer(admin, job.user_id, comment.message, [], {
         rpcName: 'match_knowledge_hybrid_service',
       }).catch(() => null)
@@ -165,6 +165,7 @@ async function runJob(admin: AdminClient, job: CommentJob): Promise<void> {
         decision.publicReply = ragText
       }
     }
+
     let graphStatus: GraphStatus = 'skipped'
     let graphError: string | null = null
     let attemptedPrivateReply = false
@@ -187,14 +188,20 @@ async function runJob(admin: AdminClient, job: CommentJob): Promise<void> {
           })
           privateReplyMessageId = sent.id
           graphStatus = 'sent'
-          // Record the DM in the Messenger thread if one exists for this commenter
           await recordDmInThread(admin, {
             pageId: job.page_id,
             psid: comment.commenterId,
             messageId: sent.id,
             body: decision.privateReply,
           })
+          // Also post a public comment so other viewers see the page responded
+          await replyToComment({
+            pageAccessToken: pageToken,
+            commentId: comment.id,
+            message: `Hi! We sent you a message with all the details. Check your inbox 😊`,
+          }).catch(() => {})
         } catch {
+          // DM failed — reply fully in public instead
           if (decision.publicReply) {
             await replyToComment({
               pageAccessToken: pageToken,
