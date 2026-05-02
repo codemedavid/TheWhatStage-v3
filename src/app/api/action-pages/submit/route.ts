@@ -109,17 +109,52 @@ export async function POST(req: NextRequest) {
 
   // Resolve lead from messenger thread when we have an attributed PSID + page.
   let leadId: string | null = null
+  let messengerThreadId: string | null = null
   if (psid && fbPageId) {
     const { data: thread } = await admin
       .from('messenger_threads')
-      .select('lead_id')
+      .select('id, lead_id')
       .eq('page_id', fbPageId)
       .eq('psid', psid)
-      .maybeSingle<{ lead_id: string | null }>()
+      .maybeSingle<{ id: string; lead_id: string | null }>()
     leadId = thread?.lead_id ?? null
+    messengerThreadId = thread?.id ?? null
   }
 
-  const parsed = parseSubmission(page.kind as ActionPageKind, payload, page.config)
+  let parsed
+  try {
+    parsed = parseSubmission(page.kind as ActionPageKind, payload, page.config)
+  } catch (e) {
+    return NextResponse.json(
+      {
+        error: 'invalid_submission',
+        detail: e instanceof Error ? e.message : String(e),
+      },
+      { status: 400 },
+    )
+  }
+
+  let businessOrderId: string | null = null
+  if (page.kind === 'catalog') {
+    try {
+      businessOrderId = await createBusinessOrderFromCatalog({
+        admin,
+        page,
+        parsedData: parsed.data,
+        leadId,
+        psid,
+        fbPageId,
+      })
+    } catch (e) {
+      return NextResponse.json(
+        {
+          error: 'invalid_catalog_order',
+          detail: e instanceof Error ? e.message : String(e),
+        },
+        { status: 400 },
+      )
+    }
+  }
 
   const ip =
     req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ??
@@ -139,17 +174,26 @@ export async function POST(req: NextRequest) {
       data: parsed.data,
       ip_hash: hashIp(ip),
       user_agent: ua,
+      meta: businessOrderId ? { business_order_id: businessOrderId } : null,
     })
     .select('id')
     .single<{ id: string }>()
   if (subErr || !subInsert) {
-    return NextResponse.json(
-      { error: 'insert_failed', detail: subErr?.message },
-      { status: 500 },
-    )
+    if (businessOrderId) {
+      console.warn('[action-pages.submit] submission insert failed after order capture', {
+        businessOrderId,
+        err: subErr?.message,
+      })
+    } else {
+      return NextResponse.json(
+        { error: 'insert_failed', detail: subErr?.message },
+        { status: 500 },
+      )
+    }
   }
 
-  // Apply pipeline rule (best-effort — submission already saved).
+  // Apply pipeline rule best-effort. For catalog, the order remains source of
+  // truth even if action_page_submissions linkage failed.
   if (leadId) {
     const rule = page.pipeline_rules.find((r) => r.outcome === parsed.outcome)
     if (rule?.to_stage_id) {
@@ -168,10 +212,27 @@ export async function POST(req: NextRequest) {
         })
       }
     }
+    try {
+      await advanceLeadFunnelForActionPage({
+        adminClient: admin,
+        leadId,
+        userId: page.user_id,
+        actionPageId: page.id,
+      })
+    } catch (e) {
+      console.warn('[action-pages.submit] funnel advance failed', {
+        leadId,
+        err: e instanceof Error ? e.message : String(e),
+      })
+    }
   }
 
-  // Echo back to Messenger.
-  const echo = page.notification_template?.text
+  // Echo back to Messenger. Per-outcome text on the matching pipeline rule
+  // wins; otherwise fall back to the global notification template.
+  const matchedRule = page.pipeline_rules.find((r) => r.outcome === parsed.outcome)
+  const echo =
+    (matchedRule?.notify_text && matchedRule.notify_text.trim()) ||
+    page.notification_template?.text
   if (echo && psid && fbPageId) {
     try {
       const { data: pageData } = await admin
@@ -181,11 +242,35 @@ export async function POST(req: NextRequest) {
         .maybeSingle<{ page_access_token: string }>()
       if (pageData?.page_access_token) {
         const token = decryptToken(pageData.page_access_token)
-        await sendMessengerText({
+        const sent = await sendMessengerText({
           pageAccessToken: token,
           recipientPsid: psid,
           text: echo,
         })
+        if (messengerThreadId) {
+          const { error: msgErr } = await admin.from('messenger_messages').insert({
+            thread_id: messengerThreadId,
+            user_id: page.user_id,
+            direction: 'outbound',
+            sender: 'bot',
+            fb_message_id: sent.message_id,
+            body: echo,
+          })
+          if (msgErr && (msgErr as { code?: string }).code !== '23505') {
+            console.warn('[action-pages.submit] messenger echo record failed', {
+              threadId: messengerThreadId,
+              err: msgErr.message,
+            })
+          } else {
+            await admin
+              .from('messenger_threads')
+              .update({
+                last_message_at: new Date().toISOString(),
+                last_message_preview: echo.slice(0, 200),
+              })
+              .eq('id', messengerThreadId)
+          }
+        }
       }
     } catch (e) {
       console.warn('[action-pages.submit] messenger echo failed', {
@@ -197,10 +282,105 @@ export async function POST(req: NextRequest) {
 
   // Form posts redirect to a thank-you screen; JSON callers get JSON.
   if (ct.includes('application/json')) {
-    return NextResponse.json({ ok: true, submission_id: subInsert.id })
+    return NextResponse.json({
+      ok: true,
+      submission_id: subInsert?.id ?? null,
+      business_order_id: businessOrderId,
+    })
   }
   const base = (process.env.NEXT_PUBLIC_APP_URL ?? '').replace(/\/+$/, '')
   return NextResponse.redirect(`${base}/a/${slug}?submitted=1`, { status: 303 })
+}
+
+async function createBusinessOrderFromCatalog(args: {
+  admin: ReturnType<typeof createAdminClient>
+  page: ActionPageRecord
+  parsedData: Record<string, unknown>
+  leadId: string | null
+  psid: string | null
+  fbPageId: string | null
+}): Promise<string> {
+  const items = (args.parsedData.items ?? []) as {
+    id: string
+    quantity: number
+  }[]
+  if (!items.length) throw new Error('cart is empty')
+
+  const ids = [...new Set(items.map((item) => item.id))]
+  const { data: products, error } = await args.admin
+    .from('business_items')
+    .select('id, title, sku, price_amount, currency, pricing_model')
+    .eq('user_id', args.page.user_id)
+    .eq('kind', 'product')
+    .eq('status', 'published')
+    .in('id', ids)
+
+  if (error) throw new Error(`load catalog products failed: ${error.message}`)
+  if ((products ?? []).length !== ids.length) {
+    throw new Error('cart contains unavailable products')
+  }
+
+  const productById = new Map((products ?? []).map((product) => [
+    product.id as string,
+    product,
+  ]))
+  const currency = String((products ?? [])[0]?.currency ?? 'PHP')
+  const lines = items.map((item) => {
+    const product = productById.get(item.id)
+    if (!product) throw new Error('cart contains unavailable products')
+
+    const pricingModel = String(product.pricing_model ?? 'fixed')
+    if (
+      (pricingModel === 'fixed' || pricingModel === 'starts_at') &&
+      (product.price_amount === null || product.price_amount === undefined || Number(product.price_amount) <= 0)
+    ) {
+      throw new Error('cart contains products without a valid price')
+    }
+
+    const unit = Number(product.price_amount ?? 0)
+    const total = Math.round(unit * item.quantity * 100) / 100
+
+    return {
+      user_id: args.page.user_id,
+      business_item_id: item.id,
+      title_snapshot: String(product.title),
+      sku_snapshot: product.sku ?? null,
+      quantity: item.quantity,
+      unit_amount: unit,
+      currency: String(product.currency ?? currency),
+      line_total_amount: total,
+    }
+  })
+  const subtotal = lines.reduce(
+    (sum, line) => sum + Number(line.line_total_amount),
+    0,
+  )
+  const customer = (args.parsedData.customer ?? {}) as Record<string, unknown>
+
+  const { data: orderId, error: orderErr } = await args.admin.rpc('create_catalog_order', {
+    p_order: {
+      user_id: args.page.user_id,
+      action_page_id: args.page.id,
+      lead_id: args.leadId,
+      psid: args.psid,
+      page_id: args.fbPageId,
+      status: 'new',
+      payment_status: 'unpaid',
+      currency,
+      subtotal_amount: subtotal,
+      customer_name: customer.name ?? null,
+      customer_email: customer.email ?? null,
+      customer_phone: customer.phone ?? null,
+      customer_notes: customer.notes ?? null,
+      meta: {},
+    },
+    p_lines: lines,
+  })
+
+  if (orderErr || !orderId) {
+    throw new Error(orderErr?.message ?? 'order insert failed')
+  }
+  return String(orderId)
 }
 
 async function applyStageMove(args: {
@@ -245,4 +425,39 @@ async function applyStageMove(args: {
     source: 'action_page',
     reason,
   })
+}
+
+async function advanceLeadFunnelForActionPage(args: {
+  adminClient: ReturnType<typeof createAdminClient>
+  leadId: string
+  userId: string
+  actionPageId: string
+}): Promise<void> {
+  const { adminClient, leadId, userId, actionPageId } = args
+
+  const { data: lead } = await adminClient
+    .from('leads')
+    .select('current_funnel_id')
+    .eq('id', leadId)
+    .eq('user_id', userId)
+    .maybeSingle<{ current_funnel_id: string | null }>()
+  if (!lead?.current_funnel_id) return
+
+  const { data: funnel } = await adminClient
+    .from('funnels')
+    .select('id, action_page_id, next_funnel_id')
+    .eq('id', lead.current_funnel_id)
+    .eq('user_id', userId)
+    .maybeSingle<{
+      id: string
+      action_page_id: string | null
+      next_funnel_id: string | null
+    }>()
+  if (!funnel || funnel.action_page_id !== actionPageId || !funnel.next_funnel_id) return
+
+  await adminClient
+    .from('leads')
+    .update({ current_funnel_id: funnel.next_funnel_id })
+    .eq('id', leadId)
+    .eq('user_id', userId)
 }

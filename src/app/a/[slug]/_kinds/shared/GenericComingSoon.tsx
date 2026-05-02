@@ -8,17 +8,11 @@ export function GenericComingSoon({
 }: KindRendererProps & { kindLabel: string }) {
   return (
     <div className="space-y-5">
-      <header>
-        <p className="text-[12px] uppercase tracking-wide text-[#6B7280]">
-          {kindLabel}
-        </p>
-        <h1 className="mt-1 text-[26px] font-semibold tracking-tight text-[#111827]">
-          {page.title}
-        </h1>
-        {page.description && (
+      {page.description && (
+        <header>
           <p className="mt-1 text-[14px] text-[#6B7280]">{page.description}</p>
-        )}
-      </header>
+        </header>
+      )}
       <div className="rounded-md border border-dashed border-[#D1D5DB] bg-[#F9FAFB] p-8 text-center text-[13px] text-[#6B7280]">
         The interactive {kindLabel.toLowerCase()} experience is being built.
       </div>

@@ -1,5 +1,6 @@
 import type { ActionPageRow } from '@/app/(app)/dashboard/action-pages/_lib/queries'
 import type { DeeplinkClaims } from '@/lib/action-pages/signing'
+import type { PublicProductCard } from '@/lib/business/public-dto'
 
 /**
  * Contract every kind renderer must satisfy.
@@ -15,4 +16,5 @@ export interface KindRendererProps {
   claims: DeeplinkClaims | null
   rawToken: string | null
   variant: 'standalone' | 'embed'
+  products?: PublicProductCard[]
 }

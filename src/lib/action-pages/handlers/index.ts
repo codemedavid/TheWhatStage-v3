@@ -2,3 +2,4 @@
 import './form'
 import './booking'
 import './qualification'
+import './catalog'

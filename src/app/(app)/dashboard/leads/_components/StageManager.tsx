@@ -55,8 +55,12 @@ export function StageManager({ stages }: { stages: StageRow[] }) {
           <input
             value={desc}
             onChange={(e) => setDesc(e.target.value)}
+            placeholder="e.g. Lead has shown buying intent and asked about pricing"
             className="w-full border rounded px-2 py-1 text-sm"
           />
+          <div className="text-[11px] text-[#9CA3AF] mt-0.5">
+            Used by AI auto-classify to decide when a lead belongs in this stage.
+          </div>
         </label>
         <button
           disabled={pending}

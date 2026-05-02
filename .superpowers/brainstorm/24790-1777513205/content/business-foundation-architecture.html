@@ -1,0 +1,52 @@
+<h2>Recommended foundation: shared business item layer + product catalog first</h2>
+<p class="subtitle">This keeps product data reusable by RAG, Messenger recommendations, and public action pages without embedding a whole business profile as one giant knowledge source.</p>
+
+<div class="mockup">
+  <div class="mockup-header">Data and retrieval flow</div>
+  <div class="mockup-body">
+    <div style="display:grid;grid-template-columns:1.1fr .9fr 1fr;gap:14px;align-items:start">
+      <div>
+        <div class="label">Owner dashboard</div>
+        <div class="placeholder">My Business</div>
+        <div class="placeholder" style="margin-top:8px">Products</div>
+        <div class="placeholder" style="margin-top:8px">Product media</div>
+        <div class="placeholder" style="margin-top:8px">Pricing + variants</div>
+      </div>
+      <div>
+        <div class="label">Shared storage</div>
+        <div class="placeholder">business_profiles</div>
+        <div class="placeholder" style="margin-top:8px">business_items</div>
+        <div class="placeholder" style="margin-top:8px">business_item_media</div>
+        <div class="placeholder" style="margin-top:8px">business_orders</div>
+      </div>
+      <div>
+        <div class="label">Consumers</div>
+        <div class="placeholder">RAG item chunks</div>
+        <div class="placeholder" style="margin-top:8px">Messenger product cards</div>
+        <div class="placeholder" style="margin-top:8px">/a/catalog public page</div>
+        <div class="placeholder" style="margin-top:8px">Future property/digital/service stores</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="pros-cons">
+  <div class="pros">
+    <h4>Why this is the base</h4>
+    <ul>
+      <li>Each product becomes its own searchable source.</li>
+      <li>Action pages read normalized product data instead of JSON blobs.</li>
+      <li>RLS can protect every row by owner.</li>
+      <li>Orders are captured without payment risk.</li>
+    </ul>
+  </div>
+  <div class="cons">
+    <h4>Intentionally later</h4>
+    <ul>
+      <li>Payment methods and bank instructions.</li>
+      <li>Inventory reservation and fulfillment automation.</li>
+      <li>Property, digital product, and services editors.</li>
+      <li>Messenger carousel sending API polish.</li>
+    </ul>
+  </div>
+</div>

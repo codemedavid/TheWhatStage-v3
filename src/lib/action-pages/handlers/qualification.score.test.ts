@@ -163,7 +163,16 @@ describe('qualification handler', () => {
       cfg as unknown as Record<string, unknown>,
     )
     expect(result.outcome).toBe('pending_review')
-    expect(result.data).toMatchObject({ answers: { q1: 'yes' }, score: null })
+    expect(result.data.score).toBeNull()
+    expect(result.data.answers).toEqual([
+      {
+        questionId: 'q1',
+        prompt: 'A?',
+        kind: 'single_choice',
+        value: 'yes',
+        display: 'Yes',
+      },
+    ])
   })
 
   it('returns qualified when score >= threshold', () => {

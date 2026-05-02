@@ -29,31 +29,79 @@ export function BulkActionBar({
   }
 
   return (
-    <div className="sticky bottom-0 bg-white border-t p-3 flex items-center gap-2 flex-wrap">
-      <span className="text-sm text-[#374151]">{ids.length} selected</span>
-      <select
-        onChange={(e) => e.target.value && onMove(e.target.value)}
-        defaultValue=""
-        className="border rounded-md px-2 py-1.5 text-sm"
+    <div className="pointer-events-none fixed inset-x-0 bottom-6 z-40 flex justify-center">
+      <div
+        className="pointer-events-auto flex h-12 items-center gap-2 rounded-full px-3"
+        style={{
+          background: 'var(--lead-ink)',
+          color: 'var(--lead-page)',
+          boxShadow: 'var(--lead-shadow-lg)',
+        }}
       >
-        <option value="" disabled>Move to stage…</option>
-        {stages.map((s) => (
-          <option key={s.id} value={s.id}>{s.name}</option>
-        ))}
-      </select>
-      <button
-        onClick={() => setEditOpen(true)}
-        className="px-3 py-1.5 text-sm border rounded-md"
-      >
-        Edit selected
-      </button>
-      <button
-        onClick={onDelete}
-        disabled={pending}
-        className="px-3 py-1.5 text-sm bg-red-600 text-white rounded-md disabled:opacity-50"
-      >
-        Delete
-      </button>
+        <span
+          className="inline-flex h-7 items-center gap-1.5 rounded-full px-2.5 text-[12.5px] font-medium tabular-nums"
+          style={{ background: 'rgba(255,255,255,0.10)' }}
+        >
+          <span style={{ color: 'var(--lead-accent-rail)' }}>●</span>
+          {ids.length} selected
+        </span>
+
+        <span aria-hidden className="h-5 w-px" style={{ background: 'rgba(255,255,255,0.12)' }} />
+
+        <select
+          onChange={(e) => e.target.value && onMove(e.target.value)}
+          defaultValue=""
+          disabled={pending}
+          className="lead-focus h-8 rounded-full px-3 text-[12.5px] font-medium outline-none disabled:opacity-50"
+          style={{
+            background: 'transparent',
+            color: 'inherit',
+          }}
+        >
+          <option value="" disabled style={{ color: '#000' }}>Move to stage</option>
+          {stages.map((s) => (
+            <option key={s.id} value={s.id} style={{ color: '#000' }}>{s.name}</option>
+          ))}
+        </select>
+
+        <button
+          type="button"
+          onClick={() => setEditOpen(true)}
+          disabled={pending}
+          className="lead-focus inline-flex h-8 items-center rounded-full px-3 text-[12.5px] font-medium transition-colors disabled:opacity-50"
+          onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.10)')}
+          onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+        >
+          Edit fields
+        </button>
+
+        <button
+          type="button"
+          onClick={onDelete}
+          disabled={pending}
+          className="lead-focus inline-flex h-8 items-center rounded-full px-3 text-[12.5px] font-medium transition-colors disabled:opacity-50"
+          style={{ color: '#fca5a5' }}
+          onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(248,113,113,0.16)')}
+          onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+        >
+          Delete
+        </button>
+
+        <span aria-hidden className="h-5 w-px" style={{ background: 'rgba(255,255,255,0.12)' }} />
+
+        <button
+          type="button"
+          onClick={onDone}
+          aria-label="Clear selection"
+          className="lead-focus inline-flex h-8 w-8 items-center justify-center rounded-full transition-colors"
+          onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.10)')}
+          onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
+            <path d="M18 6 6 18M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
 
       {editOpen && (
         <BulkEditModal
@@ -99,57 +147,70 @@ function BulkEditModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-black/30 flex items-center justify-center"
-      onClick={onClose}
+      className="pointer-events-auto fixed inset-0 z-50 flex items-center justify-center"
+      style={{ background: 'rgba(20,17,11,0.32)' }}
+      onMouseDown={(e) => e.target === e.currentTarget && onClose()}
     >
       <form
-        onClick={(e) => e.stopPropagation()}
         onSubmit={submit}
-        className="bg-white rounded-md p-5 w-[420px] space-y-3"
+        className="w-[460px] rounded-2xl"
+        style={{
+          background: 'var(--lead-surface)',
+          border: '1px solid var(--lead-line)',
+          boxShadow: 'var(--lead-shadow-lg)',
+        }}
       >
-        <h3 className="font-semibold">
-          Edit {ids.length} leads — only fields you fill are applied
-        </h3>
-        <Row label="Company">
-          <input
-            className="border rounded px-2 py-1 text-sm w-full"
-            onChange={(e) => set('company', e.target.value)}
-          />
-        </Row>
-        <Row label="Source">
-          <input
-            className="border rounded px-2 py-1 text-sm w-full"
-            onChange={(e) => set('source', e.target.value)}
-          />
-        </Row>
-        <Row label="Estimated value">
-          <input
-            type="number"
-            className="border rounded px-2 py-1 text-sm w-full"
-            onChange={(e) =>
-              set('estimated_value', e.target.value === '' ? '' : Number(e.target.value))
-            }
-          />
-        </Row>
-        {fieldDefs.map((fd) => (
-          <Row key={fd.id} label={fd.label}>
-            <input
-              className="border rounded px-2 py-1 text-sm w-full"
-              type={fd.type === 'number' ? 'number' : fd.type === 'date' ? 'date' : 'text'}
-              onChange={(e) =>
-                set(`cf:${fd.key}`, fd.type === 'number' ? Number(e.target.value) : e.target.value)
-              }
-            />
+        <div className="px-5 py-4" style={{ borderBottom: '1px solid var(--lead-line)' }}>
+          <div className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--lead-muted)' }}>
+            Bulk edit
+          </div>
+          <div className="mt-0.5 text-[15px] font-semibold" style={{ color: 'var(--lead-ink)' }}>
+            Update {ids.length} {ids.length === 1 ? 'lead' : 'leads'}
+          </div>
+          <div className="mt-1 text-[12px]" style={{ color: 'var(--lead-muted)' }}>
+            Only fields you fill will be applied.
+          </div>
+        </div>
+        <div className="space-y-3 px-5 py-4">
+          <Row label="Company">
+            <ModalInput onChange={(v) => set('company', v)} />
           </Row>
-        ))}
-        <div className="flex justify-end gap-2">
-          <button type="button" onClick={onClose} className="px-3 py-1.5 text-sm border rounded-md">
+          <Row label="Source">
+            <ModalInput onChange={(v) => set('source', v)} />
+          </Row>
+          <Row label="Estimated value">
+            <ModalInput type="number" prefix="$" onChange={(v) =>
+              set('estimated_value', v === '' ? '' : Number(v))
+            } />
+          </Row>
+          {fieldDefs.map((fd) => (
+            <Row key={fd.id} label={fd.label}>
+              <ModalInput
+                type={fd.type === 'number' ? 'number' : fd.type === 'date' ? 'date' : 'text'}
+                onChange={(v) =>
+                  set(`cf:${fd.key}`, fd.type === 'number' ? Number(v) : v)
+                }
+              />
+            </Row>
+          ))}
+        </div>
+        <div className="flex justify-end gap-2 px-5 py-3" style={{ borderTop: '1px solid var(--lead-line)' }}>
+          <button
+            type="button"
+            onClick={onClose}
+            className="lead-focus inline-flex h-8 items-center rounded-full px-3.5 text-[12.5px] font-medium"
+            style={{
+              color: 'var(--lead-body)',
+              border: '1px solid var(--lead-line)',
+            }}
+          >
             Cancel
           </button>
           <button
             disabled={pending}
             type="submit"
-            className="px-3 py-1.5 text-sm bg-emerald-600 text-white rounded-md"
+            className="lead-focus inline-flex h-8 items-center rounded-full px-3.5 text-[12.5px] font-medium text-white disabled:opacity-50"
+            style={{ background: 'var(--lead-accent)' }}
           >
             Apply
           </button>
@@ -162,8 +223,31 @@ function BulkEditModal({
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="block">
-      <div className="text-xs text-[#374151] mb-1">{label}</div>
+      <div className="mb-1 text-[11.5px] font-medium" style={{ color: 'var(--lead-muted)' }}>{label}</div>
       {children}
     </label>
+  )
+}
+
+function ModalInput({
+  onChange, type = 'text', prefix,
+}: {
+  onChange: (v: string) => void
+  type?: string
+  prefix?: string
+}) {
+  return (
+    <div
+      className="flex h-9 items-center rounded-lg px-2.5 focus-within:[box-shadow:0_0_0_2px_var(--lead-page),_0_0_0_4px_var(--lead-accent-ring)]"
+      style={{ background: 'var(--lead-surface)', border: '1px solid var(--lead-line)' }}
+    >
+      {prefix && <span className="mr-1 text-[13px]" style={{ color: 'var(--lead-muted)' }}>{prefix}</span>}
+      <input
+        type={type}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full bg-transparent text-[13px] outline-none"
+        style={{ color: 'var(--lead-ink)' }}
+      />
+    </div>
   )
 }

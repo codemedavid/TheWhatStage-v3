@@ -1,16 +1,17 @@
 import { createClient } from '@/lib/supabase/server'
 import { fetchLeadsPage } from '../_lib/queries'
 import type { LeadsQuery } from '../_lib/schemas'
-import type { StageRow, FieldDefRow } from '../_lib/queries'
+import type { StageRow, FieldDefRow, CampaignOption } from '../_lib/queries'
 import { LeadsTableClient } from './LeadsTable.client'
 import { Pagination } from './Pagination'
 
 export async function LeadsTable({
-  userId, stages, fieldDefs, params,
+  userId, stages, fieldDefs, campaigns, params,
 }: {
   userId: string
   stages: StageRow[]
   fieldDefs: FieldDefRow[]
+  campaigns: CampaignOption[]
   params: LeadsQuery
 }) {
   const supabase = await createClient()
@@ -20,7 +21,7 @@ export async function LeadsTable({
   return (
     <div className="space-y-3">
       <StageTabs stages={stages} active={stageId} params={params} />
-      <LeadsTableClient rows={rows} stages={stages} fieldDefs={fieldDefs} />
+      <LeadsTableClient rows={rows} stages={stages} fieldDefs={fieldDefs} campaigns={campaigns} />
       <Pagination total={total} page={params.page} makeHref={(p) => buildHref(params, p)} />
     </div>
   )
@@ -34,7 +35,7 @@ function StageTabs({
   params: LeadsQuery
 }) {
   return (
-    <div className="flex gap-1 flex-wrap">
+    <div className="lead-scroll flex gap-1 overflow-x-auto">
       <TabLink label="All" stageId={undefined} active={!active} params={params} />
       {stages.map((s) => (
         <TabLink
@@ -67,7 +68,19 @@ function TabLink({
   return (
     <a
       href={`/dashboard/leads?${u.toString()}`}
-      className={`px-3 py-1.5 text-sm rounded-md border ${active ? 'bg-emerald-50 border-emerald-600 text-emerald-700' : 'bg-white'}`}
+      className="lead-focus inline-flex h-8 shrink-0 items-center rounded-full px-3 text-[12.5px] font-medium transition-colors"
+      style={
+        active
+          ? {
+              color: '#fff',
+              background: 'var(--lead-accent)',
+            }
+          : {
+              color: 'var(--lead-body)',
+              background: 'var(--lead-surface)',
+              border: '1px solid var(--lead-line)',
+            }
+      }
     >
       {label}
     </a>

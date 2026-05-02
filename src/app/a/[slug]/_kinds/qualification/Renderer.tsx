@@ -18,17 +18,11 @@ export default function QualificationRenderer({
       className="space-y-5"
       style={{ backgroundColor: config.theme.background_color }}
     >
-      <header>
-        <p className="text-[12px] uppercase tracking-wide text-[#6B7280]">
-          Qualification
-        </p>
-        <h1 className="mt-1 text-[26px] font-semibold tracking-tight text-[#111827]">
-          {page.title}
-        </h1>
-        {page.description && (
+      {page.description && (
+        <header>
           <p className="mt-1 text-[14px] text-[#6B7280]">{page.description}</p>
-        )}
-      </header>
+        </header>
+      )}
 
       <QualificationClient
         slug={page.slug}

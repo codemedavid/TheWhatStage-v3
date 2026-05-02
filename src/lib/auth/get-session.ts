@@ -15,14 +15,16 @@ export const getSession = cache(async (): Promise<SessionContext | null> => {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return null
 
-  const role: Role =
-    (user.app_metadata?.role as Role | undefined) ?? 'user'
-
   const { data: profile } = await supabase
     .from('profiles')
-    .select('full_name')
+    .select('full_name, role')
     .eq('id', user.id)
     .single()
+
+  const role: Role =
+    (profile?.role as Role | undefined) ??
+    (user.app_metadata?.role as Role | undefined) ??
+    'user'
 
   return {
     userId: user.id,

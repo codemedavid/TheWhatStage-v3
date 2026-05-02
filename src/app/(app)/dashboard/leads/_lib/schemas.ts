@@ -25,6 +25,7 @@ export const LeadInput = z.object({
   estimated_value: z.number().nonnegative().optional().nullable(),
   notes: z.string().max(4000).optional().nullable(),
   custom_fields: z.record(z.string(), z.unknown()).default({}),
+  campaign_id: z.string().uuid().nullable().optional(),
 })
 export type LeadInput = z.infer<typeof LeadInput>
 

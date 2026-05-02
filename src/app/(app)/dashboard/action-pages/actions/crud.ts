@@ -1,9 +1,10 @@
 'use server'
 
-import { revalidatePath } from 'next/cache'
+import { revalidatePath, updateTag } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { KIND_REGISTRY, isActionPageKind } from '@/lib/action-pages/kinds'
+import { actionPageSlugTag } from '@/app/a/[slug]/_lib/load'
 import {
   CreateActionPageInput,
   DeleteActionPageInput,
@@ -21,9 +22,11 @@ async function requireUser() {
 }
 
 export async function createActionPage(formData: FormData): Promise<void> {
+  const rawDescription = String(formData.get('description') ?? '').trim()
   const raw = {
     kind: formData.get('kind'),
     title: formData.get('title'),
+    description: rawDescription.length > 0 ? rawDescription : undefined,
   }
   const parsed = CreateActionPageInput.safeParse(raw)
   if (!parsed.success) {
@@ -43,6 +46,7 @@ export async function createActionPage(formData: FormData): Promise<void> {
       user_id: userId,
       kind: parsed.data.kind,
       title: parsed.data.title,
+      description: parsed.data.description ?? null,
       slug,
       status: 'draft',
       config: meta.defaultConfig,
@@ -72,6 +76,8 @@ export async function updateActionPage(formData: FormData): Promise<void> {
     pipeline_rules = []
   }
   const notificationText = String(formData.get('notification_text') ?? '').trim()
+  const ctaLabelRaw = String(formData.get('cta_label') ?? '').trim()
+  const botInstructionsRaw = String(formData.get('bot_send_instructions') ?? '').trim()
 
   let config: unknown = undefined
   const rawConfig = formData.get('config')
@@ -93,6 +99,8 @@ export async function updateActionPage(formData: FormData): Promise<void> {
     status: formData.get('status'),
     pipeline_rules,
     notification_template: notificationText ? { text: notificationText } : null,
+    cta_label: ctaLabelRaw ? ctaLabelRaw.slice(0, 50) : null,
+    bot_send_instructions: botInstructionsRaw ? botInstructionsRaw.slice(0, 2000) : null,
   }
   if (config !== undefined) raw.config = config
   const parsed = UpdateActionPageInput.safeParse(raw)
@@ -106,6 +114,14 @@ export async function updateActionPage(formData: FormData): Promise<void> {
   }
 
   const { supabase, userId } = await requireUser()
+
+  const { data: existing } = await supabase
+    .from('action_pages')
+    .select('slug')
+    .eq('id', parsed.data.id)
+    .eq('user_id', userId)
+    .maybeSingle<{ slug: string }>()
+
   const update: Record<string, unknown> = {
     title: parsed.data.title,
     description: parsed.data.description ?? null,
@@ -113,6 +129,8 @@ export async function updateActionPage(formData: FormData): Promise<void> {
     status: parsed.data.status,
     pipeline_rules: parsed.data.pipeline_rules,
     notification_template: parsed.data.notification_template ?? null,
+    cta_label: parsed.data.cta_label ?? null,
+    bot_send_instructions: parsed.data.bot_send_instructions ?? null,
   }
   if (parsed.data.config !== undefined) update.config = parsed.data.config
 
@@ -129,6 +147,10 @@ export async function updateActionPage(formData: FormData): Promise<void> {
 
   revalidatePath('/dashboard/action-pages')
   revalidatePath(`/dashboard/action-pages/${parsed.data.id}`)
+  updateTag(actionPageSlugTag(parsed.data.slug))
+  if (existing?.slug && existing.slug !== parsed.data.slug) {
+    updateTag(actionPageSlugTag(existing.slug))
+  }
   redirect(`/dashboard/action-pages/${parsed.data.id}?saved=1`)
 }
 
@@ -137,6 +159,12 @@ export async function deleteActionPage(formData: FormData): Promise<void> {
   if (!parsed.success) redirect('/dashboard/action-pages?error=invalid')
 
   const { supabase, userId } = await requireUser()
+  const { data: existing } = await supabase
+    .from('action_pages')
+    .select('slug')
+    .eq('id', parsed.data.id)
+    .eq('user_id', userId)
+    .maybeSingle<{ slug: string }>()
   const { error } = await supabase
     .from('action_pages')
     .delete()
@@ -148,5 +176,6 @@ export async function deleteActionPage(formData: FormData): Promise<void> {
     )
   }
   revalidatePath('/dashboard/action-pages')
+  if (existing?.slug) updateTag(actionPageSlugTag(existing.slug))
   redirect('/dashboard/action-pages')
 }

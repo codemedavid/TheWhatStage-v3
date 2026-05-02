@@ -14,6 +14,9 @@ const lead: LeadRow = {
   estimated_value: 1000, notes: null,
   custom_fields: { industry: 'SaaS' }, position: 0,
   created_at: '2026-04-28T00:00:00Z', updated_at: '2026-04-28T00:00:00Z',
+  picture_url: null,
+  campaign_id: null,
+  campaign_name: null,
 }
 
 describe('leadsToCsv', () => {

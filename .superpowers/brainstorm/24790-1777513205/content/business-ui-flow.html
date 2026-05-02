@@ -1,0 +1,55 @@
+<h2>Owner and customer surfaces for the first pass</h2>
+<p class="subtitle">Products are managed once in My Business, then reused by the public catalog action page and later by Messenger product recommendations.</p>
+
+<div class="split">
+  <div class="mockup">
+    <div class="mockup-header">Owner: /dashboard/business/products</div>
+    <div class="mockup-body">
+      <div class="mock-nav">My Business &nbsp; Products &nbsp; Properties &nbsp; Digital</div>
+      <div style="display:flex;gap:10px;margin-top:12px">
+        <button class="mock-button">New product</button>
+        <input class="mock-input" placeholder="Search products">
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px">
+        <div class="placeholder">Draft product<br>price, status, tags</div>
+        <div class="placeholder">Published product<br>image, stock note</div>
+      </div>
+      <div class="placeholder" style="margin-top:10px">Editor: details, images, recommendation hints, publish toggle</div>
+    </div>
+  </div>
+
+  <div class="mockup">
+    <div class="mockup-header">Customer: /a/catalog</div>
+    <div class="mockup-body">
+      <div class="mock-nav">Store name &nbsp; Cart</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px">
+        <div class="placeholder">Product card<br>image, price, details</div>
+        <div class="placeholder">Product card<br>add to cart</div>
+      </div>
+      <div class="placeholder" style="margin-top:10px">Cart: quantity, customer info, notes</div>
+      <div class="placeholder" style="margin-top:10px">Submit creates unpaid order</div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Planned first-pass pages</h3>
+  <div class="options" data-multiselect>
+    <div class="option" data-choice="dashboard-list" onclick="toggleSelect(this)">
+      <div class="letter">1</div>
+      <div class="content"><h3>Product list</h3><p>Search, status filter, quick publish/draft, edit links.</p></div>
+    </div>
+    <div class="option" data-choice="dashboard-editor" onclick="toggleSelect(this)">
+      <div class="letter">2</div>
+      <div class="content"><h3>Product editor</h3><p>Structured fields for price, media, description, tags, recommendation hints.</p></div>
+    </div>
+    <div class="option" data-choice="public-catalog" onclick="toggleSelect(this)">
+      <div class="letter">3</div>
+      <div class="content"><h3>Public catalog</h3><p>Published products only, cart, order capture, thank-you state.</p></div>
+    </div>
+    <div class="option" data-choice="order-list" onclick="toggleSelect(this)">
+      <div class="letter">4</div>
+      <div class="content"><h3>Order inbox</h3><p>Owner can review unpaid orders and line items from catalog submissions.</p></div>
+    </div>
+  </div>
+</div>

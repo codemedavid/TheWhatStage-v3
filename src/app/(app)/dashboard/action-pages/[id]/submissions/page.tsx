@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { fetchActionPage, fetchSubmissions } from '../../_lib/queries'
+import { SubmissionView } from '../../../_components/SubmissionView'
 
 export default async function SubmissionsPage({
   params,
@@ -72,9 +73,13 @@ export default async function SubmissionsPage({
                   </td>
                   <td className="px-4 py-3 text-[#374151]">{s.outcome ?? '—'}</td>
                   <td className="px-4 py-3">
-                    <pre className="max-w-md overflow-x-auto rounded bg-[#F9FAFB] p-2 font-mono text-[11px] text-[#374151]">
-                      {JSON.stringify(s.data, null, 2)}
-                    </pre>
+                    <div className="max-w-md">
+                      <SubmissionView
+                        kind={page.kind}
+                        data={s.data as Record<string, unknown>}
+                        theme="plain"
+                      />
+                    </div>
                   </td>
                 </tr>
               ))}

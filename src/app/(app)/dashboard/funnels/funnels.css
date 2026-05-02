@@ -1,0 +1,1343 @@
+[data-funnels-root] {
+  color: var(--ws-ink);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+[data-funnels-root] .fn-wrap {
+  max-width: 1260px;
+  margin: 0 auto;
+  padding: 4px 4px 80px;
+}
+
+[data-funnels-root] .fn-head,
+[data-funnels-root] .fn-section-head,
+[data-funnels-root] .fn-panel-head,
+[data-funnels-root] .fn-inspector-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+[data-funnels-root] .fn-head {
+  align-items: flex-end;
+  padding-bottom: 22px;
+  border-bottom: 1px solid var(--ws-border);
+}
+
+[data-funnels-root] .fn-head-copy {
+  min-width: 0;
+}
+
+[data-funnels-root] .fn-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 12px;
+  border: 1px solid var(--ws-border);
+  border-radius: 999px;
+  background: var(--ws-surface);
+  color: var(--ws-ink-3);
+  padding: 4px 10px 4px 8px;
+  font-size: 12px;
+}
+
+[data-funnels-root] h1,
+[data-funnels-root] h2,
+[data-funnels-root] p {
+  margin: 0;
+}
+
+[data-funnels-root] h1 {
+  font-family: 'Instrument Serif', Georgia, serif;
+  font-size: 42px;
+  font-weight: 400;
+  letter-spacing: 0;
+  line-height: 1.05;
+}
+
+[data-funnels-root] h2 {
+  font-size: 16px;
+  font-weight: 650;
+  color: var(--ws-ink);
+  letter-spacing: 0;
+}
+
+[data-funnels-root] .fn-head p,
+[data-funnels-root] .fn-section-head p,
+[data-funnels-root] .fn-inspector-head p {
+  margin-top: 6px;
+  max-width: 680px;
+  color: var(--ws-ink-3);
+  font-size: 13.5px;
+}
+
+[data-funnels-root] .fn-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+[data-funnels-root] .fn-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 40px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  padding: 0 14px;
+  font-size: 13.5px;
+  font-weight: 550;
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease, transform 140ms ease;
+  white-space: nowrap;
+}
+
+[data-funnels-root] .fn-btn:hover {
+  transform: translateY(-1px);
+}
+
+[data-funnels-root] .fn-btn-primary {
+  background: var(--ws-accent);
+  color: white;
+  box-shadow: 0 1px 2px rgba(31, 122, 77, 0.22);
+}
+
+[data-funnels-root] .fn-btn-primary:hover {
+  background: var(--ws-accent-2);
+}
+
+[data-funnels-root] .fn-btn-secondary {
+  background: var(--ws-surface);
+  border-color: var(--ws-border-strong);
+  color: var(--ws-ink);
+}
+
+[data-funnels-root] .fn-btn-secondary:hover {
+  background: var(--ws-surface-2);
+}
+
+[data-funnels-root] .fn-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 22px;
+}
+
+[data-funnels-root] .fn-metric,
+[data-funnels-root] .fn-campaigns,
+[data-funnels-root] .fn-canvas,
+[data-funnels-root] .fn-flow,
+[data-funnels-root] .fn-inspector,
+[data-funnels-root] .fn-analytics {
+  background: var(--ws-surface);
+  border: 1px solid var(--ws-border);
+  border-radius: 12px;
+}
+
+[data-funnels-root] .fn-metric {
+  padding: 15px 16px;
+  min-width: 0;
+}
+
+[data-funnels-root] .fn-metric span,
+[data-funnels-root] .fn-panel-head,
+[data-funnels-root] .fn-window,
+[data-funnels-root] .fn-action-page span {
+  color: var(--ws-ink-4);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+[data-funnels-root] .fn-metric strong {
+  display: block;
+  margin-top: 5px;
+  overflow: hidden;
+  color: var(--ws-ink);
+  font-size: 25px;
+  font-weight: 650;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+[data-funnels-root] .fn-metric small {
+  display: block;
+  margin-top: 5px;
+  overflow: hidden;
+  color: var(--ws-ink-3);
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+[data-funnels-root] .fn-workspace {
+  display: grid;
+  grid-template-columns: 258px minmax(0, 1fr) 318px;
+  gap: 14px;
+  margin-top: 14px;
+  align-items: start;
+}
+
+[data-funnels-root] .fn-campaigns,
+[data-funnels-root] .fn-inspector {
+  position: sticky;
+  top: 82px;
+}
+
+[data-funnels-root] .fn-campaigns {
+  padding: 12px;
+}
+
+[data-funnels-root] .fn-panel-head {
+  align-items: center;
+  padding: 2px 4px 10px;
+}
+
+[data-funnels-root] .fn-panel-head button {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 1px solid var(--ws-border);
+  border-radius: 7px;
+  background: var(--ws-surface);
+  color: var(--ws-ink-3);
+  cursor: pointer;
+}
+
+[data-funnels-root] .fn-campaign-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+[data-funnels-root] .fn-campaign {
+  width: 100%;
+  border: 1px solid var(--ws-border);
+  border-radius: 10px;
+  background: var(--ws-surface-2);
+  color: var(--ws-ink);
+  padding: 12px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
+}
+
+[data-funnels-root] .fn-campaign:hover,
+[data-funnels-root] .fn-campaign.active {
+  border-color: color-mix(in oklab, var(--ws-accent) 45%, var(--ws-border));
+  background: var(--ws-surface);
+  box-shadow: 0 0 0 3px var(--ws-accent-soft);
+}
+
+[data-funnels-root] .fn-status {
+  display: inline-flex;
+  align-items: center;
+  height: 21px;
+  border-radius: 999px;
+  padding: 0 8px;
+  background: var(--ws-surface-3);
+  color: var(--ws-ink-3);
+  font-size: 11px;
+  font-weight: 650;
+  text-transform: capitalize;
+}
+
+[data-funnels-root] .fn-status.live {
+  background: var(--ws-accent-soft);
+  color: var(--ws-accent-ink);
+}
+
+[data-funnels-root] .fn-status.testing {
+  background: #fff2d9;
+  color: #8a4d0a;
+}
+
+[data-funnels-root] .fn-campaign-name,
+[data-funnels-root] .fn-campaign-goal,
+[data-funnels-root] .fn-campaign-foot {
+  display: block;
+}
+
+[data-funnels-root] .fn-campaign-name {
+  margin-top: 9px;
+  color: var(--ws-ink);
+  font-size: 13.5px;
+  font-weight: 650;
+}
+
+[data-funnels-root] .fn-campaign-goal {
+  margin-top: 3px;
+  color: var(--ws-ink-3);
+  font-size: 12.3px;
+  line-height: 1.4;
+}
+
+[data-funnels-root] .fn-campaign-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 11px;
+  color: var(--ws-ink-4);
+  font-size: 12px;
+}
+
+[data-funnels-root] .fn-campaign-foot b {
+  color: var(--ws-ink);
+  font-weight: 650;
+}
+
+[data-funnels-root] .fn-main {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+[data-funnels-root] .fn-canvas,
+[data-funnels-root] .fn-flow,
+[data-funnels-root] .fn-inspector,
+[data-funnels-root] .fn-analytics {
+  padding: 18px;
+}
+
+[data-funnels-root] .fn-section-head.compact {
+  margin-bottom: 12px;
+}
+
+[data-funnels-root] .fn-personality {
+  flex-shrink: 0;
+  border-radius: 999px;
+  padding: 6px 10px;
+  background: #f5f0ff;
+  color: #5d3a9b;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+[data-funnels-root] .fn-personality.chatbot {
+  background: var(--ws-accent-soft);
+  color: var(--ws-accent-ink);
+}
+
+[data-funnels-root] .fn-path {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(190px, 1fr));
+  gap: 10px;
+  margin-top: 18px;
+}
+
+[data-funnels-root] .fn-node {
+  min-height: 188px;
+  border: 1px solid var(--ws-border);
+  border-radius: 12px;
+  background: var(--ws-surface-2);
+  color: var(--ws-ink);
+  padding: 15px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease, transform 140ms ease;
+}
+
+[data-funnels-root] .fn-node:hover,
+[data-funnels-root] .fn-node.active {
+  border-color: color-mix(in oklab, var(--ws-accent) 48%, var(--ws-border));
+  background: white;
+  transform: translateY(-1px);
+}
+
+[data-funnels-root] .fn-node-index {
+  display: inline-flex;
+  color: var(--ws-accent);
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+[data-funnels-root] .fn-node-title {
+  display: block;
+  margin-top: 12px;
+  color: var(--ws-ink);
+  font-size: 16px;
+  font-weight: 700;
+}
+
+[data-funnels-root] .fn-node-purpose {
+  display: block;
+  min-height: 42px;
+  margin-top: 4px;
+  color: var(--ws-ink-3);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+[data-funnels-root] .fn-node-bars,
+[data-funnels-root] .fn-leak-track {
+  display: block;
+  height: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--ws-surface-3);
+}
+
+[data-funnels-root] .fn-node-bars {
+  margin-top: 18px;
+}
+
+[data-funnels-root] .fn-node-bars span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--ws-accent), #2f9bda);
+}
+
+[data-funnels-root] .fn-node-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 10px;
+  color: var(--ws-ink-4);
+  font-size: 12px;
+}
+
+[data-funnels-root] .fn-node-foot b {
+  color: #8a4d0a;
+  font-weight: 650;
+}
+
+[data-funnels-root] .fn-flow-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+[data-funnels-root] .fn-flow-list li {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  gap: 12px;
+  border-top: 1px solid var(--ws-border);
+  padding: 12px 0 4px;
+}
+
+[data-funnels-root] .fn-flow-kind {
+  align-self: start;
+  justify-self: start;
+  border-radius: 999px;
+  padding: 3px 8px;
+  background: var(--ws-surface-3);
+  color: var(--ws-ink-3);
+  font-size: 11px;
+  font-weight: 650;
+  text-transform: capitalize;
+}
+
+[data-funnels-root] .fn-flow-kind.question {
+  background: #e8f2ff;
+  color: #155c9f;
+}
+
+[data-funnels-root] .fn-flow-kind.pitch {
+  background: #f0f7e9;
+  color: #466b16;
+}
+
+[data-funnels-root] .fn-flow-kind.guardrail {
+  background: #fff2d9;
+  color: #8a4d0a;
+}
+
+[data-funnels-root] .fn-flow-kind.action {
+  background: #f5eafd;
+  color: #71369c;
+}
+
+[data-funnels-root] .fn-flow-list b {
+  color: var(--ws-ink);
+  font-size: 13.5px;
+}
+
+[data-funnels-root] .fn-flow-list p {
+  margin-top: 3px;
+  color: var(--ws-ink-3);
+  font-size: 12.8px;
+}
+
+[data-funnels-root] .fn-inspector {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+[data-funnels-root] .fn-inspector-head {
+  display: block;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--ws-border);
+}
+
+[data-funnels-root] .fn-inspector-head span {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--ws-ink-4);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+[data-funnels-root] .fn-detail-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ws-ink);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+[data-funnels-root] .fn-detail-title svg {
+  color: var(--ws-accent);
+}
+
+[data-funnels-root] .fn-detail ul {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+[data-funnels-root] .fn-detail li {
+  border-radius: 8px;
+  background: var(--ws-surface-2);
+  color: var(--ws-ink-2);
+  padding: 8px 10px;
+  font-size: 12.5px;
+}
+
+[data-funnels-root] .fn-action-page {
+  border: 1px solid color-mix(in oklab, var(--ws-accent) 35%, var(--ws-border));
+  border-radius: 12px;
+  background: var(--ws-accent-softer);
+  padding: 14px;
+}
+
+[data-funnels-root] .fn-action-page b {
+  display: block;
+  margin-top: 5px;
+  color: var(--ws-ink);
+  font-size: 15px;
+}
+
+[data-funnels-root] .fn-action-page p {
+  margin-top: 6px;
+  color: var(--ws-ink-3);
+  font-size: 12.7px;
+}
+
+[data-funnels-root] .fn-analytics {
+  margin-top: 14px;
+}
+
+[data-funnels-root] .fn-window {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  border: 1px solid var(--ws-border);
+  border-radius: 999px;
+  background: var(--ws-surface-2);
+  padding: 0 10px;
+  white-space: nowrap;
+}
+
+[data-funnels-root] .fn-analytics-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 16px;
+}
+
+[data-funnels-root] .fn-leak {
+  border: 1px solid var(--ws-border);
+  border-radius: 10px;
+  background: var(--ws-surface-2);
+  padding: 13px;
+}
+
+[data-funnels-root] .fn-leak span,
+[data-funnels-root] .fn-leak small {
+  color: var(--ws-ink-3);
+  font-size: 12.5px;
+}
+
+[data-funnels-root] .fn-leak strong {
+  display: block;
+  margin: 2px 0 9px;
+  color: var(--ws-ink);
+  font-size: 24px;
+  line-height: 1.1;
+}
+
+[data-funnels-root] .fn-leak-track {
+  height: 6px;
+  margin-bottom: 8px;
+}
+
+[data-funnels-root] .fn-leak-track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #d98b1f;
+}
+
+[data-funnels-root] .fn-empty {
+  border: 1px dashed var(--ws-border-strong);
+  border-radius: 12px;
+  padding: 48px 18px;
+  color: var(--ws-ink-3);
+  text-align: center;
+}
+
+@media (max-width: 1180px) {
+  [data-funnels-root] .fn-workspace {
+    grid-template-columns: 240px minmax(0, 1fr);
+  }
+
+  [data-funnels-root] .fn-inspector {
+    position: static;
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 920px) {
+  [data-funnels-root] .fn-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  [data-funnels-root] .fn-metrics,
+  [data-funnels-root] .fn-analytics-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  [data-funnels-root] .fn-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  [data-funnels-root] .fn-campaigns {
+    position: static;
+  }
+
+  [data-funnels-root] .fn-campaign-list {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  [data-funnels-root] .fn-path {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 640px) {
+  [data-funnels-root] h1 {
+    font-size: 34px;
+  }
+
+  [data-funnels-root] .fn-actions,
+  [data-funnels-root] .fn-section-head {
+    width: 100%;
+    flex-direction: column;
+  }
+
+  [data-funnels-root] .fn-btn,
+  [data-funnels-root] .fn-actions {
+    width: 100%;
+  }
+
+  [data-funnels-root] .fn-metrics,
+  [data-funnels-root] .fn-campaign-list,
+  [data-funnels-root] .fn-analytics-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  [data-funnels-root] .fn-flow-list li {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* =====================================================================
+ * Funnels v2 — list, create, campaign editor, funnel editor.
+ * Adds .fnl-* classes layered on top of the existing .fn-* design.
+ * ===================================================================== */
+
+[data-funnels-root] .fnl-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 22px;
+  padding: 8px 0 14px;
+  border-bottom: 1px solid var(--ws-border);
+  flex-wrap: wrap;
+}
+
+[data-funnels-root] .fnl-tabs {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--ws-border);
+  border-radius: 999px;
+  background: var(--ws-surface);
+}
+
+[data-funnels-root] .fnl-tab {
+  border: 0;
+  background: transparent;
+  color: var(--ws-ink-3);
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+[data-funnels-root] .fnl-tab.active {
+  background: var(--ws-ink);
+  color: var(--ws-bg);
+}
+
+[data-funnels-root] .fnl-tab-count {
+  font-size: 11px;
+  background: rgba(0, 0, 0, 0.08);
+  border-radius: 10px;
+  padding: 1px 6px;
+  min-width: 18px;
+  text-align: center;
+}
+
+[data-funnels-root] .fnl-tab.active .fnl-tab-count {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+[data-funnels-root] .fnl-search {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--ws-border);
+  border-radius: 8px;
+  background: var(--ws-surface);
+  color: var(--ws-ink-3);
+}
+
+[data-funnels-root] .fnl-search input {
+  border: 0;
+  background: transparent;
+  outline: none;
+  font-size: 13px;
+  color: var(--ws-ink);
+  min-width: 180px;
+}
+
+[data-funnels-root] .fnl-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 14px;
+  margin-top: 18px;
+}
+
+[data-funnels-root] .fnl-card {
+  position: relative;
+  border: 1px solid var(--ws-border);
+  border-radius: 14px;
+  background: var(--ws-surface);
+  display: flex;
+  flex-direction: column;
+  transition: border-color 0.15s ease, transform 0.15s ease;
+}
+
+[data-funnels-root] .fnl-card:hover {
+  border-color: var(--ws-border-strong);
+}
+
+[data-funnels-root] .fnl-card-main {
+  padding: 16px 16px 14px;
+  color: inherit;
+  text-decoration: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+[data-funnels-root] .fnl-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+[data-funnels-root] .fnl-card-mode {
+  font-size: 11.5px;
+  color: var(--ws-ink-3);
+}
+
+[data-funnels-root] .fnl-card-title {
+  font-size: 15.5px;
+  font-weight: 650;
+  color: var(--ws-ink);
+}
+
+[data-funnels-root] .fnl-card-sub {
+  font-size: 12.5px;
+  color: var(--ws-ink-3);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  min-height: 32px;
+}
+
+[data-funnels-root] .fnl-card-meta {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--ws-border);
+  margin-top: 8px;
+}
+
+[data-funnels-root] .fnl-card-num {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ws-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+[data-funnels-root] .fnl-card-lbl {
+  font-size: 11px;
+  color: var(--ws-ink-3);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+[data-funnels-root] .fnl-card-toggle {
+  border-top: 1px solid var(--ws-border);
+  padding: 10px 14px;
+}
+
+[data-funnels-root] .fnl-toggle {
+  position: relative;
+  border: 1px solid var(--ws-border);
+  background: var(--ws-bg);
+  border-radius: 999px;
+  padding: 3px 12px 3px 30px;
+  font-size: 12px;
+  color: var(--ws-ink-3);
+  display: inline-flex;
+  align-items: center;
+  height: 26px;
+  cursor: pointer;
+  min-width: 70px;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+[data-funnels-root] .fnl-toggle.small {
+  padding-left: 26px;
+  height: 22px;
+  font-size: 11px;
+}
+
+[data-funnels-root] .fnl-toggle .fnl-toggle-knob {
+  position: absolute;
+  top: 50%;
+  left: 4px;
+  transform: translateY(-50%);
+  width: 18px;
+  height: 18px;
+  background: var(--ws-ink-3);
+  border-radius: 999px;
+  transition: left 0.15s ease, background 0.15s ease;
+}
+
+[data-funnels-root] .fnl-toggle.on {
+  background: var(--ws-ink);
+  color: var(--ws-bg);
+  border-color: var(--ws-ink);
+}
+
+[data-funnels-root] .fnl-toggle.on .fnl-toggle-knob {
+  left: calc(100% - 22px);
+  background: var(--ws-bg);
+}
+
+[data-funnels-root] .fnl-toggle.small .fnl-toggle-knob {
+  width: 14px;
+  height: 14px;
+}
+
+[data-funnels-root] .fnl-toggle.small.on .fnl-toggle-knob {
+  left: calc(100% - 18px);
+}
+
+[data-funnels-root] .fnl-empty {
+  border: 1px dashed var(--ws-border-strong);
+  border-radius: 14px;
+  padding: 56px 22px;
+  color: var(--ws-ink-3);
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  margin-top: 22px;
+}
+
+[data-funnels-root] .fnl-empty h3 {
+  font-size: 16px;
+  font-weight: 650;
+  color: var(--ws-ink);
+  margin: 0;
+}
+
+[data-funnels-root] .fnl-empty p {
+  font-size: 13px;
+  max-width: 440px;
+}
+
+[data-funnels-root] .fnl-banner {
+  margin-top: 16px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--ws-border);
+  background: var(--ws-surface);
+  font-size: 13px;
+  color: var(--ws-ink);
+}
+
+[data-funnels-root] .fnl-banner.error {
+  border-color: #f0a8a8;
+  background: #fdecec;
+  color: #6f1717;
+}
+
+[data-funnels-root] .fnl-banner.saved {
+  border-color: #a3d4b6;
+  background: #e8f5ee;
+  color: #145a32;
+}
+
+[data-funnels-root] .fnl-banner.warn {
+  border-color: #e6c97a;
+  background: #fbf3dc;
+  color: #6a4d10;
+}
+
+[data-funnels-root] .fnl-banner.warn a {
+  color: inherit;
+  text-decoration: underline;
+}
+
+[data-funnels-root] .fnl-form-card {
+  margin-top: 22px;
+  padding: 22px;
+  border: 1px solid var(--ws-border);
+  border-radius: 14px;
+  background: var(--ws-surface);
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  max-width: 720px;
+}
+
+[data-funnels-root] .fnl-form-card.wide {
+  max-width: none;
+}
+
+[data-funnels-root] .fnl-form-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+[data-funnels-root] .fnl-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+[data-funnels-root] .fnl-field.tight {
+  gap: 4px;
+}
+
+[data-funnels-root] .fnl-field.checkbox {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+[data-funnels-root] .fnl-field.checkbox label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+[data-funnels-root] .fnl-field label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ws-ink-2, var(--ws-ink-3));
+  letter-spacing: 0.01em;
+}
+
+[data-funnels-root] .fnl-field input[type='text'],
+[data-funnels-root] .fnl-field input[type='number'],
+[data-funnels-root] .fnl-field textarea,
+[data-funnels-root] .fnl-field select,
+[data-funnels-root] .fnl-fieldset select,
+[data-funnels-root] .fnl-row input[type='text'],
+[data-funnels-root] .fnl-row input[type='number'],
+[data-funnels-root] .fnl-row textarea,
+[data-funnels-root] .fnl-row select {
+  width: 100%;
+  border: 1px solid var(--ws-border);
+  border-radius: 8px;
+  background: var(--ws-bg);
+  padding: 8px 10px;
+  font: inherit;
+  color: var(--ws-ink);
+  outline: none;
+}
+
+[data-funnels-root] .fnl-field textarea,
+[data-funnels-root] .fnl-row textarea {
+  resize: vertical;
+  min-height: 60px;
+}
+
+[data-funnels-root] .fnl-field input:focus,
+[data-funnels-root] .fnl-field textarea:focus,
+[data-funnels-root] .fnl-field select:focus,
+[data-funnels-root] .fnl-row input:focus,
+[data-funnels-root] .fnl-row textarea:focus,
+[data-funnels-root] .fnl-row select:focus,
+[data-funnels-root] .fnl-fieldset select:focus {
+  border-color: var(--ws-ink);
+}
+
+[data-funnels-root] .fnl-fieldset {
+  border: 1px solid var(--ws-border);
+  border-radius: 12px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+}
+
+[data-funnels-root] .fnl-fieldset legend {
+  padding: 0 6px;
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--ws-ink);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+[data-funnels-root] .fnl-hint {
+  font-size: 12.5px;
+  color: var(--ws-ink-3);
+  margin: 0;
+}
+
+[data-funnels-root] .fnl-segments {
+  display: inline-flex;
+  border: 1px solid var(--ws-border);
+  border-radius: 10px;
+  background: var(--ws-bg);
+  padding: 3px;
+  gap: 2px;
+  align-self: flex-start;
+}
+
+[data-funnels-root] .fnl-segment {
+  border: 0;
+  background: transparent;
+  color: var(--ws-ink-3);
+  padding: 6px 14px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+[data-funnels-root] .fnl-segment.active {
+  background: var(--ws-ink);
+  color: var(--ws-bg);
+}
+
+[data-funnels-root] .fnl-personality-block {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+[data-funnels-root] .fnl-form-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-top: 1px solid var(--ws-border);
+  padding-top: 16px;
+}
+
+[data-funnels-root] .fnl-inline-form {
+  display: inline;
+}
+
+[data-funnels-root] .fnl-edit-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  gap: 18px;
+  margin-top: 20px;
+  align-items: start;
+}
+
+[data-funnels-root] .fnl-funnels-aside {
+  border: 1px solid var(--ws-border);
+  border-radius: 14px;
+  background: var(--ws-surface);
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  position: sticky;
+  top: 16px;
+}
+
+[data-funnels-root] .fnl-aside-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+[data-funnels-root] .fnl-aside-head h2 {
+  font-size: 15px;
+}
+
+[data-funnels-root] .fnl-aside-head p {
+  font-size: 12.5px;
+  color: var(--ws-ink-3);
+  margin-top: 4px;
+}
+
+[data-funnels-root] .fnl-aside-empty {
+  border: 1px dashed var(--ws-border-strong);
+  border-radius: 10px;
+  padding: 18px;
+  color: var(--ws-ink-3);
+  font-size: 12.5px;
+  text-align: center;
+}
+
+[data-funnels-root] .fnl-aside-empty.small {
+  padding: 12px;
+  font-size: 12px;
+}
+
+[data-funnels-root] .fnl-funnels-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+[data-funnels-root] .fnl-funnel-row {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  border: 1px solid var(--ws-border);
+  border-radius: 10px;
+  background: var(--ws-bg);
+}
+
+[data-funnels-root] .fnl-funnel-row:hover {
+  border-color: var(--ws-border-strong);
+}
+
+[data-funnels-root] .fnl-funnel-link {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  text-decoration: none;
+  color: inherit;
+  min-width: 0;
+}
+
+[data-funnels-root] .fnl-funnel-idx {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--ws-ink-3);
+  background: var(--ws-surface);
+  border-radius: 6px;
+  padding: 2px 6px;
+}
+
+[data-funnels-root] .fnl-funnel-meta {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+[data-funnels-root] .fnl-funnel-meta b {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--ws-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+[data-funnels-root] .fnl-funnel-meta span {
+  font-size: 11.5px;
+  color: var(--ws-ink-3);
+}
+
+[data-funnels-root] .fnl-icon-btn {
+  border: 1px solid var(--ws-border);
+  background: var(--ws-bg);
+  border-radius: 8px;
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ws-ink-3);
+  cursor: pointer;
+}
+
+[data-funnels-root] .fnl-icon-btn:hover {
+  color: var(--ws-ink);
+  border-color: var(--ws-border-strong);
+}
+
+[data-funnels-root] .fnl-icon-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+[data-funnels-root] .fnl-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+[data-funnels-root] .fnl-row {
+  border: 1px solid var(--ws-border);
+  border-radius: 10px;
+  padding: 12px;
+  background: var(--ws-bg);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  position: relative;
+}
+
+[data-funnels-root] .fnl-row.tight {
+  padding: 10px;
+}
+
+[data-funnels-root] .fnl-row-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+}
+
+[data-funnels-root] .fnl-row-grid.kind {
+  grid-template-columns: 130px minmax(0, 1fr);
+}
+
+[data-funnels-root] .fnl-row-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+[data-funnels-root] .fnl-row-remove {
+  align-self: flex-start;
+  border: 1px solid var(--ws-border);
+  background: var(--ws-surface);
+  border-radius: 8px;
+  padding: 4px 10px;
+  color: var(--ws-ink-3);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+[data-funnels-root] .fnl-row-remove:hover {
+  color: #6f1717;
+  border-color: #f0a8a8;
+  background: #fdecec;
+}
+
+[data-funnels-root] .fn-btn-danger {
+  border: 1px solid #f0a8a8;
+  background: #fdecec;
+  color: #6f1717;
+}
+
+[data-funnels-root] .fn-btn-danger:hover {
+  background: #fbd9d9;
+}
+
+[data-funnels-root] .fn-btn-ghost {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--ws-ink-3);
+}
+
+[data-funnels-root] .fn-btn-ghost:hover {
+  color: var(--ws-ink);
+}
+
+@media (max-width: 1080px) {
+  [data-funnels-root] .fnl-edit-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  [data-funnels-root] .fnl-funnels-aside {
+    position: static;
+  }
+}
+
+@media (max-width: 720px) {
+  [data-funnels-root] .fnl-form-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  [data-funnels-root] .fnl-row-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  [data-funnels-root] .fnl-row-grid.kind {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

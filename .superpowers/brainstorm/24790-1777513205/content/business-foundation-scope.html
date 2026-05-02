@@ -1,0 +1,69 @@
+<h2>What should the first foundation deliver?</h2>
+<p class="subtitle">The goal is to create a secure shared base that products, properties, digital products, and future services can build on without duplicating data or overloading RAG.</p>
+
+<div class="cards">
+  <div class="card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">A. Shared Core Only</div>
+        <div class="mockup-body">
+          <div class="mock-nav">My Business</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:12px">
+            <div class="placeholder">Product schema</div>
+            <div class="placeholder">Property schema</div>
+            <div class="placeholder">Digital schema</div>
+          </div>
+          <div class="placeholder" style="margin-top:10px">Media + RAG source contracts</div>
+          <div class="placeholder" style="margin-top:10px">No full customer storefront yet</div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A. Shared Core Only</h3>
+      <p>Build database, permissions, item model, media rules, and RAG/action-page interfaces first. Fastest secure base, but less visible product value in the first pass.</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">B. Core + Product Catalog</div>
+        <div class="mockup-body">
+          <div class="mock-nav">My Business / Products</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px">
+            <div class="placeholder">Product editor</div>
+            <div class="placeholder">Product card preview</div>
+          </div>
+          <div class="placeholder" style="margin-top:10px">RAG can retrieve one product at a time</div>
+          <div class="placeholder" style="margin-top:10px">Catalog action page reads products</div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B. Core + Product Catalog</h3>
+      <p>Build the shared foundation and make e-commerce products usable first. Best balance because products prove the RAG and action-page model.</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="c" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">C. Core + All Store Types</div>
+        <div class="mockup-body">
+          <div class="mock-nav">My Business</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px">
+            <div class="placeholder">Products</div>
+            <div class="placeholder">Properties</div>
+            <div class="placeholder">Digital products</div>
+            <div class="placeholder">Services draft</div>
+          </div>
+          <div class="placeholder" style="margin-top:10px">Multiple public pages at once</div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>C. Core + All Store Types</h3>
+      <p>More complete up front, but higher security and UX risk. This is likely too large for one clean implementation pass.</p>
+    </div>
+  </div>
+</div>

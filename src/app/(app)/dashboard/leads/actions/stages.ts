@@ -1,5 +1,6 @@
 'use server'
-import { revalidatePath } from 'next/cache'
+import { revalidatePath, revalidateTag } from 'next/cache'
+import { stagesTag } from '../_lib/queries'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { StageInput } from '../_lib/schemas'
@@ -28,17 +29,19 @@ export async function createStage(raw: unknown) {
     user_id: userId, ...input, position: nextPos, is_default: false,
   })
   if (error) throw error
+  revalidateTag(stagesTag(userId), 'max')
   revalidatePath('/dashboard/leads', 'layout')
 }
 
 export async function updateStage(id: string, raw: unknown) {
   const input = StageInput.parse(raw)
-  const { supabase } = await requireUser()
+  const { supabase, userId } = await requireUser()
   const { error } = await supabase
     .from('pipeline_stages')
     .update(input)
     .eq('id', id)
   if (error) throw error
+  revalidateTag(stagesTag(userId), 'max')
   revalidatePath('/dashboard/leads', 'layout')
 }
 
@@ -65,6 +68,7 @@ export async function deleteStage(id: string) {
 
   const { error } = await supabase.from('pipeline_stages').delete().eq('id', id)
   if (error) throw error
+  revalidateTag(stagesTag(userId), 'max')
   revalidatePath('/dashboard/leads', 'layout')
 }
 
@@ -76,5 +80,6 @@ export async function reorderStages(orderedIds: string[]) {
   )
   const results = await Promise.all(updates)
   for (const r of results) if (r.error) throw r.error
+  revalidateTag(stagesTag(userId), 'max')
   revalidatePath('/dashboard/leads', 'layout')
 }

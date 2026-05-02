@@ -40,6 +40,9 @@ export default function QualificationEditor({ page }: KindEditorProps) {
     [page.config],
   )
   const [config, setConfig] = useState<QualificationConfig>(initial)
+  const [expandedId, setExpandedId] = useState<string | null>(
+    initial.questions[0]?.id ?? null,
+  )
 
   const update = (partial: Partial<QualificationConfig>) =>
     setConfig((c) => ({ ...c, ...partial }))
@@ -79,8 +82,11 @@ export default function QualificationEditor({ page }: KindEditorProps) {
       return { ...c, questions: next }
     })
 
-  const addQuestion = () =>
-    setConfig((c) => ({ ...c, questions: [...c.questions, newQuestion()] }))
+  const addQuestion = () => {
+    const q = newQuestion()
+    setConfig((c) => ({ ...c, questions: [...c.questions, q] }))
+    setExpandedId(q.id)
+  }
 
   const changeKind = (idx: number, kind: QuestionKind) => {
     setConfig((c) => {
@@ -179,17 +185,61 @@ export default function QualificationEditor({ page }: KindEditorProps) {
             No questions yet. Click “+ Add question” to start.
           </div>
         ) : (
-          <ol className="space-y-3">
-            {config.questions.map((q, idx) => (
+          <ol className="space-y-2">
+            {config.questions.map((q, idx) => {
+              const open = expandedId === q.id
+              const kindLabel =
+                q.kind === 'single_choice'
+                  ? 'Single choice'
+                  : q.kind === 'multi_choice'
+                    ? 'Multi choice'
+                    : q.kind === 'short_text'
+                      ? 'Short text'
+                      : 'Rating'
+              return (
               <li
                 key={q.id}
-                className="rounded-md border border-[#E5E7EB] bg-white p-3"
+                className={
+                  'overflow-hidden rounded-md border bg-white ' +
+                  (open ? 'border-[#059669]' : 'border-[#E5E7EB]')
+                }
               >
-                <div className="flex items-start justify-between gap-2">
-                  <span className="text-[12px] font-semibold text-[#6B7280]">
-                    Q{idx + 1}
-                  </span>
-                  <div className="flex items-center gap-1">
+                <div className="flex items-center justify-between gap-2 px-3 py-2">
+                  <button
+                    type="button"
+                    onClick={() => setExpandedId(open ? null : q.id)}
+                    className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                    aria-expanded={open}
+                  >
+                    <span
+                      className={
+                        'shrink-0 text-[11px] transition ' +
+                        (open ? 'rotate-90 text-[#059669]' : 'text-[#9CA3AF]')
+                      }
+                      aria-hidden
+                    >
+                      ▶
+                    </span>
+                    <span className="shrink-0 rounded bg-[#F3F4F6] px-1.5 py-0.5 text-[11px] font-semibold text-[#374151]">
+                      Q{idx + 1}
+                    </span>
+                    <span className="min-w-0 truncate text-[13px] font-medium text-[#111827]">
+                      {q.prompt.trim() || (
+                        <span className="font-normal text-[#9CA3AF]">
+                          Untitled question
+                        </span>
+                      )}
+                    </span>
+                    <span className="ml-1 hidden shrink-0 rounded-full bg-[#F3F4F6] px-2 py-0.5 text-[10px] text-[#6B7280] sm:inline">
+                      {kindLabel}
+                    </span>
+                    {q.required && (
+                      <span className="hidden shrink-0 rounded-full bg-[rgba(220,38,38,0.08)] px-1.5 py-0.5 text-[10px] font-medium text-[#B91C1C] sm:inline">
+                        required
+                      </span>
+                    )}
+                  </button>
+                  <div className="flex shrink-0 items-center gap-1">
                     <IconBtn
                       label="Move up"
                       disabled={idx === 0}
@@ -210,7 +260,8 @@ export default function QualificationEditor({ page }: KindEditorProps) {
                   </div>
                 </div>
 
-                <div className="mt-2 space-y-2">
+                {open && (
+                <div className="space-y-2 border-t border-[#F3F4F6] p-3">
                   <Field label="Prompt">
                     <input
                       type="text"
@@ -299,8 +350,10 @@ export default function QualificationEditor({ page }: KindEditorProps) {
                     </div>
                   )}
                 </div>
+                )}
               </li>
-            ))}
+              )
+            })}
           </ol>
         )}
       </Subsection>

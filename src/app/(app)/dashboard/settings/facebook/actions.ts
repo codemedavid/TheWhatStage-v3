@@ -6,6 +6,7 @@ import { getSession } from '@/lib/auth/get-session'
 import { createClient } from '@/lib/supabase/server'
 import { decryptToken, encryptToken } from '@/lib/facebook/crypto'
 import { fetchUserPages } from '@/lib/facebook/oauth'
+import { subscribePageToWebhook } from '@/lib/facebook/messenger'
 
 const SETTINGS_PATH = '/dashboard/settings/facebook'
 
@@ -72,6 +73,19 @@ export async function savePagesForm(formData: FormData): Promise<void> {
     errRedirect('save_failed', insertErr.message)
   }
   console.log('[savePagesForm] inserted/upserted', inserted?.length ?? 0, 'rows')
+
+  // Subscribe each selected page to Messenger webhook events. Failures here
+  // do not block the save — the dashboard surfaces the issue separately.
+  await Promise.allSettled(
+    selected.map(async (p) => {
+      try {
+        await subscribePageToWebhook(p.accessToken)
+        console.log('[savePagesForm] subscribed page', p.id)
+      } catch (e) {
+        console.error('[savePagesForm] subscribe failed', p.id, e)
+      }
+    }),
+  )
 
   revalidatePath(SETTINGS_PATH)
   redirect(SETTINGS_PATH)

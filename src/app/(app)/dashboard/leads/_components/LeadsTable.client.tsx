@@ -2,14 +2,22 @@
 import { useState } from 'react'
 import { LeadDrawer } from './LeadDrawer'
 import { BulkActionBar } from './BulkActionBar'
-import type { LeadRow, StageRow, FieldDefRow } from '../_lib/queries'
+import type { LeadRow, StageRow, FieldDefRow, CampaignOption } from '../_lib/queries'
+
+function formatValue(v: number | null): string {
+  if (v === null) return ''
+  if (v >= 1_000_000) return `$${(v / 1_000_000).toFixed(v % 1_000_000 ? 1 : 0)}M`
+  if (v >= 1_000) return `$${(v / 1_000).toFixed(v % 1_000 ? 1 : 0)}k`
+  return `$${v.toLocaleString()}`
+}
 
 export function LeadsTableClient({
-  rows, stages, fieldDefs,
+  rows, stages, fieldDefs, campaigns,
 }: {
   rows: LeadRow[]
   stages: StageRow[]
   fieldDefs: FieldDefRow[]
+  campaigns: CampaignOption[]
 }) {
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [editing, setEditing] = useState<LeadRow | null>(null)
@@ -28,52 +36,108 @@ export function LeadsTableClient({
   const stageName = (id: string) => stages.find((s) => s.id === id)?.name ?? '—'
 
   return (
-    <div className="border rounded-md overflow-hidden">
-      <table className="w-full text-sm">
-        <thead className="bg-[#F9FAFB] text-[#6B7280]">
-          <tr>
-            <th className="w-10 p-2">
-              <input type="checkbox" checked={allChecked} onChange={toggleAll} />
-            </th>
-            <th className="text-left p-2">Name</th>
-            <th className="text-left p-2">Email</th>
-            <th className="text-left p-2">Company</th>
-            <th className="text-left p-2">Stage</th>
-            <th className="text-left p-2">Value</th>
-            <th className="text-left p-2">Created</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.length === 0 && (
-            <tr>
-              <td colSpan={7} className="p-6 text-center text-[#6B7280]">
-                No leads.
-              </td>
-            </tr>
-          )}
-          {rows.map((r) => (
-            <tr
-              key={r.id}
-              className="border-t hover:bg-[#F9FAFB] cursor-pointer"
-              onClick={() => setEditing(r)}
-            >
-              <td className="p-2" onClick={(e) => e.stopPropagation()}>
+    <div
+      className="overflow-hidden rounded-2xl"
+      style={{
+        background: 'var(--lead-surface)',
+        border: '1px solid var(--lead-line)',
+        boxShadow: 'var(--lead-shadow-sm)',
+      }}
+    >
+      <div className="overflow-x-auto lead-scroll">
+        <table className="w-full text-[13px]">
+          <thead
+            className="sticky top-0 z-[1]"
+            style={{
+              background: 'var(--lead-surface-2)',
+              borderBottom: '1px solid var(--lead-line)',
+            }}
+          >
+            <tr style={{ color: 'var(--lead-muted)' }}>
+              <th className="w-10 px-3 py-2.5 text-left">
                 <input
                   type="checkbox"
-                  checked={selected.has(r.id)}
-                  onChange={() => toggle(r.id)}
+                  checked={allChecked}
+                  onChange={toggleAll}
+                  className="lead-focus h-3.5 w-3.5 rounded accent-[color:var(--lead-accent)]"
                 />
-              </td>
-              <td className="p-2 font-medium">{r.name}</td>
-              <td className="p-2">{r.email ?? '—'}</td>
-              <td className="p-2">{r.company ?? '—'}</td>
-              <td className="p-2">{stageName(r.stage_id)}</td>
-              <td className="p-2">{r.estimated_value ?? '—'}</td>
-              <td className="p-2">{new Date(r.created_at).toLocaleDateString()}</td>
+              </th>
+              <Th>Name</Th>
+              <Th>Email</Th>
+              <Th>Company</Th>
+              <Th>Stage</Th>
+              <Th>Campaign</Th>
+              <Th align="right">Value</Th>
+              <Th align="right">Created</Th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {rows.length === 0 && (
+              <tr>
+                <td colSpan={8} className="px-6 py-12 text-center" style={{ color: 'var(--lead-muted)' }}>
+                  <div className="text-[14px] font-medium" style={{ color: 'var(--lead-ink)' }}>
+                    No leads match
+                  </div>
+                  <div className="mt-1 text-[12.5px]">Try clearing filters or adding a lead.</div>
+                </td>
+              </tr>
+            )}
+            {rows.map((r, i) => {
+              const isSel = selected.has(r.id)
+              return (
+                <tr
+                  key={r.id}
+                  onClick={() => setEditing(r)}
+                  className="group cursor-pointer transition-colors"
+                  style={{
+                    borderTop: i === 0 ? 'none' : '1px solid var(--lead-line)',
+                    background: isSel ? 'var(--lead-accent-tint)' : 'transparent',
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!isSel) e.currentTarget.style.background = 'var(--lead-surface-2)'
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!isSel) e.currentTarget.style.background = 'transparent'
+                  }}
+                >
+                  <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      checked={isSel}
+                      onChange={() => toggle(r.id)}
+                      className="lead-focus h-3.5 w-3.5 rounded accent-[color:var(--lead-accent)]"
+                    />
+                  </td>
+                  <td className="px-3 py-2.5 font-medium" style={{ color: 'var(--lead-ink)' }}>
+                    <div className="flex items-center gap-2">
+                      <Avatar src={r.picture_url} name={r.name} />
+                      <span className="truncate">{r.name}</span>
+                    </div>
+                  </td>
+                  <td className="px-3 py-2.5" style={{ color: 'var(--lead-body)' }}>
+                    {r.email ?? <Em />}
+                  </td>
+                  <td className="px-3 py-2.5" style={{ color: 'var(--lead-body)' }}>
+                    {r.company ?? <Em />}
+                  </td>
+                  <td className="px-3 py-2.5">
+                    <StageBadge name={stageName(r.stage_id)} />
+                  </td>
+                  <td className="px-3 py-2.5">
+                    <CampaignBadge name={r.campaign_name} />
+                  </td>
+                  <td className="px-3 py-2.5 text-right tabular-nums" style={{ color: 'var(--lead-ink)' }}>
+                    {r.estimated_value !== null ? formatValue(r.estimated_value) : <Em />}
+                  </td>
+                  <td className="px-3 py-2.5 text-right tabular-nums" style={{ color: 'var(--lead-muted)' }}>
+                    {new Date(r.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
 
       {selected.size > 0 && (
         <BulkActionBar
@@ -90,9 +154,87 @@ export function LeadsTableClient({
           lead={editing}
           stages={stages}
           fieldDefs={fieldDefs}
+          campaigns={campaigns}
           onClose={() => setEditing(null)}
         />
       )}
     </div>
+  )
+}
+
+function Th({ children, align = 'left' }: { children: React.ReactNode; align?: 'left' | 'right' }) {
+  return (
+    <th
+      className={`px-3 py-2.5 text-[11px] font-semibold uppercase tracking-wider ${align === 'right' ? 'text-right' : 'text-left'}`}
+    >
+      {children}
+    </th>
+  )
+}
+
+function Em() {
+  return <span style={{ color: 'var(--lead-faint)' }}>—</span>
+}
+
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/).slice(0, 2)
+  return parts.map((p) => p[0]?.toUpperCase() ?? '').join('') || '?'
+}
+
+function Avatar({ src, name }: { src: string | null; name: string }) {
+  if (src) {
+    return (
+      <img
+        src={src}
+        alt=""
+        referrerPolicy="no-referrer"
+        className="h-6 w-6 shrink-0 rounded-full object-cover"
+        style={{ background: 'var(--lead-accent-soft)' }}
+      />
+    )
+  }
+  return (
+    <span
+      aria-hidden
+      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold"
+      style={{ color: 'var(--lead-accent)', background: 'var(--lead-accent-soft)' }}
+    >
+      {initials(name)}
+    </span>
+  )
+}
+
+function CampaignBadge({ name }: { name: string | null }) {
+  return (
+    <span
+      className="inline-flex max-w-[160px] items-center gap-1 rounded-full px-2 py-0.5 text-[11.5px] font-medium"
+      title={name ?? 'Main bot (no campaign)'}
+      style={{
+        color: name ? 'var(--lead-body)' : 'var(--lead-faint)',
+        background: 'var(--lead-surface-2)',
+        border: '1px solid var(--lead-line)',
+      }}
+    >
+      <span
+        aria-hidden
+        className="inline-block h-1.5 w-1.5 rounded-full"
+        style={{ background: name ? 'var(--lead-accent)' : 'var(--lead-faint)' }}
+      />
+      <span className="truncate">{name ?? 'Main bot'}</span>
+    </span>
+  )
+}
+
+function StageBadge({ name }: { name: string }) {
+  return (
+    <span
+      className="inline-flex items-center rounded-full px-2 py-0.5 text-[11.5px] font-medium"
+      style={{
+        color: 'var(--lead-accent)',
+        background: 'var(--lead-accent-soft)',
+      }}
+    >
+      {name}
+    </span>
   )
 }

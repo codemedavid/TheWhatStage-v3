@@ -1,5 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { revalidateTag } from 'next/cache'
 import { DEFAULT_STAGES } from './defaults'
+import { stagesTag } from './queries'
 
 export async function seedDefaultStagesIfEmpty(
   supabase: SupabaseClient,
@@ -23,4 +25,5 @@ export async function seedDefaultStagesIfEmpty(
 
   const { error } = await supabase.from('pipeline_stages').insert(rows)
   if (error) throw error
+  revalidateTag(stagesTag(userId), 'max')
 }

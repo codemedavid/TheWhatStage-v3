@@ -31,12 +31,6 @@ export default function FormRenderer({
             className="h-10 w-auto"
           />
         )}
-        <p className="text-[12px] uppercase tracking-wide text-[#6B7280]">
-          Form
-        </p>
-        <h1 className="text-[26px] font-semibold tracking-tight text-[#111827]">
-          {page.title}
-        </h1>
         {page.description && (
           <p className="text-[14px] text-[#6B7280]">{page.description}</p>
         )}

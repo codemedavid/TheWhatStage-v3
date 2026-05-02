@@ -180,8 +180,38 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
     const { stages, currentStageId } = classifyEnabled
       ? await loadStageContext(admin, thread.user_id, thread.lead_id)
       : { stages: [] as StageBrief[], currentStageId: null as string | null }
+    const campaign = thread.lead_id ? await loadLeadCampaign(admin, thread.lead_id) : null
+    const activeFunnel = campaign?.activeFunnel ?? null
+    const campaignPersona = campaign
+      ? (() => {
+          const funnelInstruction = activeFunnel?.instruction?.trim() || undefined
+          const funnelDoRules = (activeFunnel?.rules ?? [])
+            .filter((r) => r.kind === 'do')
+            .map((r) => r.text)
+            .filter(Boolean)
+          const funnelDontRules = (activeFunnel?.rules ?? [])
+            .filter((r) => r.kind === 'dont')
+            .map((r) => r.text)
+            .filter(Boolean)
+          const allDoRules = [...(campaign.do_rules ?? []), ...funnelDoRules]
+          const allDontRules = [...(campaign.dont_rules ?? []), ...funnelDontRules]
+          return {
+            // Persona override only in custom mode — chatbot mode uses base config persona
+            ...(campaign.personality_mode === 'custom' && campaign.persona
+              ? { persona: campaign.persona }
+              : {}),
+            ...(allDoRules.length ? { doRules: allDoRules } : {}),
+            ...(allDontRules.length ? { dontRules: allDontRules } : {}),
+            ...(funnelInstruction ? { funnelInstruction } : {}),
+          }
+        })()
+      : undefined
     const sendablePages = thread.auto_reply_enabled
-      ? await loadSendableActionPages(admin, thread.user_id)
+      ? await loadSendableActionPages(
+          admin,
+          thread.user_id,
+          activeFunnel?.action_page_id ?? campaign?.goal_action_page_id ?? null,
+        )
       : []
     const actionPages: ActionPageBrief[] = sendablePages.map((p) => ({
       id: p.id,
@@ -238,7 +268,7 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
             history,
             stages,
             currentStageId,
-            { rpcName: 'match_knowledge_hybrid_service', actionPages },
+            { rpcName: 'match_knowledge_hybrid_service', actionPages, campaignPersona },
           )
           reply = r.text.trim()
           stageChange = r.stageChange
@@ -250,6 +280,7 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
       if (!reply) {
         const r = await answer(admin, thread.user_id, message, history, {
           rpcName: 'match_knowledge_hybrid_service',
+          campaignPersona,
         })
         reply = r.text.trim()
       }
@@ -521,6 +552,11 @@ async function ensureLead(
     throw new Error(`no pipeline_stages for user ${thread.user_id}`)
   }
 
+  const campaign_id = await pickCampaignForUser(admin, thread.user_id)
+  const current_funnel_id = campaign_id
+    ? await pickFirstFunnelForCampaign(admin, campaign_id)
+    : null
+
   const { data: lead, error: leadErr } = await admin
     .from('leads')
     .insert({
@@ -528,6 +564,8 @@ async function ensureLead(
       stage_id: defaultStage.id,
       name: profile.fullName,
       source: 'messenger',
+      campaign_id,
+      current_funnel_id,
     })
     .select('id')
     .single()
@@ -655,23 +693,118 @@ interface SendableActionPage {
   signing_secret: string
 }
 
+interface FunnelBrief {
+  id: string
+  position: number
+  instruction: string
+  action_page_id: string | null
+  next_funnel_id: string | null
+  rules: { kind: 'do' | 'dont'; text: string }[]
+}
+
+interface CampaignBrief {
+  id: string
+  personality_mode: 'chatbot' | 'custom'
+  persona: string | null
+  do_rules: string[] | null
+  dont_rules: string[] | null
+  goal_action_page_id: string | null
+  activeFunnel: FunnelBrief | null
+}
+
+async function pickCampaignForUser(
+  admin: AdminClient,
+  userId: string,
+): Promise<string | null> {
+  const { data } = await admin
+    .from('campaigns')
+    .select('id, weight')
+    .eq('user_id', userId)
+    .eq('enabled', true)
+    .eq('status', 'active')
+  const rows = (data ?? []) as { id: string; weight: number }[]
+  if (rows.length === 0) return null
+  const weights = rows.map((r) => Math.max(1, r.weight ?? 1))
+  const total = weights.reduce((a, b) => a + b, 0)
+  let roll = Math.random() * total
+  for (let i = 0; i < rows.length; i++) {
+    roll -= weights[i]
+    if (roll <= 0) return rows[i].id
+  }
+  return rows[rows.length - 1].id
+}
+
+async function pickFirstFunnelForCampaign(
+  admin: AdminClient,
+  campaignId: string,
+): Promise<string | null> {
+  const { data } = await admin
+    .from('funnels')
+    .select('id')
+    .eq('campaign_id', campaignId)
+    .order('position', { ascending: true })
+    .limit(1)
+    .maybeSingle<{ id: string }>()
+  return data?.id ?? null
+}
+
+async function loadLeadCampaign(
+  admin: AdminClient,
+  leadId: string,
+): Promise<CampaignBrief | null> {
+  const { data: lead } = await admin
+    .from('leads')
+    .select('campaign_id, current_funnel_id')
+    .eq('id', leadId)
+    .maybeSingle<{ campaign_id: string | null; current_funnel_id: string | null }>()
+  if (!lead?.campaign_id) return null
+  const { data: campaign } = await admin
+    .from('campaigns')
+    .select('id, personality_mode, persona, do_rules, dont_rules, goal_action_page_id')
+    .eq('id', lead.campaign_id)
+    .maybeSingle<Omit<CampaignBrief, 'activeFunnel'>>()
+  if (!campaign) return null
+  const { data: funnelRows } = await admin
+    .from('funnels')
+    .select('id, position, instruction, rules, action_page_id, next_funnel_id')
+    .eq('campaign_id', campaign.id)
+    .order('position', { ascending: true })
+  const funnels = (funnelRows ?? []) as FunnelBrief[]
+  const activeFunnel =
+    funnels.find((f) => f.id === lead.current_funnel_id) ?? funnels[0] ?? null
+  if (activeFunnel && activeFunnel.id !== lead.current_funnel_id) {
+    await admin
+      .from('leads')
+      .update({ current_funnel_id: activeFunnel.id })
+      .eq('id', leadId)
+  }
+  return {
+    ...campaign,
+    activeFunnel,
+  }
+}
+
 /**
- * Load published action pages owned by `userId` that are eligible for the
- * bot to send autonomously — i.e. have both a CTA label and bot guidance.
- * The combined classifier picks at most one per reply.
+ * Load published action pages eligible for the bot to send autonomously.
+ * When a funnel or campaign target page is provided, only that page is returned
+ * so the bot prioritizes the lead's active funnel before the broader campaign.
  */
 async function loadSendableActionPages(
   admin: AdminClient,
   userId: string,
+  targetActionPageId: string | null = null,
 ): Promise<SendableActionPage[]> {
-  const { data, error } = await admin
+  let query = admin
     .from('action_pages')
     .select('id, slug, title, cta_label, bot_send_instructions, signing_secret')
     .eq('user_id', userId)
     .eq('status', 'published')
     .not('cta_label', 'is', null)
     .not('bot_send_instructions', 'is', null)
-    .limit(20)
+  if (targetActionPageId) {
+    query = query.eq('id', targetActionPageId)
+  }
+  const { data, error } = await query.limit(20)
   if (error) {
     console.error('[messenger.worker] loadSendableActionPages failed', error.message)
     return []

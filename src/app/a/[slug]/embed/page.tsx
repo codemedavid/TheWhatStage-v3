@@ -2,8 +2,6 @@ import { notFound } from 'next/navigation'
 import { loadPublicActionPage } from '../_lib/load'
 import { ActionPageRenderer } from '../_components/Renderer'
 
-export const dynamic = 'force-dynamic'
-
 export default async function EmbedActionPage({
   params,
   searchParams,
@@ -24,6 +22,7 @@ export default async function EmbedActionPage({
         claims={result.claims}
         rawToken={rawToken}
         variant="embed"
+        products={result.products ?? []}
       />
     </main>
   )

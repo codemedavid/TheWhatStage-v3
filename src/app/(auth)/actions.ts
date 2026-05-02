@@ -2,6 +2,7 @@
 
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { signUpSchema, signInSchema } from '@/lib/auth/schemas'
 
 export type AuthFormState = {
@@ -34,15 +35,31 @@ export async function signUpAction(
     return { fieldErrors: flattenFieldErrors(parsed.error) }
   }
 
-  const supabase = await createClient()
-  const { error } = await supabase.auth.signUp({
+  const admin = createAdminClient()
+  const { error: createErr } = await admin.auth.admin.createUser({
     email: parsed.data.email,
     password: parsed.data.password,
-    options: { data: { full_name: parsed.data.full_name } },
+    email_confirm: true,
+    user_metadata: { full_name: parsed.data.full_name },
   })
 
-  if (error) {
+  if (createErr) {
+    if (process.env.NODE_ENV !== 'production') {
+      console.error('[signUpAction] supabase create error:', createErr)
+    }
+    if (createErr.message?.toLowerCase().includes('already')) {
+      return { formError: 'An account with that email already exists.' }
+    }
     return { formError: 'Could not create account. Please try again.' }
+  }
+
+  const supabase = await createClient()
+  const { error: signInErr } = await supabase.auth.signInWithPassword({
+    email: parsed.data.email,
+    password: parsed.data.password,
+  })
+  if (signInErr) {
+    return { formError: 'Account created but auto sign-in failed. Try logging in.' }
   }
 
   redirect('/dashboard')

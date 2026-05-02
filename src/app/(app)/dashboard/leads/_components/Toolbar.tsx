@@ -1,115 +1,158 @@
 'use client'
-import { useState, useEffect, useTransition } from 'react'
-import Link from 'next/link'
+import { useEffect, useState, useRef } from 'react'
 import { useUrlState } from './_useUrlState'
-import { LeadDrawer } from './LeadDrawer'
-import { exportLeadsCsv } from '../actions/export'
 import type { LeadsQuery } from '../_lib/schemas'
-import type { StageRow, FieldDefRow } from '../_lib/queries'
 
-function downloadCsv(filename: string, csv: string) {
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-  URL.revokeObjectURL(url)
-}
-
-export function Toolbar({
-  params, stages, fieldDefs,
-}: {
-  params: LeadsQuery
-  stages: StageRow[]
-  fieldDefs: FieldDefRow[]
-}) {
+export function Toolbar({ params }: { params: LeadsQuery }) {
   const { set } = useUrlState()
   const [q, setQ] = useState(params.q ?? '')
-  const [openAdd, setOpenAdd] = useState(false)
-  const [exporting, startExport] = useTransition()
-
-  const onExport = (scope: 'filtered' | 'all') =>
-    startExport(async () => {
-      const csv = await exportLeadsCsv(params, scope)
-      const stamp = new Date().toISOString().slice(0, 10)
-      downloadCsv(`leads-${scope}-${stamp}.csv`, csv)
-    })
+  const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    const t = setTimeout(() => set({ q: q || undefined }), 300)
+    const t = setTimeout(() => set({ q: q || undefined }), 250)
     return () => clearTimeout(t)
   }, [q, set])
 
+  // "/" focuses search
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === '/' && document.activeElement?.tagName !== 'INPUT' && document.activeElement?.tagName !== 'TEXTAREA') {
+        e.preventDefault()
+        inputRef.current?.focus()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  const hasFilters = !!(params.q || params.from || params.to)
+
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      <input
-        value={q}
-        onChange={(e) => setQ(e.target.value)}
-        placeholder="Search name, email, phone, company"
-        className="border border-[#E5E7EB] rounded-md px-3 py-1.5 text-sm w-72"
-      />
-      <input
-        type="date"
-        value={params.from ?? ''}
-        onChange={(e) => set({ from: e.target.value || undefined })}
-        className="border rounded-md px-2 py-1.5 text-sm"
-      />
-      <span className="text-sm text-[#6B7280]">to</span>
-      <input
-        type="date"
-        value={params.to ?? ''}
-        onChange={(e) => set({ to: e.target.value || undefined })}
-        className="border rounded-md px-2 py-1.5 text-sm"
-      />
-      <select
-        value={params.sort}
-        onChange={(e) => set({ sort: e.target.value })}
-        className="border rounded-md px-2 py-1.5 text-sm"
+    <div className="mt-4 flex flex-wrap items-center gap-2">
+      <div
+        className="group relative flex h-8 flex-1 min-w-[260px] max-w-md items-center gap-2 rounded-full px-3 transition-colors"
+        style={{
+          background: 'var(--lead-surface)',
+          border: '1px solid var(--lead-line)',
+        }}
       >
-        <option value="recent">Recent</option>
-        <option value="oldest">Oldest</option>
-        <option value="name_asc">Name A–Z</option>
-        <option value="value_desc">Value high–low</option>
-      </select>
-      <div className="ml-auto flex items-center gap-2">
-        <button
-          onClick={() => onExport('filtered')}
-          disabled={exporting}
-          className="px-3 py-1.5 text-sm border rounded-md disabled:opacity-50"
-        >
-          Export filtered
-        </button>
-        <button
-          onClick={() => onExport('all')}
-          disabled={exporting}
-          className="px-3 py-1.5 text-sm border rounded-md disabled:opacity-50"
-        >
-          Export all
-        </button>
-        <Link href="/dashboard/leads/stages" className="px-3 py-1.5 text-sm border rounded-md">
-          Manage stages
-        </Link>
-        <Link href="/dashboard/leads/fields" className="px-3 py-1.5 text-sm border rounded-md">
-          Custom fields
-        </Link>
-        <button
-          onClick={() => setOpenAdd(true)}
-          className="px-3 py-1.5 text-sm bg-[#059669] text-white rounded-md"
-        >
-          Add Lead
-        </button>
-      </div>
-      {openAdd && (
-        <LeadDrawer
-          mode="create"
-          stages={stages}
-          fieldDefs={fieldDefs}
-          onClose={() => setOpenAdd(false)}
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden style={{ color: 'var(--lead-muted)' }}>
+          <circle cx="11" cy="11" r="7" />
+          <path d="m20 20-3.5-3.5" />
+        </svg>
+        <input
+          ref={inputRef}
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="Search leads"
+          className="w-full bg-transparent text-[13px] outline-none placeholder:text-[color:var(--lead-faint)]"
+          style={{ color: 'var(--lead-ink)' }}
         />
+        {q ? (
+          <button
+            type="button"
+            onClick={() => setQ('')}
+            className="lead-focus inline-flex h-5 w-5 items-center justify-center rounded-full"
+            style={{ color: 'var(--lead-muted)', background: 'var(--lead-surface-2)' }}
+            aria-label="Clear search"
+          >
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
+              <path d="M18 6 6 18M6 6l12 12" />
+            </svg>
+          </button>
+        ) : (
+          <kbd
+            className="hidden sm:inline-flex h-5 items-center rounded-md px-1.5 font-mono text-[10.5px]"
+            style={{
+              color: 'var(--lead-muted)',
+              background: 'var(--lead-surface-2)',
+              border: '1px solid var(--lead-line)',
+            }}
+          >
+            /
+          </kbd>
+        )}
+      </div>
+
+      <DateChip
+        label="From"
+        value={params.from ?? ''}
+        onChange={(v) => set({ from: v || undefined })}
+      />
+      <DateChip
+        label="To"
+        value={params.to ?? ''}
+        onChange={(v) => set({ to: v || undefined })}
+      />
+
+      <SortPicker
+        value={params.sort}
+        onChange={(v) => set({ sort: v })}
+      />
+
+      {hasFilters && (
+        <button
+          type="button"
+          onClick={() => set({ q: undefined, from: undefined, to: undefined })}
+          className="lead-focus h-8 rounded-full px-3 text-[12.5px] font-medium transition-colors"
+          style={{ color: 'var(--lead-accent)' }}
+          onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--lead-accent-tint)')}
+          onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+        >
+          Clear filters
+        </button>
       )}
     </div>
+  )
+}
+
+function DateChip({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+  const has = !!value
+  return (
+    <label
+      className="inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-[12.5px] transition-colors"
+      style={{
+        color: has ? 'var(--lead-ink)' : 'var(--lead-muted)',
+        background: has ? 'var(--lead-accent-tint)' : 'var(--lead-surface)',
+        border: `1px solid ${has ? 'var(--lead-accent-ring)' : 'var(--lead-line)'}`,
+      }}
+    >
+      <span className="font-medium">{label}</span>
+      <input
+        type="date"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="bg-transparent outline-none lead-focus"
+        style={{ color: 'inherit', colorScheme: 'inherit' }}
+      />
+    </label>
+  )
+}
+
+function SortPicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <label
+      className="relative inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-[12.5px] font-medium transition-colors"
+      style={{
+        color: 'var(--lead-body)',
+        background: 'var(--lead-surface)',
+        border: '1px solid var(--lead-line)',
+      }}
+    >
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden style={{ color: 'var(--lead-muted)' }}>
+        <path d="M3 6h13M3 12h9M3 18h5M17 8v12m0 0-3-3m3 3 3-3" />
+      </svg>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="bg-transparent pr-1 outline-none lead-focus"
+        style={{ color: 'inherit' }}
+      >
+        <option value="recent">Most recent</option>
+        <option value="oldest">Oldest</option>
+        <option value="name_asc">Name A–Z</option>
+        <option value="value_desc">Value high to low</option>
+      </select>
+    </label>
   )
 }

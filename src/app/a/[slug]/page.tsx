@@ -2,8 +2,6 @@ import { notFound } from 'next/navigation'
 import { loadPublicActionPage } from './_lib/load'
 import { ActionPageRenderer } from './_components/Renderer'
 
-export const dynamic = 'force-dynamic'
-
 export default async function PublicActionPage({
   params,
   searchParams,
@@ -18,6 +16,19 @@ export default async function PublicActionPage({
 
   const rawToken = typeof sp.t === 'string' ? sp.t : null
   const submitted = sp.submitted === '1'
+  const isBooking = result.page.kind === 'booking' && !submitted
+
+  if (isBooking) {
+    return (
+      <ActionPageRenderer
+        page={result.page}
+        claims={result.claims}
+        rawToken={rawToken}
+        variant="standalone"
+        products={result.products ?? []}
+      />
+    )
+  }
 
   return (
     <main className="min-h-screen bg-[#F9FAFB] px-4 py-10">
@@ -36,6 +47,7 @@ export default async function PublicActionPage({
             claims={result.claims}
             rawToken={rawToken}
             variant="standalone"
+            products={result.products ?? []}
           />
         )}
       </div>

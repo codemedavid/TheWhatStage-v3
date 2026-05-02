@@ -1,5 +1,6 @@
 'use server'
-import { revalidatePath } from 'next/cache'
+import { revalidatePath, revalidateTag } from 'next/cache'
+import { fieldDefsTag } from '../_lib/queries'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { FieldDefInput } from '../_lib/schemas'
@@ -25,14 +26,16 @@ export async function createFieldDef(raw: unknown) {
     user_id: userId, ...input, position: nextPos,
   })
   if (error) throw error
+  revalidateTag(fieldDefsTag(userId), 'max')
   revalidatePath('/dashboard/leads', 'layout')
 }
 
 export async function updateFieldDef(id: string, raw: unknown) {
   const input = FieldDefInput.parse(raw)
-  const { supabase } = await requireUser()
+  const { supabase, userId } = await requireUser()
   const { error } = await supabase.from('lead_field_defs').update(input).eq('id', id)
   if (error) throw error
+  revalidateTag(fieldDefsTag(userId), 'max')
   revalidatePath('/dashboard/leads', 'layout')
 }
 
@@ -56,5 +59,6 @@ export async function deleteFieldDef(id: string) {
 
   const { error } = await supabase.from('lead_field_defs').delete().eq('id', id)
   if (error) throw error
+  revalidateTag(fieldDefsTag(userId), 'max')
   revalidatePath('/dashboard/leads', 'layout')
 }

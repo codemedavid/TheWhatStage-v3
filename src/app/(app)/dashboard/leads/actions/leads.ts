@@ -16,6 +16,34 @@ function normalize(input: z.infer<typeof LeadInput>) {
   return { ...input, email: input.email || null }
 }
 
+// Weighted-random pick from the user's enabled+active campaigns. Returns null
+// if none exist, in which case the lead falls back to the main bot (no
+// campaign assigned). Weight is clamped to 1 so a campaign with weight 0
+// still has a non-zero chance — matches the schema's "0..100" intent of
+// relative weight, not exclusion.
+async function pickRandomCampaignId(
+  supabase: Awaited<ReturnType<typeof requireUser>>['supabase'],
+  userId: string,
+): Promise<string | null> {
+  const { data, error } = await supabase
+    .from('campaigns')
+    .select('id, weight')
+    .eq('user_id', userId)
+    .eq('enabled', true)
+    .eq('status', 'active')
+  if (error) throw error
+  const rows = (data ?? []) as { id: string; weight: number }[]
+  if (rows.length === 0) return null
+  const weights = rows.map((r) => Math.max(1, r.weight ?? 1))
+  const total = weights.reduce((a, b) => a + b, 0)
+  let roll = Math.random() * total
+  for (let i = 0; i < rows.length; i++) {
+    roll -= weights[i]
+    if (roll <= 0) return rows[i].id
+  }
+  return rows[rows.length - 1].id
+}
+
 export async function createLead(raw: unknown) {
   const input = normalize(LeadInput.parse(raw))
   const { supabase, userId } = await requireUser()
@@ -25,9 +53,14 @@ export async function createLead(raw: unknown) {
     .eq('user_id', userId).eq('stage_id', input.stage_id)
     .order('position', { ascending: false }).limit(1).maybeSingle()
 
+  const campaign_id =
+    input.campaign_id !== undefined
+      ? input.campaign_id
+      : await pickRandomCampaignId(supabase, userId)
+
   const nextPos = (maxRow?.position ?? -1) + 1
   const { error } = await supabase.from('leads').insert({
-    user_id: userId, ...input, position: nextPos,
+    user_id: userId, ...input, campaign_id, position: nextPos,
   })
   if (error) throw error
   revalidatePath('/dashboard/leads', 'layout')
