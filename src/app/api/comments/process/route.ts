@@ -10,6 +10,7 @@ import {
   sendPrivateCommentReply,
   type FacebookComment,
 } from '@/lib/facebook/comments'
+import { sendMessengerText } from '@/lib/facebook/messenger'
 import { classifyComment, type CommentDecision } from '@/lib/comments/classify'
 
 export const runtime = 'nodejs'
@@ -165,28 +166,30 @@ async function runJob(admin: AdminClient, job: CommentJob): Promise<void> {
         graphStatus = 'hidden'
       } else if (action === 'private_reply' && decision.privateReply) {
         attemptedPrivateReply = true
-        try {
-          const sent = await sendPrivateCommentReply({
+        // Prefer sending via Messenger directly (PSID = commenter's from.id).
+        // This works whether or not they've messaged the page before, and creates
+        // a proper Messenger thread. The private_reply Graph API endpoint only
+        // works for users who have already messaged the page, so we skip it.
+        const dmSent = await sendCommentDm(admin, {
+          pageId: job.page_id,
+          pageToken,
+          psid: comment.commenterId,
+          message: decision.privateReply,
+          userId: job.user_id,
+        })
+        if (dmSent) {
+          privateReplyMessageId = dmSent.messageId
+          graphStatus = 'sent'
+        } else if (decision.publicReply) {
+          // Commenter PSID unknown or DM failed — reply publicly instead
+          await replyToComment({
             pageAccessToken: pageToken,
             commentId: comment.id,
-            message: decision.privateReply,
+            message: decision.publicReply,
           })
-          privateReplyMessageId = sent.id ?? null
           graphStatus = 'sent'
-        } catch {
-          // Private reply fails when commenter hasn't messaged the Page before.
-          // Facebook returns can_reply_privately:true even in that case.
-          // Fall back to a public reply if one was generated.
-          if (decision.publicReply) {
-            await replyToComment({
-              pageAccessToken: pageToken,
-              commentId: comment.id,
-              message: decision.publicReply,
-            })
-            graphStatus = 'sent'
-          } else {
-            graphStatus = 'skipped'
-          }
+        } else {
+          graphStatus = 'skipped'
         }
       } else if (action === 'public_reply' && decision.publicReply) {
         await replyToComment({
@@ -228,6 +231,54 @@ async function runJob(admin: AdminClient, job: CommentJob): Promise<void> {
     await markDone(admin, job.id, action === 'none' ? 'skipped' : 'done', null)
   } catch (e) {
     await retryOrFail(admin, job, e)
+  }
+}
+
+async function sendCommentDm(
+  admin: AdminClient,
+  args: {
+    pageId: string
+    pageToken: string
+    psid: string | null
+    message: string
+    userId: string
+  },
+): Promise<{ messageId: string } | null> {
+  if (!args.psid) return null
+  try {
+    const sent = await sendMessengerText({
+      pageAccessToken: args.pageToken,
+      recipientPsid: args.psid,
+      text: args.message,
+    })
+    // Record the outbound message in the thread if one exists
+    const { data: thread } = await admin
+      .from('messenger_threads')
+      .select('id, user_id')
+      .eq('page_id', args.pageId)
+      .eq('psid', args.psid)
+      .maybeSingle<{ id: string; user_id: string }>()
+    if (thread) {
+      await admin.from('messenger_messages').insert({
+        thread_id: thread.id,
+        user_id: thread.user_id,
+        direction: 'outbound',
+        sender: 'bot',
+        fb_message_id: sent.message_id,
+        body: args.message,
+      })
+      await admin
+        .from('messenger_threads')
+        .update({
+          last_message_at: new Date().toISOString(),
+          last_message_preview: args.message.slice(0, 200),
+        })
+        .eq('id', thread.id)
+    }
+    return { messageId: sent.message_id }
+  } catch (e) {
+    console.warn('[comments.worker] DM send failed', e instanceof Error ? e.message : e)
+    return null
   }
 }
 
