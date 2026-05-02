@@ -3,26 +3,21 @@ import { buildMediaRagText, extractMediaRefs } from './rag-text'
 
 describe('buildMediaRagText', () => {
   it('includes folder and image descriptions with reference tokens', () => {
-    expect(
-      buildMediaRagText({
-        folderName: 'Reviews',
-        folderSlug: 'image-review',
-        folderDescription: 'Customer proof and testimonials.',
-        assetName: 'Ryan Engineer Review',
-        assetSlug: 'new-review-customer-ryan',
-        assetDescription: 'Review from engineer Ryan about build quality.',
-      }),
-    ).toContain('Folder slug: #image-review')
-    expect(
-      buildMediaRagText({
-        folderName: 'Reviews',
-        folderSlug: 'image-review',
-        folderDescription: 'Customer proof and testimonials.',
-        assetName: 'Ryan Engineer Review',
-        assetSlug: 'new-review-customer-ryan',
-        assetDescription: 'Review from engineer Ryan about build quality.',
-      }),
-    ).toContain('Image slug: @new-review-customer-ryan')
+    const text = buildMediaRagText({
+      folderName: 'Reviews',
+      folderSlug: 'image-review',
+      folderDescription: 'Customer proof and testimonials.',
+      assetName: 'Ryan Engineer Review',
+      assetSlug: 'new-review-customer-ryan',
+      assetDescription: 'Review from engineer Ryan about build quality.',
+    })
+
+    expect(text).toContain('# Ryan Engineer Review')
+    expect(text).toContain('Media folder: Reviews')
+    expect(text).toContain('Folder slug: #image-review')
+    expect(text).toContain('Folder description: Customer proof and testimonials.')
+    expect(text).toContain('Image slug: @new-review-customer-ryan')
+    expect(text).toContain('Image description: Review from engineer Ryan about build quality.')
   })
 
   it('falls back to slugs and none markers for empty display fields', () => {

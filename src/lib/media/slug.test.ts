@@ -30,6 +30,8 @@ describe('media schemas', () => {
   })
 
   it('rejects invalid media slugs', () => {
+    expect(() => MediaSlugSchema.parse('Ab')).toThrow()
+    expect(() => MediaSlugSchema.parse(' ab')).toThrow()
     expect(() => MediaSlugSchema.parse('Review_Image')).toThrow()
     expect(() => MediaSlugSchema.parse('a')).toThrow()
   })
