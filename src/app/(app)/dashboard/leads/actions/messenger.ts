@@ -158,6 +158,20 @@ export interface LatestStageRationale {
  * this stage" in the drawer. Returns null when the lead has never been moved
  * (no events) or when the latest event has no destination stage.
  */
+export async function loadLeadComments(leadId: string): Promise<ConversationComment[]> {
+  const { supabase } = await requireUser()
+  const { data, error } = await supabase
+    .from('facebook_lead_comments')
+    .select(
+      'id, fb_comment_id, message, commenter_name, classification, confidence, moderation_action, graph_status, created_at',
+    )
+    .eq('lead_id', leadId)
+    .order('created_at', { ascending: false })
+    .limit(100)
+  if (error) throw new Error(`loadLeadComments: ${error.message}`)
+  return (data ?? []) as ConversationComment[]
+}
+
 export async function loadLatestStageRationale(
   leadId: string,
 ): Promise<LatestStageRationale | null> {
