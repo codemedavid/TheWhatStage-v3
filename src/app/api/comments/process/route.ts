@@ -10,7 +10,6 @@ import {
   sendPrivateCommentReply,
   type FacebookComment,
 } from '@/lib/facebook/comments'
-import { sendMessengerText } from '@/lib/facebook/messenger'
 import { classifyComment, type CommentDecision } from '@/lib/comments/classify'
 
 export const runtime = 'nodejs'
@@ -166,30 +165,32 @@ async function runJob(admin: AdminClient, job: CommentJob): Promise<void> {
         graphStatus = 'hidden'
       } else if (action === 'private_reply' && decision.privateReply) {
         attemptedPrivateReply = true
-        // Prefer sending via Messenger directly (PSID = commenter's from.id).
-        // This works whether or not they've messaged the page before, and creates
-        // a proper Messenger thread. The private_reply Graph API endpoint only
-        // works for users who have already messaged the page, so we skip it.
-        const dmSent = await sendCommentDm(admin, {
-          pageId: job.page_id,
-          pageToken,
-          psid: comment.commenterId,
-          message: decision.privateReply,
-          userId: job.user_id,
-        })
-        if (dmSent) {
-          privateReplyMessageId = dmSent.messageId
-          graphStatus = 'sent'
-        } else if (decision.publicReply) {
-          // Commenter PSID unknown or DM failed — reply publicly instead
-          await replyToComment({
+        try {
+          const sent = await sendPrivateCommentReply({
             pageAccessToken: pageToken,
             commentId: comment.id,
-            message: decision.publicReply,
+            message: decision.privateReply,
           })
+          privateReplyMessageId = sent.id
           graphStatus = 'sent'
-        } else {
-          graphStatus = 'skipped'
+          // Record the DM in the Messenger thread if one exists for this commenter
+          await recordDmInThread(admin, {
+            pageId: job.page_id,
+            psid: comment.commenterId,
+            messageId: sent.id,
+            body: decision.privateReply,
+          })
+        } catch {
+          if (decision.publicReply) {
+            await replyToComment({
+              pageAccessToken: pageToken,
+              commentId: comment.id,
+              message: decision.publicReply,
+            })
+            graphStatus = 'sent'
+          } else {
+            graphStatus = 'skipped'
+          }
         }
       } else if (action === 'public_reply' && decision.publicReply) {
         await replyToComment({
@@ -234,52 +235,30 @@ async function runJob(admin: AdminClient, job: CommentJob): Promise<void> {
   }
 }
 
-async function sendCommentDm(
+async function recordDmInThread(
   admin: AdminClient,
-  args: {
-    pageId: string
-    pageToken: string
-    psid: string | null
-    message: string
-    userId: string
-  },
-): Promise<{ messageId: string } | null> {
-  if (!args.psid) return null
-  try {
-    const sent = await sendMessengerText({
-      pageAccessToken: args.pageToken,
-      recipientPsid: args.psid,
-      text: args.message,
-    })
-    // Record the outbound message in the thread if one exists
-    const { data: thread } = await admin
-      .from('messenger_threads')
-      .select('id, user_id')
-      .eq('page_id', args.pageId)
-      .eq('psid', args.psid)
-      .maybeSingle<{ id: string; user_id: string }>()
-    if (thread) {
-      await admin.from('messenger_messages').insert({
-        thread_id: thread.id,
-        user_id: thread.user_id,
-        direction: 'outbound',
-        sender: 'bot',
-        fb_message_id: sent.message_id,
-        body: args.message,
-      })
-      await admin
-        .from('messenger_threads')
-        .update({
-          last_message_at: new Date().toISOString(),
-          last_message_preview: args.message.slice(0, 200),
-        })
-        .eq('id', thread.id)
-    }
-    return { messageId: sent.message_id }
-  } catch (e) {
-    console.warn('[comments.worker] DM send failed', e instanceof Error ? e.message : e)
-    return null
-  }
+  args: { pageId: string; psid: string | null; messageId: string; body: string },
+): Promise<void> {
+  if (!args.psid) return
+  const { data: thread } = await admin
+    .from('messenger_threads')
+    .select('id, user_id')
+    .eq('page_id', args.pageId)
+    .eq('psid', args.psid)
+    .maybeSingle<{ id: string; user_id: string }>()
+  if (!thread) return
+  await admin.from('messenger_messages').insert({
+    thread_id: thread.id,
+    user_id: thread.user_id,
+    direction: 'outbound',
+    sender: 'bot',
+    fb_message_id: args.messageId,
+    body: args.body,
+  })
+  await admin
+    .from('messenger_threads')
+    .update({ last_message_at: new Date().toISOString(), last_message_preview: args.body.slice(0, 200) })
+    .eq('id', thread.id)
 }
 
 async function findStrictLeadMatch(

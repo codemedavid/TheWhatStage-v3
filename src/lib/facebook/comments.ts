@@ -90,12 +90,20 @@ export async function sendPrivateCommentReply(args: {
   commentId: string
   message: string
 }): Promise<{ id: string }> {
-  const url = new URL(`${GRAPH}/${encodeURIComponent(args.commentId)}/private_replies`)
+  // Use /me/messages with comment_id as recipient — works for any commenter,
+  // even first-time. The older /{comment-id}/private_replies endpoint fails
+  // unless the user has previously messaged the page.
+  const url = new URL(`${GRAPH}/me/messages`)
   url.searchParams.set('access_token', args.pageAccessToken)
-  return graphJson<{ id: string }>(url.toString(), {
+  const res = await graphJson<{ message_id: string; recipient_id: string }>(url.toString(), {
     method: 'POST',
-    body: JSON.stringify({ message: args.message }),
+    body: JSON.stringify({
+      recipient: { comment_id: args.commentId },
+      message: { text: args.message },
+      messaging_type: 'RESPONSE',
+    }),
   })
+  return { id: res.message_id }
 }
 
 export async function hideComment(args: {

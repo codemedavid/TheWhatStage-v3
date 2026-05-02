@@ -64,8 +64,8 @@ describe('facebook comment helpers', () => {
     })
   })
 
-  it('sends a private reply for a comment', async () => {
-    mockFetchOnce({ id: 'm_1' })
+  it('sends a private reply via /me/messages with comment_id recipient', async () => {
+    const fetchMock = mockFetchOnce({ message_id: 'm_1', recipient_id: 'u_1' })
     await expect(
       sendPrivateCommentReply({
         pageAccessToken: 'tok',
@@ -73,6 +73,11 @@ describe('facebook comment helpers', () => {
         message: 'Sent you details.',
       }),
     ).resolves.toEqual({ id: 'm_1' })
+    const url = new URL(fetchMock.mock.calls[0][0] as string)
+    expect(url.pathname).toBe('/v19.0/me/messages')
+    const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string)
+    expect(body.recipient).toEqual({ comment_id: 'c_1' })
+    expect(body.messaging_type).toBe('RESPONSE')
   })
 
   it('hides a comment by updating is_hidden', async () => {
