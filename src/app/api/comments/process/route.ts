@@ -165,13 +165,29 @@ async function runJob(admin: AdminClient, job: CommentJob): Promise<void> {
         graphStatus = 'hidden'
       } else if (action === 'private_reply' && decision.privateReply) {
         attemptedPrivateReply = true
-        const sent = await sendPrivateCommentReply({
-          pageAccessToken: pageToken,
-          commentId: comment.id,
-          message: decision.privateReply,
-        })
-        privateReplyMessageId = sent.id ?? null
-        graphStatus = 'sent'
+        try {
+          const sent = await sendPrivateCommentReply({
+            pageAccessToken: pageToken,
+            commentId: comment.id,
+            message: decision.privateReply,
+          })
+          privateReplyMessageId = sent.id ?? null
+          graphStatus = 'sent'
+        } catch {
+          // Private reply fails when commenter hasn't messaged the Page before.
+          // Facebook returns can_reply_privately:true even in that case.
+          // Fall back to a public reply if one was generated.
+          if (decision.publicReply) {
+            await replyToComment({
+              pageAccessToken: pageToken,
+              commentId: comment.id,
+              message: decision.publicReply,
+            })
+            graphStatus = 'sent'
+          } else {
+            graphStatus = 'skipped'
+          }
+        }
       } else if (action === 'public_reply' && decision.publicReply) {
         await replyToComment({
           pageAccessToken: pageToken,
