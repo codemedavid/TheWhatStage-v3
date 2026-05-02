@@ -1,10 +1,11 @@
 import { z } from 'zod'
 
 export const MediaSlugSchema = z.string().regex(/^[a-z0-9][a-z0-9-]{1,119}$/)
+export const MediaFolderSlugSchema = z.string().regex(/^[a-z0-9][a-z0-9-]{1,79}$/)
 
 export const CreateMediaFolderInput = z.object({
   name: z.string().trim().min(1).max(80),
-  slug: MediaSlugSchema.optional(),
+  slug: MediaFolderSlugSchema.optional(),
   description: z.string().trim().max(2000).nullable().default(null),
 })
 

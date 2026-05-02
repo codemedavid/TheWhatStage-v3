@@ -32,7 +32,7 @@ export function buildMediaRagText(input: BuildMediaRagTextInput): string {
 export function extractMediaRefs(text: string): MediaRefs {
   const folderSlugs: string[] = []
   const assetSlugs: string[] = []
-  const tokenRe = /(^|[\s([{>])([#@])([a-z0-9][a-z0-9-]{1,119})(?=$|[\s.,;:!?()[\]{}<>"'])/g
+  const tokenRe = /(^|[\s([{<>"'])([#@])([a-z0-9][a-z0-9-]{1,119})(?=$|[\s.,;:!?()[\]{}<>"'])/g
 
   for (const match of text.matchAll(tokenRe)) {
     const marker = match[2]

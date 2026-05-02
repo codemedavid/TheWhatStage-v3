@@ -60,6 +60,13 @@ describe('extractMediaRefs', () => {
     })
   })
 
+  it('extracts quoted and angle-wrapped refs', () => {
+    expect(extractMediaRefs('Use "@quoted-asset", \'@single-quoted\', and <@angle-asset>.')).toEqual({
+      folderSlugs: [],
+      assetSlugs: ['quoted-asset', 'single-quoted', 'angle-asset'],
+    })
+  })
+
   it('deduplicates repeated asset refs while preserving first-seen order', () => {
     expect(extractMediaRefs('@first @second @first @third @second')).toEqual({
       folderSlugs: [],
