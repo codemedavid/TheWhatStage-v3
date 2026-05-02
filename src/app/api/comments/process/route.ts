@@ -11,6 +11,7 @@ import {
   type FacebookComment,
 } from '@/lib/facebook/comments'
 import { classifyComment, type CommentDecision } from '@/lib/comments/classify'
+import { answer } from '@/lib/chatbot/answer'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -151,6 +152,19 @@ async function runJob(admin: AdminClient, job: CommentJob): Promise<void> {
     }
 
     const action = chooseGraphAction({ decision, comment })
+
+    // For reply actions, regenerate the reply text using the RAG pipeline so it
+    // uses the bot's personality and knowledge base instead of the classifier stub.
+    if (action === 'private_reply' || action === 'public_reply') {
+      const ragResult = await answer(admin, job.user_id, comment.message, [], {
+        rpcName: 'match_knowledge_hybrid_service',
+      }).catch(() => null)
+      const ragText = ragResult?.text?.trim()
+      if (ragText) {
+        decision.privateReply = ragText
+        decision.publicReply = ragText
+      }
+    }
     let graphStatus: GraphStatus = 'skipped'
     let graphError: string | null = null
     let attemptedPrivateReply = false
