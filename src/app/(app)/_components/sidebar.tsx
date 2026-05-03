@@ -11,6 +11,7 @@ type IconName =
   | 'funnels'
   | 'business'
   | 'actions'
+  | 'media'
   | 'activity'
   | 'settings'
   | 'help'
@@ -24,6 +25,7 @@ const items: { href: string; label: string; icon: IconName }[] = [
   { href: '/dashboard/funnels', label: 'Funnels', icon: 'funnels' },
   { href: '/dashboard/business', label: 'My Business', icon: 'business' },
   { href: '/dashboard/action-pages', label: 'Action Pages', icon: 'actions' },
+  { href: '/dashboard/media', label: 'Media', icon: 'media' },
   { href: '/dashboard/activity', label: 'Activity', icon: 'activity' },
   { href: '/dashboard/settings', label: 'Settings', icon: 'settings' },
 ]
@@ -78,6 +80,13 @@ function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
       <>
         <path d="M4 5h16M4 12h10M4 19h16" />
         <circle cx="18" cy="12" r="2.5" fill="currentColor" stroke="none" />
+      </>
+    ),
+    media: (
+      <>
+        <rect x="3" y="5" width="18" height="14" rx="2" />
+        <circle cx="8" cy="10" r="1.5" />
+        <path d="M21 16l-5-5-4 4-2-2-5 5" />
       </>
     ),
     activity: <path d="M3 12h4l3-8 4 16 3-8h4" />,
