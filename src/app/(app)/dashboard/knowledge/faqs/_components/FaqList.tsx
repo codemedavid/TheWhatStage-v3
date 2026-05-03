@@ -3,7 +3,8 @@ import Link from 'next/link'
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import type { CategoryRow, FaqRow } from '../../_lib/queries'
-import { deleteFaq, toggleFaqPublished } from '../../actions/faqs'
+import { deleteFaq, reindexFaq, toggleFaqPublished } from '../../actions/faqs'
+import { EmbeddingStatusBadge } from '../../_components/EmbeddingStatusBadge'
 
 export function FaqList({
   faqs,
@@ -51,6 +52,20 @@ export function FaqList({
       try {
         await toggleFaqPublished({ id: f.id, isPublished: !f.is_published })
         router.refresh()
+      } finally {
+        setPendingId(null)
+      }
+    })
+  }
+
+  const onReindex = (f: FaqRow) => {
+    setPendingId(f.id)
+    startTransition(async () => {
+      try {
+        await reindexFaq({ id: f.id })
+        router.refresh()
+      } catch (e) {
+        alert(e instanceof Error ? e.message : 'Reindex failed')
       } finally {
         setPendingId(null)
       }
@@ -111,6 +126,10 @@ export function FaqList({
                       Draft
                     </span>
                   )}
+                  <EmbeddingStatusBadge
+                    status={f.embedding_status}
+                    embeddedAt={f.embedded_at}
+                  />
                 </div>
               </div>
               {cat ? (
@@ -149,6 +168,15 @@ export function FaqList({
                     className="inline-flex h-7 items-center rounded-md border border-[#E5E7EB] bg-white px-2.5 text-[12px] font-medium text-[#374151] hover:bg-[#F9FAFB] disabled:opacity-60"
                   >
                     {f.is_published ? 'Unpublish' : 'Publish'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onReindex(f)}
+                    disabled={isPending}
+                    className="inline-flex h-7 items-center rounded-md border border-[#E5E7EB] bg-white px-2.5 text-[12px] font-medium text-[#374151] hover:bg-[#F9FAFB] disabled:opacity-60"
+                    title="Re-run embedding for this FAQ"
+                  >
+                    Reindex
                   </button>
                   <button
                     type="button"

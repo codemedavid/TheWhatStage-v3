@@ -17,6 +17,8 @@ export type TagRow = {
   updated_at: string
 }
 
+export type EmbeddingStatus = 'pending' | 'indexed' | 'stale'
+
 export type DocumentListRow = {
   id: string
   title: string
@@ -28,6 +30,8 @@ export type DocumentListRow = {
   published_at: string | null
   updated_at: string
   created_at: string
+  embedding_status: EmbeddingStatus
+  embedded_at: string | null
   tag_ids: string[]
 }
 
@@ -38,8 +42,6 @@ export type DocumentRow = Omit<DocumentListRow, 'tag_ids'> & {
   draft_json: unknown
   draft_html: string | null
   draft_text: string | null
-  embedding_status: 'pending' | 'indexed' | 'stale'
-  embedded_at: string | null
   tag_ids: string[]
 }
 
@@ -81,6 +83,8 @@ type DocSelectRow = {
   published_at: string | null
   updated_at: string
   created_at: string
+  embedding_status: EmbeddingStatus | null
+  embedded_at: string | null
   knowledge_document_tags: { tag_id: string }[] | null
 }
 
@@ -96,6 +100,8 @@ function flattenTags(d: DocSelectRow): DocumentListRow {
     published_at: d.published_at,
     updated_at: d.updated_at,
     created_at: d.created_at,
+    embedding_status: (d.embedding_status ?? 'pending') as EmbeddingStatus,
+    embedded_at: d.embedded_at,
     tag_ids: (d.knowledge_document_tags ?? []).map((t) => t.tag_id),
   }
 }
@@ -108,7 +114,7 @@ export async function fetchDocumentsList(
   let query = supabase
     .from('knowledge_documents')
     .select(
-      'id, title, category_id, has_unsaved_changes, version, is_pinned, pinned_at, published_at, updated_at, created_at, knowledge_document_tags(tag_id)',
+      'id, title, category_id, has_unsaved_changes, version, is_pinned, pinned_at, published_at, updated_at, created_at, embedding_status, embedded_at, knowledge_document_tags(tag_id)',
     )
     .eq('user_id', userId)
     .order('is_pinned', { ascending: false })
@@ -140,6 +146,9 @@ export type FaqRow = {
   category_id: string | null
   position: number
   is_published: boolean
+  embedding_status: EmbeddingStatus
+  embedded_at: string | null
+  version: number
   created_at: string
   updated_at: string
 }
@@ -184,6 +193,31 @@ export async function fetchFaq(
     .maybeSingle()
   if (error) throw error
   return (data as FaqRow | null) ?? null
+}
+
+export type EmbeddingJobInfo = {
+  status: 'queued' | 'running' | 'done' | 'failed'
+  attempts: number
+  last_error: string | null
+  scheduled_at: string
+  started_at: string | null
+  finished_at: string | null
+}
+
+export async function fetchLatestEmbeddingJob(
+  supabase: SupabaseClient,
+  args: { kind: 'document' | 'faq'; sourceId: string },
+): Promise<EmbeddingJobInfo | null> {
+  const col = args.kind === 'document' ? 'document_id' : 'faq_id'
+  const { data, error } = await supabase
+    .from('knowledge_embedding_jobs')
+    .select('status, attempts, last_error, scheduled_at, started_at, finished_at')
+    .eq(col, args.sourceId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (error) throw error
+  return (data as EmbeddingJobInfo | null) ?? null
 }
 
 export async function fetchDocument(

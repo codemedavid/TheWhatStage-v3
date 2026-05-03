@@ -126,6 +126,36 @@ export async function updateFaq(raw: unknown) {
   revalidatePath('/dashboard/knowledge/faqs')
 }
 
+export async function reindexFaq(raw: unknown): Promise<void> {
+  const input = DeleteFaqInput.parse(raw)
+  const { supabase, userId } = await requireUser()
+
+  const { data: existing, error: readErr } = await supabase
+    .from('knowledge_faqs')
+    .select('version, answer')
+    .eq('id', input.id)
+    .single()
+  if (readErr) throw readErr
+  if (!existing) throw new Error('FAQ not found')
+  if (!existing.answer || String(existing.answer).trim() === '') {
+    throw new Error('Add an answer before indexing.')
+  }
+
+  await supabase
+    .from('knowledge_embedding_jobs')
+    .delete()
+    .eq('faq_id', input.id)
+    .eq('status', 'failed')
+
+  await enqueueEmbedJob(supabase, {
+    kind: 'faq',
+    sourceId: input.id,
+    userId,
+    sourceVersion: (existing.version as number | null) ?? 0,
+  })
+  revalidatePath('/dashboard/knowledge/faqs')
+}
+
 export async function deleteFaq(raw: unknown) {
   const input = DeleteFaqInput.parse(raw)
   const { supabase } = await requireUser()

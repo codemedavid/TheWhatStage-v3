@@ -16,11 +16,18 @@ import {
   saveDocument,
   setDocumentCategory,
   deleteDocument,
+  reindexDocument,
 } from '../actions/documents'
-import type { CategoryRow, DocumentRow, TagRow } from '../_lib/queries'
+import type {
+  CategoryRow,
+  DocumentRow,
+  EmbeddingStatus,
+  TagRow,
+} from '../_lib/queries'
 import { PinButton } from './PinButton'
 import { TagPicker } from './TagPicker'
 import { DocumentOutline } from './DocumentOutline'
+import { EmbeddingStatusBadge } from './EmbeddingStatusBadge'
 
 const AUTOSAVE_DEBOUNCE_MS = 1500
 
@@ -85,6 +92,20 @@ function DocumentEditorImpl({
   )
   const [savePending, startSave] = useTransition()
   const [deletePending, startDelete] = useTransition()
+  const [reindexPending, startReindex] = useTransition()
+  const [embedding, setEmbedding] = useState<{
+    status: EmbeddingStatus
+    embeddedAt: string | null
+    job: {
+      status: 'queued' | 'running' | 'done' | 'failed'
+      last_error: string | null
+      attempts: number
+    } | null
+  }>({
+    status: doc.embedding_status,
+    embeddedAt: doc.embedded_at,
+    job: null,
+  })
 
   // Refs decouple Save from React render cycles & editor mount state.
   const titleRef = useRef(title)
@@ -309,6 +330,65 @@ function DocumentEditorImpl({
     }
   }, [])
 
+  // Poll embedding status. Tight cadence while a job is in flight or stale,
+  // back off to 30s once indexed so we don't hammer Supabase for idle tabs.
+  useEffect(() => {
+    let cancelled = false
+    const tick = async () => {
+      try {
+        const res = await fetch(
+          `/dashboard/knowledge/${doc.id}/embedding-status`,
+          { cache: 'no-store' },
+        )
+        if (!res.ok) return
+        const json = (await res.json()) as {
+          embedding_status: EmbeddingStatus
+          embedded_at: string | null
+          job: {
+            status: 'queued' | 'running' | 'done' | 'failed'
+            last_error: string | null
+            attempts: number
+          } | null
+        }
+        if (cancelled) return
+        setEmbedding({
+          status: json.embedding_status,
+          embeddedAt: json.embedded_at,
+          job: json.job,
+        })
+      } catch {
+        // best-effort polling; ignore transient failures
+      }
+    }
+    void tick()
+    const interval = setInterval(() => {
+      const active =
+        embedding.status !== 'indexed' ||
+        embedding.job?.status === 'queued' ||
+        embedding.job?.status === 'running'
+      if (active || document.visibilityState === 'visible') void tick()
+    }, embedding.status === 'indexed' && embedding.job?.status !== 'failed'
+      ? 30_000
+      : 4_000)
+    return () => {
+      cancelled = true
+      clearInterval(interval)
+    }
+  }, [doc.id, embedding.status, embedding.job?.status])
+
+  const handleReindex = () => {
+    startReindex(async () => {
+      try {
+        await reindexDocument({ id: doc.id })
+        setErrorMsg(null)
+        setEmbedding((cur) => ({ ...cur, status: 'stale', job: { status: 'queued', last_error: null, attempts: 0 } }))
+        router.refresh()
+      } catch (e) {
+        setErrorMsg(e instanceof Error ? e.message : 'Reindex failed')
+      }
+    })
+  }
+
   const handleTitleChange = (v: string) => {
     setTitle(v)
     userInteractedRef.current = true
@@ -381,6 +461,13 @@ function DocumentEditorImpl({
             {title || 'Untitled'}
           </span>
           <SaveStatusBadge state={state} version={version} />
+          <EmbeddingStatusBadge
+            status={embedding.status}
+            embeddedAt={embedding.embeddedAt}
+            hasUnsavedChanges={state === 'dirty' || state === 'saving-draft'}
+            jobStatus={embedding.job?.status ?? null}
+            jobError={embedding.job?.last_error ?? null}
+          />
           <div className="ml-auto flex items-center gap-2">
             <PinButton id={doc.id} pinned={doc.is_pinned} size="sm" />
             <TagPicker
@@ -393,6 +480,15 @@ function DocumentEditorImpl({
               value={doc.category_id}
               onChange={handleCategoryChange}
             />
+            <button
+              type="button"
+              onClick={handleReindex}
+              disabled={reindexPending}
+              className="inline-flex h-8 items-center rounded-md border border-[#dadce0] bg-white px-3 text-[12.5px] font-medium text-[#5f6368] hover:border-[#059669] hover:text-[#059669] disabled:opacity-60"
+              title="Re-run embedding for this document"
+            >
+              {reindexPending ? 'Reindexing…' : 'Reindex'}
+            </button>
             <button
               type="button"
               onClick={handleDelete}
@@ -420,6 +516,29 @@ function DocumentEditorImpl({
         <div className="mx-auto mt-3 max-w-[920px] px-6">
           <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-[12.5px] text-red-700">
             {errorMsg}
+          </div>
+        </div>
+      )}
+
+      {embedding.job?.status === 'failed' && (
+        <div className="mx-auto mt-3 max-w-[920px] px-6">
+          <div className="flex items-start justify-between gap-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-[12.5px] text-red-700">
+            <div className="min-w-0">
+              <div className="font-medium">Embedding failed</div>
+              <div className="mt-0.5 break-words">
+                {embedding.job.last_error ?? 'Unknown error'} (after{' '}
+                {embedding.job.attempts} attempt
+                {embedding.job.attempts === 1 ? '' : 's'})
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={handleReindex}
+              disabled={reindexPending}
+              className="inline-flex h-7 shrink-0 items-center rounded-md border border-red-300 bg-white px-2.5 text-[12px] font-medium text-red-700 hover:bg-red-100 disabled:opacity-60"
+            >
+              {reindexPending ? 'Retrying…' : 'Retry'}
+            </button>
           </div>
         </div>
       )}

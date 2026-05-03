@@ -6,6 +6,7 @@ import type {
   TagRow,
 } from '../_lib/queries'
 import { PinButton } from './PinButton'
+import { EmbeddingStatusBadge } from './EmbeddingStatusBadge'
 
 export function DocumentList({
   documents,
@@ -83,6 +84,11 @@ export function DocumentList({
                       <span className="text-amber-600">Unsaved</span>
                     </>
                   )}
+                  <EmbeddingStatusBadge
+                    status={d.embedding_status}
+                    embeddedAt={d.embedded_at}
+                    hasUnsavedChanges={d.has_unsaved_changes}
+                  />
                 </div>
               </div>
               {cat ? (

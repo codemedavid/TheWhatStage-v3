@@ -151,6 +151,41 @@ export async function setDocumentCategory(raw: unknown) {
   revalidatePath('/dashboard/knowledge', 'layout')
 }
 
+// Force a re-embed: marks the source stale and (re-)arms a job. Useful when
+// the cron has been quiet, a previous job hit MAX_ATTEMPTS, or the user wants
+// to recompute after editing knowledge externally.
+export async function reindexDocument(raw: unknown): Promise<void> {
+  const input = DeleteDocumentInput.parse(raw)
+  const { supabase, userId } = await requireUser()
+
+  const { data: existing, error: readErr } = await supabase
+    .from('knowledge_documents')
+    .select('version, content_json')
+    .eq('id', input.id)
+    .single()
+  if (readErr) throw readErr
+  if (!existing) throw new Error('Document not found')
+  if (!existing.content_json) {
+    throw new Error('Save the document at least once before indexing.')
+  }
+
+  // Wipe any prior failed job so enqueue can insert a fresh one. The unique
+  // partial index only blocks queued/running rows so this is safe.
+  await supabase
+    .from('knowledge_embedding_jobs')
+    .delete()
+    .eq('document_id', input.id)
+    .eq('status', 'failed')
+
+  await enqueueEmbedJob(supabase, {
+    kind: 'document',
+    sourceId: input.id,
+    userId,
+    sourceVersion: (existing.version as number | null) ?? 0,
+  })
+  revalidatePath('/dashboard/knowledge', 'layout')
+}
+
 // Caller (client) navigates after delete — no redirect in the action.
 export async function deleteDocument(raw: unknown): Promise<void> {
   const input = DeleteDocumentInput.parse(raw)
