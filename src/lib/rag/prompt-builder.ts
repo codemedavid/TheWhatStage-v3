@@ -54,6 +54,7 @@ export interface BuiltPrompt {
   system: string;
   user: string;
   contextChunkIds: string[];
+  contextChunks: RetrievedChunk[];
 }
 
 function numbered(items: string[]): string {
@@ -115,10 +116,12 @@ export function buildPrompt(args: BuildPromptArgs): BuiltPrompt {
     .slice(0, max);
   const contextBlock = buildContextBlock(ranked);
 
+  const contextChunks = ranked.map(({ score: _score, ...c }) => c);
+
   // Legacy escape hatch: full freeform persona block.
   if (args.persona) {
     const system = `${args.persona}\n\n# Knowledge base context\n${contextBlock}`;
-    return { system, user: args.userQuery, contextChunkIds: ranked.map((c) => c.id) };
+    return { system, user: args.userQuery, contextChunkIds: ranked.map((c) => c.id), contextChunks };
   }
 
   const merged: ChatbotPersona = {
@@ -130,5 +133,6 @@ export function buildPrompt(args: BuildPromptArgs): BuiltPrompt {
     system: assembleSystemPrompt(merged, contextBlock),
     user: args.userQuery,
     contextChunkIds: ranked.map((c) => c.id),
+    contextChunks,
   };
 }

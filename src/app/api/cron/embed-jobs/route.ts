@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { enqueuePendingSources, runDueJobs } from '@/lib/rag/worker/embed-job';
+import { buildMediaRagText } from '@/lib/media/rag-text';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
@@ -56,6 +57,28 @@ export async function GET(req: Request) {
         version: data.version,
         status: data.status,
         ragEnabled: data.rag_enabled,
+      };
+    },
+    async fetchMediaAsset(id: string) {
+      const { data, error } = await client
+        .from('media_assets')
+        .select('name, slug, description, version, is_archived, media_folders!inner(name, slug, description)')
+        .eq('id', id)
+        .single();
+      if (error || !data) throw new Error(`media asset ${id} missing: ${error?.message}`);
+      const folder = Array.isArray(data.media_folders) ? data.media_folders[0] : data.media_folders;
+      return {
+        name: data.name,
+        version: data.version,
+        isArchived: data.is_archived,
+        ragText: buildMediaRagText({
+          folderName: folder.name,
+          folderSlug: folder.slug,
+          folderDescription: folder.description,
+          assetName: data.name,
+          assetSlug: data.slug,
+          assetDescription: data.description,
+        }),
       };
     },
   };

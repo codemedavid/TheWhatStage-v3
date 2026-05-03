@@ -129,7 +129,7 @@ export async function answerWithClassification(
   }
 
   const sourceTitles = await resolveSourceTitles(supabase, userId, built.contextChunkIds)
-  return { text, sourceTitles, stageChange, actionPage }
+  return { text, sourceTitles, media: [], stageChange, actionPage }
 }
 
 /**

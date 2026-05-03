@@ -7,12 +7,14 @@ import {
   retrieve,
 } from '@/lib/rag'
 import { getChatbotConfig } from './config'
+import { selectMediaForReply, type SelectedMediaAsset } from '@/lib/media/selector'
 
 export type AnswerHistory = { role: 'user' | 'assistant'; content: string }[]
 
 export interface AnswerResult {
   text: string
   sourceTitles: string[]
+  media: SelectedMediaAsset[]
 }
 
 export interface CampaignPersonaOverride {
@@ -79,6 +81,19 @@ export async function answer(
     maxContext: config.maxContext,
   })
 
+  const mediaPromise = selectMediaForReply({
+    client: supabase,
+    embedder,
+    userId,
+    customerMessage: message,
+    retrievedChunks: built.contextChunks,
+    rpcName: options.rpcName === 'match_knowledge_hybrid_service' ? 'match_media_assets_service' : 'match_media_assets',
+    limit: 4,
+  }).catch((err) => {
+    console.warn('[chatbot.media] selection failed', err)
+    return [] as SelectedMediaAsset[]
+  })
+
   const text = await llm.complete(
     [
       { role: 'system', content: built.system },
@@ -88,8 +103,11 @@ export async function answer(
     { temperature: config.temperature, maxTokens: 1500 },
   )
 
-  const sourceTitles = await resolveSourceTitles(supabase, userId, built.contextChunkIds)
-  return { text: text.trim(), sourceTitles }
+  const [sourceTitles, media] = await Promise.all([
+    resolveSourceTitles(supabase, userId, built.contextChunkIds),
+    mediaPromise,
+  ])
+  return { text: text.trim(), sourceTitles, media }
 }
 
 async function resolveSourceTitles(

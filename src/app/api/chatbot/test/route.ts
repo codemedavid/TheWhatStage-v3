@@ -8,6 +8,7 @@ import {
   createReranker,
   retrieve,
 } from '@/lib/rag'
+import { selectMediaForReply } from '@/lib/media/selector'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -113,8 +114,7 @@ export async function POST(req: NextRequest) {
           maxContext: config.maxContext,
         })
 
-        // Kick off title resolution in parallel; emit when ready instead of
-        // blocking the LLM stream.
+        // Kick off title resolution and media selection in parallel; emit when ready.
         const titlesPromise = resolveSourceTitles(supabase, userId, built.contextChunkIds)
           .then((titles) => {
             if (titles.length > 0) send({ type: 'sources', titles: titles.map((t) => t.title) })
@@ -122,6 +122,19 @@ export async function POST(req: NextRequest) {
           .catch((err) => {
             console.warn('[chat] resolveSourceTitles failed', err)
           })
+
+        const mediaPromise = selectMediaForReply({
+          client: supabase,
+          embedder,
+          userId,
+          customerMessage: message,
+          retrievedChunks: built.contextChunks,
+          limit: 4,
+        })
+          .then((media) => {
+            if (media.length > 0) send({ type: 'media', media })
+          })
+          .catch((err) => console.warn('[chat.test.media] selection failed', err))
 
         const messages = [
           { role: 'system' as const, content: built.system },
@@ -146,6 +159,7 @@ export async function POST(req: NextRequest) {
         }
         console.log('[chat.timing] llm done', { ms: Date.now() - tFirstToken })
         await titlesPromise
+        await mediaPromise
         send({ type: 'done' })
       } catch (err) {
         send({ type: 'error', message: (err as Error)?.message ?? 'unknown error' })
