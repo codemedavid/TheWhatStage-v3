@@ -1,8 +1,10 @@
 'use server'
+import { after } from 'next/server'
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { enqueueEmbedJob } from '@/lib/rag'
+import { processSourceInline } from '@/lib/rag/process-now'
 import {
   CreateDocumentInput,
   AutosaveDocumentInput,
@@ -122,6 +124,16 @@ export async function saveDocument(raw: unknown) {
     sourceVersion: data.version as number,
   })
 
+  // Run the embedding inline on this Fluid Compute instance after the response
+  // is sent. Cron remains as a safety net if the instance dies mid-flight.
+  after(async () => {
+    try {
+      await processSourceInline({ kind: 'document', sourceId: input.id })
+    } catch (e) {
+      console.error('[saveDocument] inline embed failed', e)
+    }
+  })
+
   revalidatePath('/dashboard/knowledge', 'layout')
   return {
     version: data.version as number,
@@ -182,6 +194,13 @@ export async function reindexDocument(raw: unknown): Promise<void> {
     sourceId: input.id,
     userId,
     sourceVersion: (existing.version as number | null) ?? 0,
+  })
+  after(async () => {
+    try {
+      await processSourceInline({ kind: 'document', sourceId: input.id })
+    } catch (e) {
+      console.error('[reindexDocument] inline embed failed', e)
+    }
   })
   revalidatePath('/dashboard/knowledge', 'layout')
 }

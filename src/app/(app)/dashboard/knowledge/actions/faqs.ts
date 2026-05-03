@@ -1,8 +1,20 @@
 'use server'
+import { after } from 'next/server'
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { enqueueEmbedJob } from '@/lib/rag'
+import { processSourceInline } from '@/lib/rag/process-now'
+
+function embedAfterResponse(sourceId: string, label: string) {
+  after(async () => {
+    try {
+      await processSourceInline({ kind: 'faq', sourceId })
+    } catch (e) {
+      console.error(`[${label}] inline embed failed`, e)
+    }
+  })
+}
 import {
   CreateFaqInput,
   UpdateFaqInput,
@@ -72,6 +84,7 @@ export async function createFaq(raw: unknown): Promise<{ id: string }> {
     userId,
     sourceVersion: (data.version as number | null) ?? 0,
   })
+  embedAfterResponse(newId, 'createFaq')
 
   revalidatePath('/dashboard/knowledge/faqs')
   return { id: newId }
@@ -122,6 +135,7 @@ export async function updateFaq(raw: unknown) {
     userId,
     sourceVersion: nextVersion,
   })
+  embedAfterResponse(input.id, 'updateFaq')
 
   revalidatePath('/dashboard/knowledge/faqs')
 }
@@ -153,6 +167,7 @@ export async function reindexFaq(raw: unknown): Promise<void> {
     userId,
     sourceVersion: (existing.version as number | null) ?? 0,
   })
+  embedAfterResponse(input.id, 'reindexFaq')
   revalidatePath('/dashboard/knowledge/faqs')
 }
 
