@@ -99,11 +99,11 @@ Saving turns into: `{insert: N, update: M, delete: K, skip: rest}`. On a small e
 
 Saving a document inserts a row into `knowledge_embedding_jobs` (status `queued`). A worker claims jobs with `for update skip locked`, runs the ingest, and marks `done` or `failed` with backoff.
 
-Worker host options (decide before slice 6):
-- **Vercel Cron + route handler** (every 30s, simple, fits Fluid Compute, no external infra).
-- Long-poll script in a side container (Railway/Fly) — only if Vercel Cron cadence becomes a bottleneck.
+Worker host:
+- **Supabase Cron + route handler** via `pg_cron` and `pg_net`.
+- Long-poll script in a side container (Railway/Fly) — only if cron cadence becomes a bottleneck.
 
-v1 default: Vercel Cron route handler at `/api/cron/embed-jobs`.
+v1 default: Supabase Cron calls `/api/cron/embed-jobs`.
 
 ### 4.5 Retrieval pipeline
 
@@ -282,7 +282,7 @@ src/lib/rag/
   llm.ts                # HF router OpenAI client, streaming
   worker/
     embed-job.ts        # claim → ingest → mark done/failed
-    schedule.ts         # called by Vercel Cron route handler
+    schedule.ts         # called by Supabase Cron route handler
   index.ts              # public API: ingestDocument, query
 ```
 

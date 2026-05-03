@@ -4,6 +4,12 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
+/**
+ * Supabase Cron safety net. Scheduled from pg_cron via pg_net.
+ * Authentication: scheduled requests send `Authorization: Bearer ${CRON_SECRET}`;
+ * we verify it to keep ad-hoc external calls out.
+ */
+
 export async function GET(req: Request) {
   const isDev = process.env.NODE_ENV !== 'production'
   if (!isDev) {

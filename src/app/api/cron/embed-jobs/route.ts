@@ -6,12 +6,12 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
 
 /**
- * Vercel Cron entry point. Scheduled via vercel.ts / vercel.json.
- * Authentication: Vercel sets `Authorization: Bearer ${CRON_SECRET}` on
- * scheduled requests; we verify it to keep ad-hoc external calls out.
+ * Supabase Cron entry point. Scheduled from pg_cron via pg_net.
+ * Authentication: scheduled requests send `Authorization: Bearer ${CRON_SECRET}`;
+ * we verify it to keep ad-hoc external calls out.
  */
 export async function GET(req: Request) {
-  // In production we require Vercel Cron's bearer token. In dev we let
+  // In production we require the cron bearer token. In dev we let
   // requests through so you can hit this endpoint from a browser or curl.
   const isDev = process.env.NODE_ENV !== 'production';
   if (!isDev) {

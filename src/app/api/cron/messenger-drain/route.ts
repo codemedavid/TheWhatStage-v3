@@ -5,7 +5,7 @@ export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
 /**
- * Vercel Cron safety net. Fires the messenger worker via internal POST,
+ * Supabase Cron safety net. Fires the messenger worker via internal POST,
  * fire-and-forget through `after()` so this cron route returns fast and
  * the actual drain runs on the worker invocation's own 300s budget.
  *
@@ -13,8 +13,8 @@ export const maxDuration = 60
  * webhook handler — this cron exists for cases where webhooks burst-fail
  * or the queue accumulates while the worker invocations were maxed out.
  *
- * Authentication: Vercel sets `Authorization: Bearer ${CRON_SECRET}` on
- * scheduled requests; we verify it to keep ad-hoc external calls out.
+ * Authentication: scheduled requests send `Authorization: Bearer ${CRON_SECRET}`;
+ * we verify it to keep ad-hoc external calls out.
  */
 export async function GET(req: Request) {
   const isDev = process.env.NODE_ENV !== 'production'
