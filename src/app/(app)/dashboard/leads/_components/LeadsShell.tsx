@@ -34,7 +34,7 @@ function subscribeTheme(cb: () => void): () => void {
 }
 
 export function LeadsShell({ children }: { children: ReactNode }) {
-  const theme = useSyncExternalStore(subscribeTheme, readTheme, () => 'light')
+  const theme = useSyncExternalStore<Theme>(subscribeTheme, readTheme, () => 'light')
 
   const setTheme = useCallback((next: Theme) => {
     if (typeof window === 'undefined') return
