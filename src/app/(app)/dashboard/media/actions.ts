@@ -1,8 +1,10 @@
 'use server'
 
+import { after } from 'next/server'
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { enqueueEmbedJob } from '@/lib/rag'
+import { processSourceInline } from '@/lib/rag/process-now'
 import { createClient } from '@/lib/supabase/server'
 import { CreateMediaFolderInput, UpdateMediaAssetInput, UpdateMediaFolderInput } from '@/lib/media/schemas'
 import { makeSlug } from '@/lib/media/slug'
@@ -59,10 +61,23 @@ export async function updateMediaFolder(formData: FormData): Promise<void> {
     .eq('folder_id', input.id)
     .eq('user_id', userId)
     .eq('is_archived', false)
+  const queuedAssetIds: string[] = []
   for (const asset of assets ?? []) {
     const nextVersion = Number(asset.version ?? 0) + 1
     await supabase.from('media_assets').update({ version: nextVersion, embedding_status: 'stale' }).eq('id', asset.id)
     await enqueueEmbedJob(supabase, { kind: 'media_asset', sourceId: asset.id, userId, sourceVersion: nextVersion })
+    queuedAssetIds.push(asset.id)
+  }
+  if (queuedAssetIds.length) {
+    after(async () => {
+      for (const id of queuedAssetIds) {
+        try {
+          await processSourceInline({ kind: 'media_asset', sourceId: id })
+        } catch (e) {
+          console.error('[updateMediaFolder] inline embed failed', e)
+        }
+      }
+    })
   }
   revalidatePath('/dashboard/media')
 }
@@ -99,6 +114,13 @@ export async function updateMediaAsset(formData: FormData): Promise<void> {
     await supabase.from('knowledge_chunks').delete().eq('media_asset_id', input.id).eq('user_id', userId)
   } else {
     await enqueueEmbedJob(supabase, { kind: 'media_asset', sourceId: input.id, userId, sourceVersion: nextVersion })
+    after(async () => {
+      try {
+        await processSourceInline({ kind: 'media_asset', sourceId: input.id })
+      } catch (e) {
+        console.error('[updateMediaAsset] inline embed failed', e)
+      }
+    })
   }
   revalidatePath('/dashboard/media')
 }

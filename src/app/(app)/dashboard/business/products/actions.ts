@@ -1,10 +1,12 @@
 'use server'
 
+import { after } from 'next/server'
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { ProductFormInput } from '@/lib/business/schemas'
 import { buildProductRagText } from '@/lib/business/product-rag'
 import { enqueueEmbedJob } from '@/lib/rag'
+import { processSourceInline } from '@/lib/rag/process-now'
 import { createClient } from '@/lib/supabase/server'
 
 async function requireUser() {
@@ -128,11 +130,19 @@ export async function saveProduct(formData: FormData): Promise<void> {
   if (!updated) throw new Error('Product not found')
 
   if (input.status === 'published' && input.rag_enabled) {
+    const productId = input.id
     await enqueueEmbedJob(supabase, {
       kind: 'business_item',
-      sourceId: input.id,
+      sourceId: productId,
       userId,
       sourceVersion: nextVersion,
+    })
+    after(async () => {
+      try {
+        await processSourceInline({ kind: 'business_item', sourceId: productId })
+      } catch (e) {
+        console.error('[saveProduct] inline embed failed', e)
+      }
     })
   } else {
     await supabase.from('knowledge_chunks').delete().eq('business_item_id', input.id).eq('user_id', userId)

@@ -1,5 +1,6 @@
-import { NextResponse } from 'next/server'
+import { NextResponse, after } from 'next/server'
 import { enqueueEmbedJob } from '@/lib/rag'
+import { processSourceInline } from '@/lib/rag/process-now'
 import { makeSlug } from '@/lib/media/slug'
 import { createClient } from '@/lib/supabase/server'
 
@@ -29,6 +30,7 @@ export async function POST(req: Request) {
   if (folderErr || !folder) return NextResponse.json({ error: 'Folder not found' }, { status: 404 })
 
   const created: string[] = []
+  const queuedAssetIds: string[] = []
   try {
     for (const file of files) {
       if (!ALLOWED.has(file.type)) {
@@ -73,6 +75,18 @@ export async function POST(req: Request) {
         sourceId: inserted.id,
         userId: user.id,
         sourceVersion: inserted.version,
+      })
+      queuedAssetIds.push(inserted.id)
+    }
+    if (queuedAssetIds.length) {
+      after(async () => {
+        for (const id of queuedAssetIds) {
+          try {
+            await processSourceInline({ kind: 'media_asset', sourceId: id })
+          } catch (e) {
+            console.error('[mediaUpload] inline embed failed', e)
+          }
+        }
       })
     }
     return NextResponse.json({ ok: true })
