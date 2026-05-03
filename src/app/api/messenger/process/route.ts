@@ -5,12 +5,14 @@ import { decryptToken } from '@/lib/facebook/crypto'
 import {
   fetchMessengerProfile,
   sendMessengerButton,
+  sendMessengerImage,
   sendMessengerReaction,
   sendMessengerSenderAction,
   sendMessengerText,
 } from '@/lib/facebook/messenger'
 import { deeplinkActionPageUrl } from '@/lib/action-pages/urls'
 import { answer, type AnswerHistory } from '@/lib/chatbot/answer'
+import { type SelectedMediaAsset } from '@/lib/media/selector'
 import {
   answerWithClassification,
   applyStageChange,
@@ -44,6 +46,7 @@ interface JobRow {
   attempts: number
   outbound_text_fb_id: string | null
   outbound_button_fb_id: string | null
+  outbound_media: Array<{ media_asset_id: string; fb_message_id: string }>
 }
 
 interface ThreadRow {
@@ -125,7 +128,10 @@ async function claimJobs(admin: AdminClient, limit: number): Promise<JobRow[]> {
     console.error('[messenger.worker] claim rpc failed', error)
     return []
   }
-  return (data ?? []) as JobRow[]
+  return ((data ?? []) as JobRow[]).map((row) => ({
+    ...row,
+    outbound_media: Array.isArray(row.outbound_media) ? row.outbound_media : [],
+  }))
 }
 
 async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
@@ -259,6 +265,7 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
       let reply = ''
       let stageChange: Awaited<ReturnType<typeof answerWithClassification>>['stageChange'] = null
       let actionPageChoice: Awaited<ReturnType<typeof answerWithClassification>>['actionPage'] = null
+      let selectedMedia: SelectedMediaAsset[] = []
       if ((classifyEnabled && stages.length > 0) || actionPages.length > 0) {
         try {
           const r = await answerWithClassification(
@@ -283,6 +290,7 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
           campaignPersona,
         })
         reply = r.text.trim()
+        selectedMedia = r.media
       }
       if (!reply) {
         await markDone(admin, job.id, 'skipped', 'empty reply')
@@ -333,6 +341,8 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
           inbound_since_classify: 0,
         })
         .eq('id', thread.id)
+
+      await sendSelectedMedia(admin, { job, thread, pageToken, selectedMedia })
 
       // Send action page as a separate button message after the text reply.
       if (actionPageChoice) {
@@ -867,4 +877,53 @@ async function markDone(
       last_error: note,
     })
     .eq('id', jobId)
+}
+
+async function sendSelectedMedia(
+  admin: AdminClient,
+  args: {
+    job: JobRow
+    thread: ThreadRow
+    pageToken: string
+    selectedMedia: SelectedMediaAsset[]
+  },
+): Promise<void> {
+  const sent = [...args.job.outbound_media]
+  const sentIds = new Set(sent.map((m) => m.media_asset_id))
+
+  for (const asset of args.selectedMedia.slice(0, 4)) {
+    if (sentIds.has(asset.id)) continue
+    try {
+      const { data: signed, error: signErr } = await admin.storage
+        .from('media-assets')
+        .createSignedUrl(asset.storagePath, 60 * 60)
+      if (signErr || !signed?.signedUrl) throw signErr ?? new Error('signed URL missing')
+
+      const fb = await sendMessengerImage({
+        pageAccessToken: args.pageToken,
+        recipientPsid: args.thread.psid,
+        imageUrl: signed.signedUrl,
+      })
+      sent.push({ media_asset_id: asset.id, fb_message_id: fb.message_id })
+      sentIds.add(asset.id)
+      await admin.from('messenger_jobs').update({ outbound_media: sent }).eq('id', args.job.id)
+
+      const { error: insertErr } = await admin.from('messenger_messages').insert({
+        thread_id: args.thread.id,
+        user_id: args.thread.user_id,
+        direction: 'outbound',
+        sender: 'bot',
+        fb_message_id: fb.message_id,
+        media_asset_id: asset.id,
+        body: `[image] ${asset.name}`,
+        attachments: [{ type: 'image', media_asset_id: asset.id, storage_path: asset.storagePath }],
+      })
+      if (insertErr && (insertErr as { code?: string }).code !== '23505') throw insertErr
+    } catch (e) {
+      console.error('[messenger.worker] media send failed', {
+        assetId: asset.id,
+        err: e instanceof Error ? e.message : String(e),
+      })
+    }
+  }
 }

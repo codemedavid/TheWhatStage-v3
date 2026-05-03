@@ -135,6 +135,28 @@ export async function sendMessengerReaction(args: {
   })
 }
 
+export async function sendMessengerImage(args: {
+  pageAccessToken: string
+  recipientPsid: string
+  imageUrl: string
+}): Promise<{ message_id: string }> {
+  const url = new URL(`${GRAPH}/me/messages`)
+  url.searchParams.set('access_token', args.pageAccessToken)
+  return postJson<{ message_id: string }>(url.toString(), {
+    recipient: { id: args.recipientPsid },
+    messaging_type: 'RESPONSE',
+    message: {
+      attachment: {
+        type: 'image',
+        payload: {
+          url: args.imageUrl,
+          is_reusable: true,
+        },
+      },
+    },
+  })
+}
+
 export interface MessengerProfile {
   firstName: string | null
   lastName: string | null
