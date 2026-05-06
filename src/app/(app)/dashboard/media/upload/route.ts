@@ -49,7 +49,6 @@ export async function POST(req: Request) {
           storage_path: 'pending',
           mime_type: file.type,
           byte_size: file.size,
-          version: Date.now(),
         })
         .select('id, version')
         .single()

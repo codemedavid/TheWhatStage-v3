@@ -202,7 +202,7 @@ function PageTable({ pages }: { pages: ActionPageListItem[] }) {
         return (
           <Link
             key={p.id}
-            href={`/dashboard/action-pages/${p.id}`}
+            href={`/dashboard/action-pages/${p.id}/submissions`}
             className="apl-tr"
           >
             <div className="apl-col-title">
@@ -247,7 +247,7 @@ function PageCard({ p }: { p: ActionPageListItem }) {
   const meta = kindMeta(p.kind)
   const updated = new Date(p.updated_at)
   return (
-    <Link href={`/dashboard/action-pages/${p.id}`} className="apl-card">
+    <Link href={`/dashboard/action-pages/${p.id}/submissions`} className="apl-card">
       <div className="apl-card-top">
         <KindGlyph tint={meta.tint} icon={meta.icon} size={32} />
         <StatusPill status={p.status} />

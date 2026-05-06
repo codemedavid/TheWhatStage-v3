@@ -2,14 +2,27 @@
 
 import { useState, useTransition } from 'react'
 import type { ChatbotConfig } from '@/lib/chatbot/config'
+import type { MediaAssetRow, MediaFolderRow } from '@/app/(app)/dashboard/media/_lib/queries'
 import { saveChatbotConfig } from '../actions'
 import { RuleList } from './RuleList'
+import { MentionTextarea } from './MentionTextarea'
 
-export function ConfigForm({ initial }: { initial: ChatbotConfig }) {
+type Tab = 'personality' | 'instructions'
+
+export function ConfigForm({
+  initial,
+  mediaFolders,
+  mediaAssets,
+}: {
+  initial: ChatbotConfig
+  mediaFolders: MediaFolderRow[]
+  mediaAssets: MediaAssetRow[]
+}) {
   const [pending, startTransition] = useTransition()
   const [saved, setSaved] = useState(false)
   const [dirty, setDirty] = useState(false)
   const [persona, setPersona] = useState(initial.persona)
+  const [tab, setTab] = useState<Tab>('instructions')
 
   function onSubmit(formData: FormData) {
     setSaved(false)
@@ -49,77 +62,127 @@ export function ConfigForm({ initial }: { initial: ChatbotConfig }) {
         </div>
       </div>
 
-      {/* Personality */}
+      {/* Tabbed: Personality & Rules / Instructions */}
       <div className="cb-section">
-        <div className="cb-section-head">
-          <h2>Personality</h2>
-          <p>Describe identity and voice. The system prompt prepends this with structure.</p>
+        <div className="cb-tabs">
+          <button
+            type="button"
+            className={`cb-tab${tab === 'personality' ? ' active' : ''}`}
+            onClick={() => setTab('personality')}
+          >
+            Personality &amp; Rules
+          </button>
+          <button
+            type="button"
+            className={`cb-tab${tab === 'instructions' ? ' active' : ''}`}
+            onClick={() => setTab('instructions')}
+          >
+            Instructions
+          </button>
         </div>
-        <div className="cb-section-body">
-          <div className="cb-field">
-            <textarea
-              id="persona"
-              name="persona"
-              rows={6}
-              value={persona}
-              onChange={(e) => setPersona(e.target.value)}
-              className="cb-textarea cb-textarea-tall"
-              placeholder="One paragraph: who is this assistant, what tone, what business?"
-            />
-            <div className="cb-field-help">{wordCount} words</div>
-          </div>
-        </div>
-      </div>
 
-      {/* Rules */}
-      <div className="cb-section">
-        <div className="cb-section-head">
-          <h2>
-            Rules
-            <span className="cb-head-tag">
-              {(initial.doRules?.length ?? 0) + (initial.dontRules?.length ?? 0)}
-            </span>
-          </h2>
-          <p>Hard constraints that override personality.</p>
-        </div>
-        <div className="cb-section-body">
-          <div className="cb-rule-cols">
-            <div className="cb-rule-col do">
-              <div className="cb-rule-col-head">
-                <div className="cb-rule-col-icon" aria-hidden>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
-                </div>
-                <div>
-                  <h3>DO</h3>
-                  <p>Things the assistant should always do</p>
-                </div>
+        <div style={{ display: tab === 'personality' ? 'block' : 'none' }}>
+            {/* Personality */}
+            <div className="cb-section-head">
+              <h2>Personality</h2>
+              <p>Describe identity and voice. The system prompt prepends this with structure.</p>
+            </div>
+            <div className="cb-section-body">
+              <div className="cb-field">
+                <textarea
+                  id="persona"
+                  name="persona"
+                  rows={6}
+                  value={persona}
+                  onChange={(e) => setPersona(e.target.value)}
+                  className="cb-textarea cb-textarea-tall"
+                  placeholder="One paragraph: who is this assistant, what tone, what business?"
+                />
+                <div className="cb-field-help">{wordCount} words</div>
               </div>
-              <RuleList
-                name="doRules"
-                initial={initial.doRules}
-                placeholder="e.g. Mirror the user's language."
-                addLabel="Add DO rule"
-              />
             </div>
 
-            <div className="cb-rule-col dont">
-              <div className="cb-rule-col-head">
-                <div className="cb-rule-col-icon" aria-hidden>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+            {/* Rules */}
+            <div className="cb-section-head" style={{ marginTop: 4 }}>
+              <h2>
+                Rules
+                <span className="cb-head-tag">
+                  {(initial.doRules?.length ?? 0) + (initial.dontRules?.length ?? 0)}
+                </span>
+              </h2>
+              <p>Hard constraints that override personality.</p>
+            </div>
+            <div className="cb-section-body">
+              <div className="cb-rule-cols">
+                <div className="cb-rule-col do">
+                  <div className="cb-rule-col-head">
+                    <div className="cb-rule-col-icon" aria-hidden>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+                    </div>
+                    <div>
+                      <h3>DO</h3>
+                      <p>Things the assistant should always do</p>
+                    </div>
+                  </div>
+                  <RuleList
+                    name="doRules"
+                    initial={initial.doRules}
+                    placeholder="e.g. Mirror the user's language."
+                    addLabel="Add DO rule"
+                  />
                 </div>
-                <div>
-                  <h3>DON&apos;T</h3>
-                  <p>Things the assistant must never do</p>
+
+                <div className="cb-rule-col dont">
+                  <div className="cb-rule-col-head">
+                    <div className="cb-rule-col-icon" aria-hidden>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+                    </div>
+                    <div>
+                      <h3>DON&apos;T</h3>
+                      <p>Things the assistant must never do</p>
+                    </div>
+                  </div>
+                  <RuleList
+                    name="dontRules"
+                    initial={initial.dontRules}
+                    placeholder="e.g. Never invent prices or links."
+                    addLabel="Add DON'T rule"
+                  />
                 </div>
               </div>
-              <RuleList
-                name="dontRules"
-                initial={initial.dontRules}
-                placeholder="e.g. Never invent prices or links."
-                addLabel="Add DON'T rule"
-              />
             </div>
-          </div>
+        </div>
+
+        <div style={{ display: tab === 'instructions' ? 'block' : 'none' }}>
+            <div className="cb-section-head">
+              <h2>Instructions</h2>
+              <p>
+                Tell the bot what to focus on and how to handle specific situations.
+                This is injected at the top of every prompt, above personality and rules.
+              </p>
+            </div>
+            <div className="cb-section-body">
+              <div className="cb-field">
+                <MentionTextarea
+                  id="instructions"
+                  name="instructions"
+                  rows={10}
+                  defaultValue={initial.instructions}
+                  className="cb-textarea cb-textarea-instructions"
+                  placeholder={
+                    'Examples:\n' +
+                    '• When someone asks about pricing, always lead with the value before the number.\n' +
+                    '• Type @ to attach an image, # to reference a folder.\n' +
+                    '• Always ask for the customer\'s name if it hasn\'t been shared yet.'
+                  }
+                  assets={mediaAssets}
+                  folders={mediaFolders}
+                />
+                <div className="cb-field-help">
+                  Free-form directives. Use <code>@image-slug</code> to attach a specific image and <code>#folder-slug</code> to let the bot pick the best one from a folder.
+                </div>
+              </div>
+            </div>
         </div>
       </div>
 

@@ -2,7 +2,19 @@
 
 import { useRef, useState } from 'react'
 
-type Msg = { role: 'user' | 'assistant'; content: string; sources?: string[] }
+type MediaThumb = {
+  id: string
+  name: string
+  slug: string
+  signedUrl: string | null
+}
+
+type Msg = {
+  role: 'user' | 'assistant'
+  content: string
+  sources?: string[]
+  media?: MediaThumb[]
+}
 
 const SUGGESTED_QS = [
   'What are your prices?',
@@ -61,12 +73,13 @@ export function TestChat({ name = 'Assistant' }: { name?: string }) {
       let buf = ''
       let assistant = ''
       let sources: string[] = []
+      let media: MediaThumb[] = []
       let pendingFlush: ReturnType<typeof setTimeout> | null = null
       const flushAssistant = () => {
         pendingFlush = null
         setMessages((m) => {
           const copy = [...m]
-          copy[copy.length - 1] = { role: 'assistant', content: assistant, sources }
+          copy[copy.length - 1] = { role: 'assistant', content: assistant, sources, media }
           return copy
         })
       }
@@ -88,6 +101,15 @@ export function TestChat({ name = 'Assistant' }: { name?: string }) {
               | { type: 'ack' }
               | { type: 'delta'; text: string }
               | { type: 'sources'; titles: string[] }
+              | {
+                  type: 'media'
+                  media: Array<{
+                    id: string
+                    name: string
+                    slug: string
+                    signedUrl?: string | null
+                  }>
+                }
               | { type: 'done' }
               | { type: 'error'; message: string }
             if (ev.type === 'delta') {
@@ -97,14 +119,26 @@ export function TestChat({ name = 'Assistant' }: { name?: string }) {
               sources = ev.titles
               setMessages((m) => {
                 const copy = [...m]
-                copy[copy.length - 1] = { role: 'assistant', content: assistant, sources }
+                copy[copy.length - 1] = { role: 'assistant', content: assistant, sources, media }
+                return copy
+              })
+            } else if (ev.type === 'media') {
+              media = ev.media.map((mItem) => ({
+                id: mItem.id,
+                name: mItem.name,
+                slug: mItem.slug,
+                signedUrl: mItem.signedUrl ?? null,
+              }))
+              setMessages((m) => {
+                const copy = [...m]
+                copy[copy.length - 1] = { role: 'assistant', content: assistant, sources, media }
                 return copy
               })
             } else if (ev.type === 'error') {
               assistant += `\n\n[error] ${ev.message}`
               setMessages((m) => {
                 const copy = [...m]
-                copy[copy.length - 1] = { role: 'assistant', content: assistant, sources }
+                copy[copy.length - 1] = { role: 'assistant', content: assistant, sources, media }
                 return copy
               })
             }
@@ -199,6 +233,20 @@ export function TestChat({ name = 'Assistant' }: { name?: string }) {
                     <div className="whitespace-pre-wrap">{m.content}</div>
                   ) : (
                     <span className="cb-typing"><i /><i /><i /></span>
+                  )}
+                  {m.role === 'assistant' && m.media && m.media.length > 0 && (
+                    <div className="cb-msg-media">
+                      {m.media.map((thumb) => (
+                        <div key={thumb.id} className="cb-msg-media-thumb" title={thumb.name}>
+                          {thumb.signedUrl ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={thumb.signedUrl} alt={thumb.name} loading="lazy" />
+                          ) : (
+                            <span className="cb-msg-media-fallback">{thumb.name}</span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
                   )}
                   {m.role === 'assistant' && m.sources && m.sources.length > 0 && (
                     <div className="cb-msg-sources">

@@ -6,7 +6,13 @@ import { parseSubmission } from '@/lib/action-pages/dispatch'
 import '@/lib/action-pages/handlers' // side-effect: register per-kind handlers
 import { isActionPageKind, type ActionPageKind } from '@/lib/action-pages/kinds'
 import { decryptToken } from '@/lib/facebook/crypto'
-import { sendMessengerText } from '@/lib/facebook/messenger'
+import { appendLeadContacts, extractContactsFromSubmission } from '@/lib/leads/contact-append'
+import { sendOutbound } from '@/lib/messenger/outbound'
+import {
+  dispatchStageEntered,
+  dispatchSubmissionReceived,
+  dispatchBookingOffsets,
+} from '@/lib/workflow/dispatcher'
 import type { PipelineRule } from '@/app/(app)/dashboard/action-pages/_lib/schemas'
 
 export const dynamic = 'force-dynamic'
@@ -162,6 +168,10 @@ export async function POST(req: NextRequest) {
     null
   const ua = req.headers.get('user-agent')
 
+  // A3: capture consent fields from the form payload (boolean or "true"/"false")
+  const marketingOptin = payload.marketing_optin === true || payload.marketing_optin === 'true'
+  const reminderOptin  = payload.reminder_optin  === true || payload.reminder_optin  === 'true'
+
   const { data: subInsert, error: subErr } = await admin
     .from('action_page_submissions')
     .insert({
@@ -175,6 +185,8 @@ export async function POST(req: NextRequest) {
       ip_hash: hashIp(ip),
       user_agent: ua,
       meta: businessOrderId ? { business_order_id: businessOrderId } : null,
+      marketing_optin: marketingOptin,
+      reminder_optin:  reminderOptin,
     })
     .select('id')
     .single<{ id: string }>()
@@ -192,6 +204,87 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // A3/M5: persist marketing opt-in into the consent registry so the channel
+  // policy resolver can find it when sending outside the 24-hour window.
+  if (marketingOptin && messengerThreadId) {
+    void admin
+      .from('messenger_marketing_optins')
+      .upsert(
+        { thread_id: messengerThreadId, user_id: page.user_id, source: 'action_page_submission' },
+        { onConflict: 'thread_id' },
+      )
+      .then(({ error: e }) => {
+        if (e) console.warn('[action-pages.submit] marketing_optins upsert failed', { threadId: messengerThreadId, err: e.message })
+      })
+  }
+
+  // Append any phone/email values captured in the submission to the lead's
+  // contact arrays. Best-effort — never blocks the response.
+  if (leadId) {
+    try {
+      const contacts = extractContactsFromSubmission(page.kind, parsed.data, page.config)
+      await appendLeadContacts(admin, leadId, contacts)
+    } catch (e) {
+      console.warn('[action-pages.submit] contact append failed', {
+        leadId,
+        err: e instanceof Error ? e.message : String(e),
+      })
+    }
+  }
+
+  // Dispatch workflow triggers. Best-effort — never blocks the response.
+  if (subInsert?.id) {
+    dispatchSubmissionReceived(admin, {
+      userId: page.user_id,
+      submissionId: subInsert.id,
+      actionPageId: page.id,
+      outcome: parsed.outcome,
+      leadId: leadId ?? null,
+      threadId: messengerThreadId ?? null,
+    }).catch((e) => console.error('[action-pages.submit] dispatchSubmissionReceived threw', e))
+  }
+
+  // For booking submissions: persist a structured booking_events row (A1/A2)
+  // then dispatch time-offset workflow triggers (-3d, -2h, -10m).
+  if (parsed.outcome === 'booked' && subInsert?.id) {
+    const slotIso = typeof parsed.data.slot_iso === 'string' ? parsed.data.slot_iso : null
+    const tz = typeof (page.config as Record<string, unknown>).timezone === 'string'
+      ? (page.config as Record<string, unknown>).timezone as string
+      : 'UTC'
+    if (slotIso) {
+      ;(async () => {
+        const { data: bkRow, error: bkErr } = await admin
+          .from('booking_events')
+          .insert({
+            user_id: page.user_id,
+            submission_id: subInsert.id,
+            lead_id: leadId ?? null,
+            event_at: new Date(slotIso).toISOString(),
+            timezone: tz,
+            duration_minutes: typeof (page.config as Record<string, unknown>).duration_min === 'number'
+              ? (page.config as Record<string, unknown>).duration_min as number
+              : null,
+            status: 'scheduled',
+          })
+          .select('id')
+          .single<{ id: string }>()
+        if (bkErr) {
+          console.warn('[action-pages.submit] booking_events insert failed', bkErr.message)
+          return
+        }
+        if (bkRow) {
+          await dispatchBookingOffsets(admin, {
+            userId: page.user_id,
+            bookingEventId: bkRow.id,
+            leadId: leadId ?? null,
+            threadId: messengerThreadId ?? null,
+            eventAt: new Date(slotIso).toISOString(),
+          })
+        }
+      })().catch((e) => console.error('[action-pages.submit] booking_events chain threw', e))
+    }
+  }
+
   // Apply pipeline rule best-effort. For catalog, the order remains source of
   // truth even if action_page_submissions linkage failed.
   if (leadId) {
@@ -200,10 +293,12 @@ export async function POST(req: NextRequest) {
       try {
         await applyStageMove({
           adminClient: admin,
-          leadId,
           userId: page.user_id,
+          leadId,
           toStageId: rule.to_stage_id,
-          reason: rule.reason ?? `Action page: ${parsed.outcome}`,
+          outcome: parsed.outcome,
+          submissionId: subInsert?.id ?? null,
+          threadId: messengerThreadId,
         })
       } catch (e) {
         console.warn('[action-pages.submit] stage move failed', {
@@ -233,27 +328,34 @@ export async function POST(req: NextRequest) {
   const echo =
     (matchedRule?.notify_text && matchedRule.notify_text.trim()) ||
     page.notification_template?.text
-  if (echo && psid && fbPageId) {
+  if (echo && psid && fbPageId && messengerThreadId) {
     try {
       const { data: pageData } = await admin
         .from('facebook_pages')
         .select('page_access_token')
         .eq('id', fbPageId)
         .maybeSingle<{ page_access_token: string }>()
+      const { data: threadData } = await admin
+        .from('messenger_threads')
+        .select('last_inbound_at')
+        .eq('id', messengerThreadId)
+        .maybeSingle<{ last_inbound_at: string | null }>()
       if (pageData?.page_access_token) {
         const token = decryptToken(pageData.page_access_token)
-        const sent = await sendMessengerText({
-          pageAccessToken: token,
-          recipientPsid: psid,
-          text: echo,
+        const result = await sendOutbound({
+          admin,
+          thread: { id: messengerThreadId, psid, last_inbound_at: threadData?.last_inbound_at ?? null },
+          pageToken: token,
+          payload: { kind: 'text', text: echo },
+          kind: 'submission_echo',
         })
-        if (messengerThreadId) {
+        if (result.sent) {
           const { error: msgErr } = await admin.from('messenger_messages').insert({
             thread_id: messengerThreadId,
             user_id: page.user_id,
             direction: 'outbound',
             sender: 'bot',
-            fb_message_id: sent.message_id,
+            fb_message_id: result.messageId,
             body: echo,
           })
           if (msgErr && (msgErr as { code?: string }).code !== '23505') {
@@ -385,46 +487,40 @@ async function createBusinessOrderFromCatalog(args: {
 
 async function applyStageMove(args: {
   adminClient: ReturnType<typeof createAdminClient>
-  leadId: string
   userId: string
+  leadId: string
   toStageId: string
-  reason: string
+  outcome: string
+  submissionId: string | null
+  threadId: string | null
 }): Promise<void> {
-  const { adminClient, leadId, userId, toStageId, reason } = args
+  const { adminClient, userId, leadId, toStageId, outcome, submissionId, threadId } = args
+  const idempotencyKey = `submission:${submissionId}`
 
-  const { data: lead } = await adminClient
-    .from('leads')
-    .select('stage_id')
-    .eq('id', leadId)
-    .eq('user_id', userId)
-    .maybeSingle<{ stage_id: string | null }>()
-  const fromStageId = lead?.stage_id ?? null
-  if (fromStageId === toStageId) return
-
-  const { data: maxRow } = await adminClient
-    .from('leads')
-    .select('position')
-    .eq('user_id', userId)
-    .eq('stage_id', toStageId)
-    .order('position', { ascending: false })
-    .limit(1)
-    .maybeSingle<{ position: number }>()
-  const nextPosition = (maxRow?.position ?? -1) + 1
-
-  await adminClient
-    .from('leads')
-    .update({ stage_id: toStageId, position: nextPosition })
-    .eq('id', leadId)
-    .eq('user_id', userId)
-
-  await adminClient.from('lead_stage_events').insert({
-    lead_id: leadId,
-    user_id: userId,
-    from_stage_id: fromStageId,
-    to_stage_id: toStageId,
-    source: 'action_page',
-    reason,
-  })
+  const { data, error } = await adminClient
+    .rpc('set_lead_stage', {
+      p_lead_id: leadId,
+      p_to_stage_id: toStageId,
+      p_source: 'action_page_submission',
+      p_reason: `outcome: ${outcome}`,
+      p_idempotency_key: idempotencyKey,
+      p_expected_version: null,
+      p_confidence: null,
+      p_thread_id: threadId ?? null,
+    })
+  if (error) {
+    throw new Error(error.message)
+  }
+  if (data) {
+    dispatchStageEntered(adminClient, {
+      userId,
+      leadId,
+      threadId,
+      toStageId,
+      fromStageId: null,
+      idempotencyKey,
+    }).catch((e) => console.error('[action-pages.submit] dispatchStageEntered threw', e))
+  }
 }
 
 async function advanceLeadFunnelForActionPage(args: {

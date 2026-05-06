@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { useState, useEffect } from 'react'
 
 type IconName =
   | 'overview'
@@ -16,17 +17,28 @@ type IconName =
   | 'settings'
   | 'help'
   | 'signout'
+  | 'menu'
+  | 'x'
+  | 'chevron-left'
+  | 'chevron-right'
+  | 'workflows'
 
 const items: { href: string; label: string; icon: IconName }[] = [
   { href: '/dashboard', label: 'Overview', icon: 'overview' },
   { href: '/dashboard/leads', label: 'Leads', icon: 'leads' },
   { href: '/dashboard/knowledge', label: 'Knowledge', icon: 'knowledge' },
   { href: '/dashboard/chatbot', label: 'Chatbot', icon: 'chatbot' },
-  { href: '/dashboard/funnels', label: 'Funnels', icon: 'funnels' },
-  { href: '/dashboard/business', label: 'My Business', icon: 'business' },
   { href: '/dashboard/action-pages', label: 'Action Pages', icon: 'actions' },
+  { href: '/dashboard/workflows', label: 'Workflows', icon: 'workflows' },
   { href: '/dashboard/media', label: 'Media', icon: 'media' },
-  { href: '/dashboard/activity', label: 'Activity', icon: 'activity' },
+  { href: '/dashboard/settings', label: 'Settings', icon: 'settings' },
+]
+
+const mobileItems: { href: string; label: string; icon: IconName }[] = [
+  { href: '/dashboard', label: 'Overview', icon: 'overview' },
+  { href: '/dashboard/leads', label: 'Leads', icon: 'leads' },
+  { href: '/dashboard/chatbot', label: 'Chatbot', icon: 'chatbot' },
+  { href: '/dashboard/action-pages', label: 'Actions', icon: 'actions' },
   { href: '/dashboard/settings', label: 'Settings', icon: 'settings' },
 ]
 
@@ -104,6 +116,30 @@ function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
       </>
     ),
     signout: <path d="M15 18l-6-6 6-6" />,
+    menu: (
+      <>
+        <line x1="3" y1="6" x2="21" y2="6" />
+        <line x1="3" y1="12" x2="21" y2="12" />
+        <line x1="3" y1="18" x2="21" y2="18" />
+      </>
+    ),
+    x: (
+      <>
+        <line x1="18" y1="6" x2="6" y2="18" />
+        <line x1="6" y1="6" x2="18" y2="18" />
+      </>
+    ),
+    'chevron-left': <path d="M15 18l-6-6 6-6" />,
+    'chevron-right': <path d="M9 18l6-6-6-6" />,
+    workflows: (
+      <>
+        <rect x="3" y="3" width="5" height="5" rx="1.2" />
+        <rect x="16" y="3" width="5" height="5" rx="1.2" />
+        <rect x="16" y="16" width="5" height="5" rx="1.2" />
+        <path d="M8 5.5h3.5a4 4 0 014 4V16" />
+        <path d="M8 5.5h3.5a4 4 0 004-4V3" />
+      </>
+    ),
   }
   return (
     <svg
@@ -124,16 +160,110 @@ function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
 
 export function Sidebar({ userInitial = 'D', userName = 'David' }: { userInitial?: string; userName?: string } = {}) {
   const pathname = usePathname() ?? '/dashboard'
-  return (
-    <aside className="ws-sidebar">
-      <div className="ws-brand">
-        <div className="ws-brand-logo">W</div>
-        <div className="ws-brand-name">WhatStage</div>
-      </div>
+  const [collapsed, setCollapsed] = useState(false)
+  const [mobileOpen, setMobileOpen] = useState(false)
 
-      <div className="ws-nav-section-label">Workspace</div>
-      <nav className="ws-nav">
-        {items.map((item) => {
+  useEffect(() => {
+    const stored = localStorage.getItem('ws-sidebar-collapsed')
+    if (stored !== null) setCollapsed(stored === 'true')
+  }, [])
+
+  function toggleCollapse() {
+    const next = !collapsed
+    setCollapsed(next)
+    localStorage.setItem('ws-sidebar-collapsed', String(next))
+  }
+
+  function closeMobile() {
+    setMobileOpen(false)
+  }
+
+  return (
+    <>
+      {mobileOpen && (
+        <div className="ws-sidebar-backdrop" onClick={closeMobile} aria-hidden="true" />
+      )}
+
+      <button
+        type="button"
+        className="ws-mobile-menu-btn"
+        onClick={() => setMobileOpen(true)}
+        aria-label="Open navigation"
+      >
+        <Icon name="menu" size={20} />
+      </button>
+
+      <aside
+        className={'ws-sidebar' + (collapsed ? ' collapsed' : '') + (mobileOpen ? ' mobile-open' : '')}
+        aria-label="Sidebar navigation"
+      >
+        <div className="ws-brand">
+          <div className="ws-brand-logo">W</div>
+          <div className="ws-brand-name">WhatStage</div>
+          <button
+            type="button"
+            className="ws-mobile-close-btn"
+            onClick={closeMobile}
+            aria-label="Close navigation"
+          >
+            <Icon name="x" size={16} />
+          </button>
+        </div>
+
+        <div className="ws-nav-section-label">Workspace</div>
+        <nav className="ws-nav">
+          {items.map((item) => {
+            const active =
+              item.href === '/dashboard'
+                ? pathname === '/dashboard'
+                : pathname === item.href || pathname.startsWith(item.href + '/')
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={'ws-nav-item' + (active ? ' active' : '')}
+                title={item.label}
+                onClick={closeMobile}
+              >
+                <Icon name={item.icon} />
+                <span className="ws-nav-label">{item.label}</span>
+              </Link>
+            )
+          })}
+        </nav>
+
+        <div className="ws-sidebar-bottom">
+          <button type="button" className="ws-nav-item" title="Help & docs">
+            <Icon name="help" />
+            <span className="ws-nav-label">Help &amp; docs</span>
+          </button>
+          <div className="ws-user-chip">
+            <div className="ws-user-avatar">{userInitial}</div>
+            <div className="ws-user-meta">
+              <div className="ws-user-name">Welcome back</div>
+              <div className="ws-user-email">{userName}</div>
+            </div>
+            <form action="/auth/signout" method="post">
+              <button type="submit" className="ws-user-signout" title="Sign out" aria-label="Sign out">
+                <Icon name="signout" size={14} />
+              </button>
+            </form>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          className="ws-collapse-toggle"
+          onClick={toggleCollapse}
+          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          title={collapsed ? 'Expand' : 'Collapse'}
+        >
+          <Icon name={collapsed ? 'chevron-right' : 'chevron-left'} size={14} />
+        </button>
+      </aside>
+
+      <nav className="ws-mobile-nav" aria-label="Mobile navigation">
+        {mobileItems.map((item) => {
           const active =
             item.href === '/dashboard'
               ? pathname === '/dashboard'
@@ -142,34 +272,14 @@ export function Sidebar({ userInitial = 'D', userName = 'David' }: { userInitial
             <Link
               key={item.href}
               href={item.href}
-              className={'ws-nav-item' + (active ? ' active' : '')}
-              title={item.label}
+              className={'ws-mobile-nav-item' + (active ? ' active' : '')}
             >
-              <Icon name={item.icon} />
+              <Icon name={item.icon} size={20} />
               <span>{item.label}</span>
             </Link>
           )
         })}
       </nav>
-
-      <div className="ws-sidebar-bottom">
-        <button type="button" className="ws-nav-item" title="Help & docs">
-          <Icon name="help" />
-          <span>Help &amp; docs</span>
-        </button>
-        <div className="ws-user-chip">
-          <div className="ws-user-avatar">{userInitial}</div>
-          <div className="ws-user-meta">
-            <div className="ws-user-name">Welcome back</div>
-            <div className="ws-user-email">{userName}</div>
-          </div>
-          <form action="/auth/signout" method="post">
-            <button type="submit" className="ws-user-signout" title="Sign out" aria-label="Sign out">
-              <Icon name="signout" size={14} />
-            </button>
-          </form>
-        </div>
-      </div>
-    </aside>
+    </>
   )
 }

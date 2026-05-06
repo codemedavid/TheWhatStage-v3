@@ -11,6 +11,7 @@ import { ActionPagePreview } from './ActionPagePreview'
 import { CopyField } from './CopyField'
 import { KindEditor } from './KindEditor'
 import { PipelineRulesEditor } from './PipelineRulesEditor'
+import { CatalogShell } from '../_kinds/catalog/CatalogShell'
 
 type StepId = 'general' | 'configuration' | 'workflow' | 'share'
 
@@ -44,6 +45,20 @@ export function EditActionPageShell({
   saved: boolean
   errorBanner: string | null
 }) {
+  if (page.kind === 'catalog') {
+    return (
+      <CatalogShell
+        page={page}
+        stages={stages}
+        publicUrl={publicUrl}
+        embedUrl={embedUrl}
+        embedSnippet={embedSnippet}
+        saved={saved}
+        errorBanner={errorBanner}
+      />
+    )
+  }
+
   const meta = KIND_REGISTRY[page.kind]
   const [step, setStep] = useState<number>(0)
   const [completed, setCompleted] = useState<number[]>([])
@@ -112,9 +127,9 @@ export function EditActionPageShell({
           </span>
           <Link
             href={`/dashboard/action-pages/${page.id}/submissions`}
-            className="ap-btn ap-btn-secondary ap-btn-sm"
+            className="ap-btn ap-btn-primary ap-btn-sm"
           >
-            <EyeIcon /> View submissions
+            <EyeIcon /> Submissions
           </Link>
           <button
             type="button"

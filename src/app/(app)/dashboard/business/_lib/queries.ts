@@ -12,6 +12,7 @@ export interface ProductListItem {
   pricing_model: 'fixed' | 'starts_at' | 'quote' | 'free'
   inventory_status: string
   tags: string[]
+  cover_image_url: string | null
   updated_at: string
 }
 
@@ -57,7 +58,7 @@ export async function fetchProducts(
   let query = supabase
     .from('business_items')
     .select(
-      'id, title, slug, status, summary, price_amount, currency, pricing_model, inventory_status, tags, updated_at',
+      'id, title, slug, status, summary, price_amount, currency, pricing_model, inventory_status, tags, cover_image_url, updated_at',
     )
     .eq('user_id', userId)
     .eq('kind', 'product')
@@ -82,7 +83,7 @@ export async function fetchProduct(
   const { data, error } = await supabase
     .from('business_items')
     .select(
-      'id, title, slug, status, summary, description, price_amount, compare_at_amount, currency, pricing_model, sku, inventory_status, tags, details, recommendation_hints, rag_enabled, rag_text, updated_at',
+      'id, title, slug, status, summary, description, price_amount, compare_at_amount, currency, pricing_model, sku, inventory_status, tags, cover_image_url, details, recommendation_hints, rag_enabled, rag_text, updated_at',
     )
     .eq('user_id', userId)
     .eq('kind', 'product')
@@ -124,7 +125,7 @@ export async function fetchBusinessStats(
     supabase
       .from('business_items')
       .select(
-        'id, title, slug, status, summary, price_amount, currency, pricing_model, inventory_status, tags, updated_at',
+        'id, title, slug, status, summary, price_amount, currency, pricing_model, inventory_status, tags, cover_image_url, updated_at',
       )
       .eq('user_id', userId)
       .eq('kind', 'product')

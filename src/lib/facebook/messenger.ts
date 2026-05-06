@@ -46,14 +46,18 @@ export async function sendMessengerText(args: {
   pageAccessToken: string
   recipientPsid: string
   text: string
+  messagingType?: 'RESPONSE' | 'UPDATE' | 'MESSAGE_TAG'
+  tag?: 'HUMAN_AGENT'
 }): Promise<{ message_id: string }> {
   const url = new URL(`${GRAPH}/me/messages`)
   url.searchParams.set('access_token', args.pageAccessToken)
-  return postJson<{ message_id: string }>(url.toString(), {
+  const body: Record<string, unknown> = {
     recipient: { id: args.recipientPsid },
     message: { text: args.text },
-    messaging_type: 'RESPONSE',
-  })
+    messaging_type: args.messagingType ?? 'RESPONSE',
+  }
+  if (args.tag) body.tag = args.tag
+  return postJson<{ message_id: string }>(url.toString(), body)
 }
 
 /**

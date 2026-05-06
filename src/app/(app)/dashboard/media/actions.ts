@@ -92,7 +92,13 @@ export async function updateMediaAsset(formData: FormData): Promise<void> {
     isArchived: formData.get('isArchived') === 'on',
   })
   const { supabase, userId } = await requireUser()
-  const nextVersion = Date.now()
+  const { data: current } = await supabase
+    .from('media_assets')
+    .select('version')
+    .eq('id', input.id)
+    .eq('user_id', userId)
+    .maybeSingle()
+  const nextVersion = (current?.version ?? 0) + 1
   const { data, error } = await supabase
     .from('media_assets')
     .update({

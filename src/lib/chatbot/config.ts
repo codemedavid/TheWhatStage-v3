@@ -5,12 +5,15 @@ export type ChatbotConfigRow = {
   user_id: string
   name: string
   persona: string
+  instructions: string
   do_rules: string[]
   dont_rules: string[]
   fallback_message: string
   temperature: number
   max_context: number
   auto_classify_enabled: boolean
+  active_template_id: string | null
+  personality_source: string
   created_at: string
   updated_at: string
 }
@@ -19,6 +22,9 @@ export type ChatbotConfig = ChatbotPersona & {
   temperature: number
   maxContext: number
   autoClassifyEnabled: boolean
+  activeTemplateId: string | null
+  personalitySource: 'custom' | 'template'
+  updatedAt: string
 }
 
 export const DEFAULT_CHATBOT_CONFIG: ChatbotConfig = {
@@ -26,18 +32,25 @@ export const DEFAULT_CHATBOT_CONFIG: ChatbotConfig = {
   temperature: 0.4,
   maxContext: 12,
   autoClassifyEnabled: false,
+  activeTemplateId: null,
+  personalitySource: 'custom',
+  updatedAt: '',
 }
 
 export function rowToConfig(row: ChatbotConfigRow): ChatbotConfig {
   return {
     name: row.name || DEFAULT_CHATBOT_CONFIG.name,
     persona: row.persona || DEFAULT_CHATBOT_CONFIG.persona,
+    instructions: row.instructions ?? '',
     doRules: row.do_rules?.length ? row.do_rules : DEFAULT_CHATBOT_CONFIG.doRules,
     dontRules: row.dont_rules?.length ? row.dont_rules : DEFAULT_CHATBOT_CONFIG.dontRules,
     fallbackMessage: row.fallback_message || DEFAULT_CHATBOT_CONFIG.fallbackMessage,
     temperature: row.temperature ?? DEFAULT_CHATBOT_CONFIG.temperature,
     maxContext: row.max_context ?? DEFAULT_CHATBOT_CONFIG.maxContext,
     autoClassifyEnabled: row.auto_classify_enabled ?? DEFAULT_CHATBOT_CONFIG.autoClassifyEnabled,
+    activeTemplateId: row.active_template_id ?? null,
+    personalitySource: (row.personality_source as ChatbotConfig['personalitySource']) ?? 'custom',
+    updatedAt: row.updated_at ?? '',
   }
 }
 
@@ -58,6 +71,7 @@ export async function getChatbotConfig(
 export type ChatbotConfigInput = {
   name: string
   persona: string
+  instructions: string
   doRules: string[]
   dontRules: string[]
   fallbackMessage: string
@@ -76,6 +90,7 @@ export async function upsertChatbotConfig(
       user_id: userId,
       name: input.name.trim() || DEFAULT_CHATBOT_CONFIG.name,
       persona: input.persona.trim(),
+      instructions: input.instructions.trim(),
       do_rules: input.doRules.map((s) => s.trim()).filter(Boolean),
       dont_rules: input.dontRules.map((s) => s.trim()).filter(Boolean),
       fallback_message: input.fallbackMessage.trim() || DEFAULT_CHATBOT_CONFIG.fallbackMessage,

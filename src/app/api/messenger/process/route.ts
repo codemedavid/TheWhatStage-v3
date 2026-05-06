@@ -4,14 +4,14 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { decryptToken } from '@/lib/facebook/crypto'
 import {
   fetchMessengerProfile,
-  sendMessengerButton,
   sendMessengerImage,
   sendMessengerReaction,
   sendMessengerSenderAction,
-  sendMessengerText,
 } from '@/lib/facebook/messenger'
+import { sendOutbound } from '@/lib/messenger/outbound'
 import { deeplinkActionPageUrl } from '@/lib/action-pages/urls'
-import { answer, type AnswerHistory } from '@/lib/chatbot/answer'
+import { appendLeadContacts, extractEmails, extractPhones } from '@/lib/leads/contact-append'
+import { answer, summarizeConversation, type AnswerHistory } from '@/lib/chatbot/answer'
 import { type SelectedMediaAsset } from '@/lib/media/selector'
 import {
   answerWithClassification,
@@ -20,13 +20,14 @@ import {
   type ActionPageBrief,
   type StageBrief,
 } from '@/lib/chatbot/classify'
+import { interruptWorkflowRun } from '@/lib/workflow/trigger'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
 
 const MAX_ATTEMPTS = 3
-const HISTORY_LIMIT = 10
+const HISTORY_LIMIT = 20
 const BATCH_SIZE = 5
 const RUNNING_STALE_MS = 5 * 60 * 1000
 const CLASSIFY_EVERY = 4
@@ -58,6 +59,9 @@ interface ThreadRow {
   full_name: string | null
   auto_reply_enabled: boolean
   inbound_since_classify: number
+  conversation_summary: string | null
+  last_inbound_at: string | null
+  controlled_by_run_id: string | null
 }
 
 export async function POST(req: NextRequest) {
@@ -181,6 +185,23 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
       return
     }
 
+    await admin
+      .from('messenger_threads')
+      .update({ last_inbound_at: new Date().toISOString() })
+      .eq('id', thread.id)
+
+    // Auto-detect phone numbers and emails shared by the lead in their message.
+    if (thread.lead_id) {
+      const detectedPhones = extractPhones(message)
+      const detectedEmails = extractEmails(message)
+      if (detectedPhones.length || detectedEmails.length) {
+        await appendLeadContacts(admin, thread.lead_id, {
+          phones: detectedPhones,
+          emails: detectedEmails,
+        })
+      }
+    }
+
     const history = await loadHistory(admin, job.thread_id, job.inbound_msg_id)
     const classifyEnabled = await isAutoClassifyEnabled(admin, thread.user_id)
     const { stages, currentStageId } = classifyEnabled
@@ -226,7 +247,23 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
       bot_send_instructions: p.bot_send_instructions,
     }))
 
-    if (thread.auto_reply_enabled) {
+    // When a workflow run owns this thread, suppress the auto-reply — the run
+    // is waiting for the customer's response and will handle the next step.
+    // Classification still runs (below) so stage moves and interrupt routing
+    // remain active even while the bot is deferred.
+    if (thread.controlled_by_run_id) {
+      console.log('[messenger.worker] thread owned by workflow run — auto-reply suppressed', {
+        threadId: thread.id,
+        runId: thread.controlled_by_run_id,
+      })
+      interruptWorkflowRun(admin, thread.controlled_by_run_id, {
+        kind: 'inbound_message',
+        body: message,
+        fb_message_id: inboundFbId,
+      }).catch((e) => console.error('[messenger.worker] interruptWorkflowRun threw', e))
+    }
+
+    if (thread.auto_reply_enabled && !thread.controlled_by_run_id) {
       // Best-effort presence signals before we spend time generating a reply:
       //   1. React to the inbound message (Page Reactions) so the user sees
       //      a visible "got it" acknowledgment even if generation is slow.
@@ -266,6 +303,7 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
       let stageChange: Awaited<ReturnType<typeof answerWithClassification>>['stageChange'] = null
       let actionPageChoice: Awaited<ReturnType<typeof answerWithClassification>>['actionPage'] = null
       let selectedMedia: SelectedMediaAsset[] = []
+      const conversationSummary = thread.conversation_summary ?? undefined
       if ((classifyEnabled && stages.length > 0) || actionPages.length > 0) {
         try {
           const r = await answerWithClassification(
@@ -275,7 +313,7 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
             history,
             stages,
             currentStageId,
-            { rpcName: 'match_knowledge_hybrid_service', actionPages, campaignPersona },
+            { rpcName: 'match_knowledge_hybrid_service', actionPages, campaignPersona, conversationSummary },
           )
           reply = r.text.trim()
           stageChange = r.stageChange
@@ -288,6 +326,7 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
         const r = await answer(admin, thread.user_id, message, history, {
           rpcName: 'match_knowledge_hybrid_service',
           campaignPersona,
+          conversationSummary,
         })
         reply = r.text.trim()
         selectedMedia = r.media
@@ -297,23 +336,35 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
         return
       }
 
-      // Send via FB. Idempotent on retry: if a previous attempt already got
-      // a message_id back from FB, skip the call (re-sending would surface
-      // as a duplicate to the user). Persist the id BEFORE the messenger_
-      // messages insert so a DB failure between FB ack and row write is
-      // recoverable on retry.
+      // Send via the unified outbound coordinator (M2 fix). Idempotent on retry:
+      // if a previous attempt already got a message_id, skip the call.
+      // sendOutbound enforces the 24h / marketing-opt-in / OTN channel policy.
       let textFbId = job.outbound_text_fb_id
       if (!textFbId) {
-        const sent = await sendMessengerText({
-          pageAccessToken: pageToken,
-          recipientPsid: thread.psid,
-          text: reply,
+        const result = await sendOutbound({
+          admin,
+          thread: { id: thread.id, psid: thread.psid, last_inbound_at: thread.last_inbound_at },
+          pageToken,
+          payload: { kind: 'text', text: reply },
+          kind: 'bot',
         })
-        textFbId = sent.message_id
-        await admin
-          .from('messenger_jobs')
-          .update({ outbound_text_fb_id: textFbId })
-          .eq('id', job.id)
+        if (!result.sent) {
+          // Policy blocked (outside 24h and no qualifying opt-in/OTN).
+          // Log and skip — don't retry; the window won't reopen on its own.
+          console.warn('[messenger.worker] text send policy_blocked', {
+            threadId: thread.id,
+            reason: (result as { sent: false; reason: string }).reason,
+          })
+          await markDone(admin, job.id, 'skipped', 'policy_blocked')
+          return
+        }
+        textFbId = result.messageId ?? null
+        if (textFbId) {
+          await admin
+            .from('messenger_jobs')
+            .update({ outbound_text_fb_id: textFbId })
+            .eq('id', job.id)
+        }
       }
 
       // Persist the outbound message and update thread tail. The unique
@@ -338,9 +389,25 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
         .update({
           last_message_at: new Date().toISOString(),
           last_message_preview: reply.slice(0, 200),
+          last_outbound_at: new Date().toISOString(),
           inbound_since_classify: 0,
         })
         .eq('id', thread.id)
+
+      // When history is at the limit, older turns exist beyond the window.
+      // Fire-and-forget a summary update so future replies retain that context.
+      if (history.length >= HISTORY_LIMIT) {
+        summarizeConversation(history, message, reply, conversationSummary)
+          .then((summary) => {
+            if (summary) {
+              return admin
+                .from('messenger_threads')
+                .update({ conversation_summary: summary })
+                .eq('id', thread.id)
+            }
+          })
+          .catch((e) => console.warn('[messenger.worker] summary update failed', e))
+      }
 
       await sendSelectedMedia(admin, { job, thread, pageToken, selectedMedia })
 
@@ -364,18 +431,27 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
             // Idempotent on retry — see text-reply block above for rationale.
             let buttonFbId = job.outbound_button_fb_id
             if (!buttonFbId) {
-              const sentBtn = await sendMessengerButton({
-                pageAccessToken: pageToken,
-                recipientPsid: thread.psid,
-                text: btnText,
-                url: targetUrl,
-                ctaLabel: chosen.cta_label,
+              const btnResult = await sendOutbound({
+                admin,
+                thread: { id: thread.id, psid: thread.psid, last_inbound_at: thread.last_inbound_at },
+                pageToken,
+                payload: { kind: 'button', text: btnText, url: targetUrl, ctaLabel: chosen.cta_label },
+                kind: 'bot',
               })
-              buttonFbId = sentBtn.message_id
-              await admin
-                .from('messenger_jobs')
-                .update({ outbound_button_fb_id: buttonFbId })
-                .eq('id', job.id)
+              if (btnResult.sent) {
+                buttonFbId = btnResult.messageId ?? null
+                if (buttonFbId) {
+                  await admin
+                    .from('messenger_jobs')
+                    .update({ outbound_button_fb_id: buttonFbId })
+                    .eq('id', job.id)
+                }
+              } else {
+                console.warn('[messenger.worker] action-page button policy_blocked', {
+                  threadId: thread.id,
+                  reason: (btnResult as { sent: false; reason: string }).reason,
+                })
+              }
             }
             const { error: btnInsertErr } = await admin
               .from('messenger_messages')
@@ -481,7 +557,7 @@ async function loadJobContext(
   const { data, error } = await admin
     .from('messenger_messages')
     .select(
-      'body, fb_message_id, messenger_threads!inner(id, user_id, page_id, psid, lead_id, full_name, auto_reply_enabled, inbound_since_classify)',
+      'body, fb_message_id, messenger_threads!inner(id, user_id, page_id, psid, lead_id, full_name, auto_reply_enabled, inbound_since_classify, conversation_summary, last_inbound_at, controlled_by_run_id)',
     )
     .eq('id', job.inbound_msg_id)
     .maybeSingle<{

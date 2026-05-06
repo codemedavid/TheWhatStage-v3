@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import { after, NextResponse, type NextRequest } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { interruptWorkflowRun } from '@/lib/workflow/trigger'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -55,6 +56,11 @@ type FbMessaging = {
     text?: string
     is_echo?: boolean
     attachments?: FbAttachment[]
+  }
+  optin?: {
+    type?: string
+    payload?: string
+    one_time_notif_token?: string
   }
 }
 type FbFeedChange = {
@@ -159,11 +165,36 @@ type AdminClient = ReturnType<typeof createAdminClient>
  * the job id when one was created, or null when the event was a non-message
  * (delivery/read receipts, echoes, etc.) or already seen.
  */
+async function handleOtnGrant(admin: AdminClient, fbPageId: string, ev: FbMessaging): Promise<void> {
+  const psid = ev.sender?.id
+  const token = ev.optin?.one_time_notif_token
+  if (!psid || !token) return
+
+  const { data: thread } = await admin
+    .from('messenger_threads')
+    .select('id, controlled_by_run_id')
+    .eq('psid', psid)
+    .maybeSingle<{ id: string; controlled_by_run_id: string | null }>()
+
+  if (!thread?.controlled_by_run_id) return
+
+  await interruptWorkflowRun(admin, thread.controlled_by_run_id, {
+    kind: 'otn_granted',
+    otn_token: token,
+  })
+}
+
 async function handleEvent(
   admin: AdminClient,
   fbPageId: string,
   ev: FbMessaging,
 ): Promise<string | null> {
+  // OTN grant — user approved a one-time notification request.
+  if (ev.optin?.one_time_notif_token) {
+    await handleOtnGrant(admin, fbPageId, ev)
+    return null
+  }
+
   const msg = ev.message
   if (!msg || msg.is_echo) return null
   const psid = ev.sender?.id

@@ -18,6 +18,12 @@ export interface ChatbotPersona {
    * highest-priority directive, above identity and style rules.
    */
   funnelInstruction?: string;
+  /**
+   * Free-form instructions for the bot — what it should focus on, how it
+   * should handle specific situations, etc. Injected before the rules so
+   * it acts as persistent directive context.
+   */
+  instructions?: string;
 }
 
 export interface BuildPromptArgs {
@@ -29,6 +35,8 @@ export interface BuildPromptArgs {
   persona?: string;
   /** Maximum context chunks to include (after grading). */
   maxContext?: number;
+  /** Rolling summary of older turns, injected before the knowledge context. */
+  conversationSummary?: string;
 }
 
 export const DEFAULT_CHATBOT_PERSONA: ChatbotPersona = {
@@ -70,7 +78,7 @@ function buildContextBlock(chunks: Array<RetrievedChunk & { score: number }>): s
     .join('\n\n---\n\n');
 }
 
-function assembleSystemPrompt(p: ChatbotPersona, contextBlock: string): string {
+function assembleSystemPrompt(p: ChatbotPersona, contextBlock: string, conversationSummary?: string): string {
   const goalSection = p.funnelInstruction?.trim()
     ? [
         `# PRIMARY GOAL (Follow this above all else)`,
@@ -79,15 +87,28 @@ function assembleSystemPrompt(p: ChatbotPersona, contextBlock: string): string {
       ]
     : [];
 
+  const instructionsSection = p.instructions?.trim()
+    ? [
+        `# Instructions`,
+        p.instructions.trim(),
+        ``,
+      ]
+    : [];
+
+  const summarySection = conversationSummary?.trim()
+    ? [
+        `# Earlier Conversation (summary)`,
+        conversationSummary.trim(),
+        ``,
+      ]
+    : [];
+
   return [
     ...goalSection,
+    ...instructionsSection,
     `# Identity`,
     `You are ${p.name}. ${p.persona.trim()}`,
-    ``,
-    `# Style`,
-    `- Match the user's language: pure Tagalog, English, or Taglish — mirror their register.`,
-    `- Be concise, warm, and conversational. Default to under 80 words unless asked for detail.`,
-    `- Use plain text. Light bullets only when listing 3+ items.`,
+    `Stay fully in this voice for every reply — tone, pacing, signature phrasing, and length all flow from the Identity, Instructions, and Rules above. Do NOT fall back to a generic "warm concise concierge" tone unless the persona itself describes that.`,
     ``,
     `# Rules — DO`,
     numbered(p.doRules),
@@ -104,6 +125,7 @@ function assembleSystemPrompt(p: ChatbotPersona, contextBlock: string): string {
     `If you cannot answer from the context, reply with this message verbatim, then offer one short next step:`,
     `"${p.fallbackMessage.trim()}"`,
     ``,
+    ...summarySection,
     `# Knowledge base context`,
     contextBlock,
   ].join('\n');
@@ -130,7 +152,7 @@ export function buildPrompt(args: BuildPromptArgs): BuiltPrompt {
   };
 
   return {
-    system: assembleSystemPrompt(merged, contextBlock),
+    system: assembleSystemPrompt(merged, contextBlock, args.conversationSummary),
     user: args.userQuery,
     contextChunkIds: ranked.map((c) => c.id),
     contextChunks,

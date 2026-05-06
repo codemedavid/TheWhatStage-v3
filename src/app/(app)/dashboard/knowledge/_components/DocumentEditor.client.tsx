@@ -24,10 +24,18 @@ import type {
   EmbeddingStatus,
   TagRow,
 } from '../_lib/queries'
+import type { MediaAssetRow, MediaFolderRow } from '@/app/(app)/dashboard/media/_lib/queries'
 import { PinButton } from './PinButton'
 import { TagPicker } from './TagPicker'
 import { DocumentOutline } from './DocumentOutline'
 import { EmbeddingStatusBadge } from './EmbeddingStatusBadge'
+import {
+  MediaPickerPopover,
+  type PickedAsset,
+  type PickedFolder,
+} from './MediaPickerPopover'
+import { buildMediaMention } from './mediaMentionExtension'
+import { MediaMentionPopover } from './MediaMentionPopover'
 
 const AUTOSAVE_DEBOUNCE_MS = 1500
 
@@ -46,10 +54,14 @@ export function DocumentEditor({
   doc,
   categories,
   tags,
+  mediaFolders,
+  mediaAssets,
 }: {
   doc: DocumentRow
   categories: CategoryRow[]
   tags: TagRow[]
+  mediaFolders: MediaFolderRow[]
+  mediaAssets: MediaAssetRow[]
 }) {
   const [mounted, setMounted] = useState(false)
   useEffect(() => setMounted(true), [])
@@ -68,17 +80,29 @@ export function DocumentEditor({
     )
   }
 
-  return <DocumentEditorImpl doc={doc} categories={categories} tags={tags} />
+  return (
+    <DocumentEditorImpl
+      doc={doc}
+      categories={categories}
+      tags={tags}
+      mediaFolders={mediaFolders}
+      mediaAssets={mediaAssets}
+    />
+  )
 }
 
 function DocumentEditorImpl({
   doc,
   categories,
   tags,
+  mediaFolders,
+  mediaAssets,
 }: {
   doc: DocumentRow
   categories: CategoryRow[]
   tags: TagRow[]
+  mediaFolders: MediaFolderRow[]
+  mediaAssets: MediaAssetRow[]
 }) {
   const router = useRouter()
   const [title, setTitle] = useState(doc.title)
@@ -154,6 +178,50 @@ function DocumentEditorImpl({
     [doc.id],
   )
 
+  /**
+   * Pick an image from the media library and insert it inline. We embed both the
+   * thumbnail (for the writer's reference) and the asset's `@slug` token so the
+   * RAG indexer picks it up — when the bot retrieves a chunk containing `@slug`,
+   * the media selector attaches the image to the reply.
+   */
+  const insertMediaAsset = useCallback((asset: PickedAsset) => {
+    const editor = editorRef.current
+    if (!editor) return
+    const altText = asset.name
+    const content: object[] = []
+    if (asset.url) {
+      content.push({
+        type: 'image',
+        attrs: { src: asset.url, alt: altText, title: altText },
+      })
+    }
+    content.push({
+      type: 'paragraph',
+      content: [{ type: 'text', text: `@${asset.slug}` }],
+    })
+    editor.chain().focus().insertContent(content).run()
+  }, [])
+
+  /**
+   * Pick a folder from the media library — inserts a `#folder-slug` paragraph.
+   * At reply time the bot picks the single best image from that folder for the
+   * lead (via the semantic ranker in `selectMediaForReply`).
+   */
+  const insertMediaFolder = useCallback((folder: PickedFolder) => {
+    const editor = editorRef.current
+    if (!editor) return
+    editor
+      .chain()
+      .focus()
+      .insertContent([
+        {
+          type: 'paragraph',
+          content: [{ type: 'text', text: `#${folder.slug}` }],
+        },
+      ])
+      .run()
+  }, [])
+
   // Tiptap content: prefer draft, then committed content, otherwise empty doc.
   // Use a real ProseMirror-friendly empty value (`<p></p>`) — empty string can
   // cause the schema to reject the initial doc and silently produce a
@@ -191,6 +259,10 @@ function DocumentEditorImpl({
         inline: false,
         allowBase64: false,
         HTMLAttributes: { class: 'kn-img' },
+      }),
+      buildMediaMention({
+        assets: mediaAssets,
+        folders: mediaFolders,
       }),
     ],
     content: initialContent,
@@ -447,6 +519,7 @@ function DocumentEditorImpl({
 
   return (
     <div data-knowledge-root className="-mx-8 -my-6 min-h-[calc(100vh-3rem)]">
+      <MediaMentionPopover />
       {/* Sticky document chrome */}
       <div className="sticky top-0 z-30 border-b border-[#e8eaed] bg-white/95 backdrop-blur">
         <div className="mx-auto flex max-w-[920px] items-center gap-3 px-6 py-2.5">
@@ -509,7 +582,13 @@ function DocumentEditorImpl({
           </div>
         </div>
 
-        <Toolbar editor={editor} onPickImage={uploadAndInsertImage} />
+        <Toolbar
+          editor={editor}
+          mediaFolders={mediaFolders}
+          mediaAssets={mediaAssets}
+          onPickAsset={insertMediaAsset}
+          onPickFolder={insertMediaFolder}
+        />
       </div>
 
       {errorMsg && (
@@ -783,10 +862,16 @@ function CategorySelect({
 
 function Toolbar({
   editor,
-  onPickImage,
+  mediaFolders,
+  mediaAssets,
+  onPickAsset,
+  onPickFolder,
 }: {
   editor: Editor | null
-  onPickImage: (file: File) => void
+  mediaFolders: MediaFolderRow[]
+  mediaAssets: MediaAssetRow[]
+  onPickAsset: (asset: PickedAsset) => void
+  onPickFolder: (folder: PickedFolder) => void
 }) {
   const disabled = !editor
 
@@ -961,7 +1046,12 @@ function Toolbar({
         <Icon path="M5 12h14" />
       </Btn>
       <Divider />
-      <ImageButton onPick={onPickImage} />
+      <MediaLibraryButton
+        folders={mediaFolders}
+        assets={mediaAssets}
+        onPickAsset={onPickAsset}
+        onPickFolder={onPickFolder}
+      />
       <Btn
         label="Link (⌘K)"
         active={isActive('link')}
@@ -1135,32 +1225,56 @@ function HighlightPicker({ editor }: { editor: Editor | null }) {
   )
 }
 
-function ImageButton({ onPick }: { onPick: (file: File) => void }) {
-  const inputRef = useRef<HTMLInputElement | null>(null)
+function MediaLibraryButton({
+  folders,
+  assets,
+  onPickAsset,
+  onPickFolder,
+}: {
+  folders: MediaFolderRow[]
+  assets: MediaAssetRow[]
+  onPickAsset: (asset: PickedAsset) => void
+  onPickFolder: (folder: PickedFolder) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const btnRef = useRef<HTMLButtonElement | null>(null)
   return (
-    <>
-      <input
-        ref={inputRef}
-        type="file"
-        accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml"
-        className="sr-only"
-        onChange={(e) => {
-          const f = e.target.files?.[0]
-          if (f) onPick(f)
-          e.target.value = ''
-        }}
-      />
+    <div className="relative inline-flex">
       <button
+        ref={btnRef}
         type="button"
-        title="Image"
-        aria-label="Insert image"
+        title="Pick from media library"
+        aria-label="Insert from media library"
+        aria-haspopup="dialog"
+        aria-expanded={open}
         onMouseDown={(e) => e.preventDefault()}
-        onClick={() => inputRef.current?.click()}
-        className="inline-flex h-8 min-w-[32px] items-center justify-center rounded px-2 text-[#3c4043] transition-colors hover:bg-[#f1f3f4]"
+        onClick={() => setOpen((v) => !v)}
+        className={
+          'inline-flex h-8 min-w-[32px] items-center justify-center rounded px-2 transition-colors ' +
+          (open
+            ? 'bg-[rgba(5,150,105,0.1)] text-[#059669]'
+            : 'text-[#3c4043] hover:bg-[#f1f3f4]')
+        }
       >
         <Icon path="M3 5h18v14H3zM3 17l5-5 4 4 4-3 5 5" />
       </button>
-    </>
+      {open && (
+        <MediaPickerPopover
+          folders={folders}
+          assets={assets}
+          anchorRef={btnRef}
+          onPickAsset={(asset) => {
+            onPickAsset(asset)
+            setOpen(false)
+          }}
+          onPickFolder={(folder) => {
+            onPickFolder(folder)
+            setOpen(false)
+          }}
+          onClose={() => setOpen(false)}
+        />
+      )}
+    </div>
   )
 }
 

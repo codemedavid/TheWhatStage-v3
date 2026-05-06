@@ -33,6 +33,9 @@ export interface AnswerOptions {
   /** When the lead is assigned to a campaign with personality_mode='custom',
    *  pass the campaign's persona/rules here to override the default chatbot config. */
   campaignPersona?: CampaignPersonaOverride
+  /** Rolling summary of older turns beyond the history window. Injected into the
+   *  system prompt so the bot retains context from early in long conversations. */
+  conversationSummary?: string
 }
 
 /**
@@ -79,6 +82,7 @@ export async function answer(
     buckets: ctx.buckets,
     config,
     maxContext: config.maxContext,
+    conversationSummary: options.conversationSummary,
   })
 
   const mediaPromise = selectMediaForReply({
@@ -108,6 +112,39 @@ export async function answer(
     mediaPromise,
   ])
   return { text: text.trim(), sourceTitles, media }
+}
+
+/**
+ * Generate a 2-3 sentence summary of the conversation so far.
+ * Used to compress older turns into the prompt when history exceeds the window.
+ */
+export async function summarizeConversation(
+  history: AnswerHistory,
+  latestUserMsg: string,
+  botReply: string,
+  existingSummary?: string | null,
+): Promise<string> {
+  const llm = new HfRouterLlm()
+  const lines: string[] = []
+  if (existingSummary?.trim()) {
+    lines.push(`[Earlier summary: ${existingSummary.trim()}]`, '')
+  }
+  for (const m of history) {
+    lines.push(`${m.role === 'user' ? 'Customer' : 'Bot'}: ${m.content}`)
+  }
+  lines.push(`Customer: ${latestUserMsg}`, `Bot: ${botReply}`)
+  const result = await llm.complete(
+    [
+      {
+        role: 'system',
+        content:
+          'Summarize the key topics, customer needs, and any commitments discussed in this conversation. Be concise — 2-3 sentences max.',
+      },
+      { role: 'user', content: lines.join('\n') },
+    ],
+    { temperature: 0, maxTokens: 200 },
+  )
+  return result.trim()
 }
 
 async function resolveSourceTitles(

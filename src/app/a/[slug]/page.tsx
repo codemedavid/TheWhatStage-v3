@@ -17,8 +17,9 @@ export default async function PublicActionPage({
   const rawToken = typeof sp.t === 'string' ? sp.t : null
   const submitted = sp.submitted === '1'
   const isBooking = result.page.kind === 'booking' && !submitted
+  const isCatalog = result.page.kind === 'catalog' && !submitted
 
-  if (isBooking) {
+  if (isBooking || isCatalog) {
     return (
       <ActionPageRenderer
         page={result.page}

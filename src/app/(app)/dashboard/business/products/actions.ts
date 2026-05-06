@@ -9,6 +9,12 @@ import { enqueueEmbedJob } from '@/lib/rag'
 import { processSourceInline } from '@/lib/rag/process-now'
 import { createClient } from '@/lib/supabase/server'
 
+export interface ProductFormState {
+  formError?: string
+  fieldErrors?: Partial<Record<string, string>>
+  ok?: boolean
+}
+
 async function requireUser() {
   const supabase = await createClient()
   const {
@@ -49,7 +55,7 @@ async function finishActiveProductEmbedJobs(
     .in('status', ['queued', 'running'])
 }
 
-export async function createProduct(): Promise<void> {
+export async function createProduct(formData?: FormData): Promise<void> {
   const { supabase, userId } = await requireUser()
   const { data, error } = await supabase
     .from('business_items')
@@ -69,11 +75,20 @@ export async function createProduct(): Promise<void> {
     .single<{ id: string }>()
   if (error || !data) throw new Error(error?.message ?? 'create product failed')
   revalidatePath('/dashboard/business/products')
-  redirect(`/dashboard/business/products/${data.id}`)
+  const fromRaw = formData?.get('from')
+  const from = typeof fromRaw === 'string' ? fromRaw : ''
+  const safeFrom = from.startsWith('/') && !from.startsWith('//') ? from : ''
+  const target = safeFrom
+    ? `/dashboard/business/products/${data.id}?from=${encodeURIComponent(safeFrom)}`
+    : `/dashboard/business/products/${data.id}`
+  redirect(target)
 }
 
-export async function saveProduct(formData: FormData): Promise<void> {
-  const input = ProductFormInput.parse({
+export async function saveProduct(
+  _prev: ProductFormState,
+  formData: FormData,
+): Promise<ProductFormState> {
+  const parsed = ProductFormInput.safeParse({
     id: formData.get('id') || undefined,
     title: formData.get('title'),
     slug: formData.get('slug'),
@@ -91,11 +106,23 @@ export async function saveProduct(formData: FormData): Promise<void> {
     recommendation_hints: parseJsonField(formData.get('recommendation_hints'), {}),
     rag_enabled: formData.get('rag_enabled') === 'on',
   })
-  if (!input.id) throw new Error('Product id is required')
+  if (!parsed.success) {
+    const fieldErrors: Record<string, string> = {}
+    for (const issue of parsed.error.issues) {
+      const key = String(issue.path[0] ?? '')
+      if (key && !fieldErrors[key]) fieldErrors[key] = issue.message
+    }
+    return {
+      formError: 'Please fix the highlighted fields before saving.',
+      fieldErrors,
+    }
+  }
+  const input = parsed.data
+  if (!input.id) return { formError: 'Product id is required.' }
 
   const { supabase, userId } = await requireUser()
   const ragText = buildProductRagText(input)
-  const nextVersion = Date.now()
+  const nextVersion = Math.floor(Date.now() / 1000)
   const publishedAt = input.status === 'published' ? new Date().toISOString() : null
 
   const { data: updated, error } = await supabase
@@ -126,8 +153,12 @@ export async function saveProduct(formData: FormData): Promise<void> {
     .eq('kind', 'product')
     .select('id')
     .single<{ id: string }>()
-  if (error) throw error
-  if (!updated) throw new Error('Product not found')
+  if (error) {
+    return { formError: error.message || 'Failed to save product.' }
+  }
+  if (!updated) {
+    return { formError: 'Product not found.' }
+  }
 
   if (input.status === 'published' && input.rag_enabled) {
     const productId = input.id
@@ -155,6 +186,7 @@ export async function saveProduct(formData: FormData): Promise<void> {
 
   revalidatePath('/dashboard/business/products')
   revalidatePath(`/dashboard/business/products/${input.id}`)
+  return { ok: true }
 }
 
 export async function deleteProduct(formData: FormData): Promise<void> {

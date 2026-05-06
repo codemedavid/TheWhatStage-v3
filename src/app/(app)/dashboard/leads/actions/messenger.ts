@@ -4,7 +4,8 @@ import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { decryptToken } from '@/lib/facebook/crypto'
-import { sendMessengerText } from '@/lib/facebook/messenger'
+import { createAdminClient } from '@/lib/supabase/admin'
+import { sendOutbound } from '@/lib/messenger/outbound'
 
 export interface ConversationMessage {
   id: string
@@ -271,7 +272,7 @@ export async function replyAsOperator(leadId: string, text: string): Promise<voi
 
   const { data: thread, error: threadErr } = await supabase
     .from('messenger_threads')
-    .select('id, psid, page_id, facebook_pages(page_access_token)')
+    .select('id, psid, page_id, last_inbound_at, controlled_by_run_id, facebook_pages(page_access_token)')
     .eq('lead_id', leadId)
     .maybeSingle()
   if (threadErr) throw new Error(`replyAsOperator: ${threadErr.message}`)
@@ -285,15 +286,28 @@ export async function replyAsOperator(leadId: string, text: string): Promise<voi
   }
   const pageToken = decryptToken(pageRow.page_access_token)
 
+  // Use service-role client for sendOutbound (needs to read marketing_optins table).
+  const admin = createAdminClient()
+
   let sentId: string | null = null
   let sendError: string | null = null
   try {
-    const sent = await sendMessengerText({
-      pageAccessToken: pageToken,
-      recipientPsid: thread.psid,
-      text: body,
+    const result = await sendOutbound({
+      admin,
+      thread: {
+        id: thread.id,
+        psid: thread.psid,
+        last_inbound_at: (thread as { last_inbound_at?: string | null }).last_inbound_at ?? null,
+      },
+      pageToken,
+      payload: { kind: 'text', text: body },
+      kind: 'operator',
     })
-    sentId = sent.message_id
+    if (result.sent) {
+      sentId = result.messageId
+    } else {
+      sendError = `policy_blocked:${result.reason}`
+    }
   } catch (e) {
     sendError = e instanceof Error ? e.message : String(e)
   }
@@ -309,12 +323,42 @@ export async function replyAsOperator(leadId: string, text: string): Promise<voi
   })
 
   if (!sendError) {
+    const threadUpdate: Record<string, unknown> = {
+      last_message_at: new Date().toISOString(),
+      last_message_preview: body.slice(0, 200),
+    }
+
+    // §9 operator override: clear the workflow run lock so the bot can resume
+    // normal operation when the run's wait expires, and pause the active run
+    // with a 24-hour auto-resume timer.
+    const runId = (thread as { controlled_by_run_id?: string | null }).controlled_by_run_id ?? null
+    if (runId) {
+      threadUpdate.controlled_by_run_id = null
+      const resumeAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+
+      // Read the run's current state, merge the pause reason, then write back.
+      // Race window is acceptable — operator override is a rare, manual event.
+      const { data: runRow } = await admin
+        .from('workflow_runs')
+        .select('state')
+        .eq('id', runId)
+        .in('status', ['running', 'waiting'])
+        .maybeSingle<{ state: Record<string, unknown> }>()
+      if (runRow) {
+        await admin
+          .from('workflow_runs')
+          .update({
+            status: 'waiting',
+            next_run_at: resumeAt,
+            state: { ...runRow.state, waiting_for: 'operator_took_over' },
+          })
+          .eq('id', runId)
+      }
+    }
+
     await supabase
       .from('messenger_threads')
-      .update({
-        last_message_at: new Date().toISOString(),
-        last_message_preview: body.slice(0, 200),
-      })
+      .update(threadUpdate)
       .eq('id', thread.id)
   }
 

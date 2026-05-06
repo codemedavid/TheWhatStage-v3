@@ -1,0 +1,162 @@
+/* Catalog (customer-facing storefront) styles. Tokens mirror the dashboard. */
+
+.shop-wrap {
+  background: linear-gradient(180deg, #FBF9F4 0%, #FBF9F4 60%, #F5F1E8 100%);
+  min-height: 100vh;
+  color: #1A1915;
+}
+
+.shop-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+@media (min-width: 640px) {
+  .shop-grid { gap: 18px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (min-width: 1024px) {
+  .shop-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
+.shop-card {
+  display: flex;
+  flex-direction: column;
+  background: #FFFFFF;
+  border: 1px solid #E8E6DE;
+  border-radius: 18px;
+  overflow: hidden;
+  box-shadow: 0 1px 2px rgba(20, 17, 11, 0.04);
+  transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+}
+.shop-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 1px 3px rgba(20, 17, 11, 0.06), 0 6px 18px rgba(20, 17, 11, 0.04);
+  border-color: #D9D6CC;
+}
+
+.shop-card-img {
+  background: #F6F5F1;
+  aspect-ratio: 1 / 1;
+  position: relative;
+  overflow: hidden;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  width: 100%;
+}
+.shop-card-img img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 500ms ease;
+}
+.shop-card:hover .shop-card-img img { transform: scale(1.05); }
+
+.shop-tab { position: relative; }
+.shop-tab[data-active="true"]::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -1px;
+  height: 2px;
+  width: 28px;
+  background: var(--shop-accent, #1F7A4D);
+  border-radius: 999px;
+  transform: translateX(-50%);
+}
+
+.shop-input {
+  width: 100%;
+  background: #FFFFFF;
+  border: 1px solid #E8E6DE;
+  border-radius: 12px;
+  padding: 11px 14px;
+  font-size: 14px;
+  color: #1A1915;
+  font-family: inherit;
+  transition: border-color 120ms, box-shadow 120ms;
+}
+.shop-input:focus {
+  outline: none;
+  border-color: var(--shop-accent, #1F7A4D);
+  box-shadow: 0 0 0 3px rgba(31, 122, 77, 0.12);
+}
+.shop-input::placeholder { color: #9C9A90; }
+
+.shop-btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: var(--shop-accent, #1F7A4D);
+  color: white;
+  border: 1px solid var(--shop-accent, #1F7A4D);
+  border-radius: 999px;
+  padding: 10px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(20, 17, 11, 0.04);
+  transition: background 120ms, transform 80ms;
+}
+.shop-btn-primary:hover { background: #0F4A30; }
+.shop-btn-primary:active { transform: translateY(1px); }
+.shop-btn-primary:disabled {
+  background: #F6F5F1;
+  color: #9C9A90;
+  border-color: #E8E6DE;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.shop-eyebrow {
+  font-family: var(--font-geist-mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #9C9A90;
+}
+
+.shop-drawer-bg {
+  background: rgba(20, 17, 11, 0.45);
+  backdrop-filter: blur(4px);
+}
+.shop-drawer {
+  background: #FFFFFF;
+  box-shadow: 0 24px 60px rgba(20, 17, 11, 0.18);
+}
+
+@keyframes shop-slide-up {
+  from { transform: translateY(20px); opacity: 0; }
+  to   { transform: translateY(0);     opacity: 1; }
+}
+.shop-modal { animation: shop-slide-up 220ms ease-out; }
+
+@keyframes shop-pop {
+  0%   { transform: scale(0.6); opacity: 0; }
+  60%  { transform: scale(1.15); opacity: 1; }
+  100% { transform: scale(1); }
+}
+.shop-badge-pop { animation: shop-pop 280ms ease; }
+
+.shop-scroll { scrollbar-width: thin; scrollbar-color: #D9D6CC transparent; }
+.shop-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
+.shop-scroll::-webkit-scrollbar-thumb {
+  background: #D9D6CC;
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+.shop-hide-mobile { display: none; }
+@media (min-width: 768px) {
+  .shop-hide-mobile { display: block; }
+  .shop-show-mobile { display: none !important; }
+}
+
+.shop-modal-grid { display: grid; grid-template-columns: 1fr; }
+@media (min-width: 640px) {
+  .shop-modal-grid { grid-template-columns: 1fr 1fr; }
+}

@@ -64,7 +64,7 @@ export async function POST(req: NextRequest) {
           return null
         })
         .filter((m): m is { role: 'user' | 'assistant'; content: string } => m !== null)
-        .slice(-12) // hard cap on prior turns
+        .slice(-20) // hard cap on prior turns
     }
   } catch {
     /* empty */
@@ -131,8 +131,18 @@ export async function POST(req: NextRequest) {
           retrievedChunks: built.contextChunks,
           limit: 4,
         })
-          .then((media) => {
-            if (media.length > 0) send({ type: 'media', media })
+          .then(async (media) => {
+            if (media.length === 0) return
+            // Sign URLs server-side so TestChat can render thumbnails directly.
+            const signed = await Promise.all(
+              media.map(async (m) => {
+                const { data } = await supabase.storage
+                  .from('media-assets')
+                  .createSignedUrl(m.storagePath, 3600)
+                return { ...m, signedUrl: data?.signedUrl ?? null }
+              }),
+            )
+            send({ type: 'media', media: signed })
           })
           .catch((err) => console.warn('[chat.test.media] selection failed', err))
 

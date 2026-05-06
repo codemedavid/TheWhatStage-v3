@@ -65,6 +65,33 @@ export async function selectMediaForReply(args: {
   const refs = extractMediaRefs(refText)
   const selected: SelectedMediaAsset[] = []
 
+  // Lazy semantic ranking — fetched only when needed (folder pick or fallback).
+  let semanticRanking: Map<string, number> | null = null
+  const loadSemanticRanking = async (): Promise<Map<string, number>> => {
+    if (semanticRanking) return semanticRanking
+    if (!args.client.rpc) {
+      semanticRanking = new Map()
+      return semanticRanking
+    }
+    const queryParts = [args.customerMessage, refText].filter((p) => p && p.trim())
+    const qvec = await args.embedder.embed(queryParts.join('\n\n'))
+    const { data, error } = await args.client.rpc(args.rpcName ?? 'match_media_assets', {
+      p_user_id: args.userId,
+      p_query_text: args.customerMessage,
+      p_query_embed: qvec,
+      p_match_limit: 40,
+    })
+    if (error) throw new Error(`match media assets failed: ${error.message ?? error}`)
+    const map = new Map<string, number>()
+    let i = 0
+    for (const r of (data ?? []) as { media_asset_id: string }[]) {
+      if (r.media_asset_id && !map.has(r.media_asset_id)) map.set(r.media_asset_id, i++)
+    }
+    semanticRanking = map
+    return map
+  }
+
+  // Priority 1 — explicit @asset references in retrieved knowledge.
   if (refs.assetSlugs.length) {
     const { data, error } = await args.client
       .from('media_assets')
@@ -80,6 +107,7 @@ export async function selectMediaForReply(args: {
     }
   }
 
+  // Priority 2 — #folder references: pick the single best image per folder.
   if (selected.length < limit && refs.folderSlugs.length) {
     const { data: folders, error: folderErr } = await args.client
       .from('media_folders')
@@ -87,7 +115,8 @@ export async function selectMediaForReply(args: {
       .eq('user_id', args.userId)
       .in('slug', refs.folderSlugs)
     if (folderErr) throw new Error(`load media folder refs failed: ${folderErr.message ?? folderErr}`)
-    const folderIds = (folders ?? []).map((f: { id: string }) => f.id)
+    const folderRows = (folders ?? []) as { id: string; slug: string }[]
+    const folderIds = folderRows.map((f) => f.id)
     if (folderIds.length) {
       const { data, error } = await args.client
         .from('media_assets')
@@ -96,37 +125,41 @@ export async function selectMediaForReply(args: {
         .eq('is_archived', false)
         .in('folder_id', folderIds)
       if (error) throw new Error(`load folder media failed: ${error.message ?? error}`)
-      for (const row of (data ?? []) as MediaAssetRow[]) addUnique(selected, row, 'folder_ref', limit)
-    }
-  }
-
-  if (selected.length < limit && args.client.rpc) {
-    const qvec = await args.embedder.embed(
-      [args.customerMessage, refText].filter((part) => part.trim()).join('\n\n'),
-    )
-    const { data, error } = await args.client.rpc(args.rpcName ?? 'match_media_assets', {
-      p_user_id: args.userId,
-      p_query_text: args.customerMessage,
-      p_query_embed: qvec,
-      p_match_limit: 40,
-    })
-    if (error) throw new Error(`match media assets failed: ${error.message ?? error}`)
-    const ids = Array.from(new Set((data ?? []).map((r: { media_asset_id: string }) => r.media_asset_id).filter(Boolean)))
-    if (ids.length) {
-      const { data: rows, error: rowsErr } = await args.client
-        .from('media_assets')
-        .select('id, folder_id, name, slug, description, storage_path, mime_type')
-        .eq('user_id', args.userId)
-        .eq('is_archived', false)
-        .in('id', ids)
-      if (rowsErr) throw new Error(`load semantic media failed: ${rowsErr.message ?? rowsErr}`)
-      const byId = new Map<string, MediaAssetRow>((rows ?? []).map((row: MediaAssetRow) => [row.id, row]))
-      for (const id of ids) {
-        const row = byId.get(id as string)
-        if (row) addUnique(selected, row, 'semantic', limit)
+      const assetsByFolder = new Map<string, MediaAssetRow[]>()
+      for (const row of (data ?? []) as MediaAssetRow[]) {
+        const list = assetsByFolder.get(row.folder_id) ?? []
+        list.push(row)
+        assetsByFolder.set(row.folder_id, list)
+      }
+      const ranking = await loadSemanticRanking()
+      const slugToFolder = new Map(folderRows.map((f) => [f.slug, f]))
+      // Walk in the order the folder slugs appeared in the chunks.
+      for (const slug of refs.folderSlugs) {
+        const folder = slugToFolder.get(slug)
+        if (!folder) continue
+        const candidates = assetsByFolder.get(folder.id) ?? []
+        const best = pickBestAsset(candidates, ranking)
+        if (best) addUnique(selected, best, 'folder_ref', limit)
       }
     }
   }
 
+  // Images are only sent when retrieved knowledge explicitly references them
+  // via @asset or #folder. No semantic fallback — keeps the bot from attaching
+  // images on every reply just because something looked vaguely similar.
   return selected.slice(0, limit)
+}
+
+function pickBestAsset(candidates: MediaAssetRow[], ranking: Map<string, number>): MediaAssetRow | null {
+  if (!candidates.length) return null
+  let best: MediaAssetRow | null = null
+  let bestRank = Number.POSITIVE_INFINITY
+  for (const row of candidates) {
+    const rank = ranking.get(row.id)
+    if (rank !== undefined && rank < bestRank) {
+      bestRank = rank
+      best = row
+    }
+  }
+  return best ?? candidates[0]
 }

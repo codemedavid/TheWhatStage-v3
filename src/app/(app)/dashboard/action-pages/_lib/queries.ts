@@ -87,8 +87,10 @@ export interface SubmissionListItem {
   outcome: string | null
   data: Record<string, unknown>
   psid: string | null
+  page_id: string | null
   lead_id: string | null
   lead_name: string | null
+  messenger_name: string | null
   created_at: string
 }
 
@@ -100,13 +102,14 @@ export async function fetchSubmissions(
 ): Promise<SubmissionListItem[]> {
   const { data, error } = await supabase
     .from('action_page_submissions')
-    .select('id, outcome, data, psid, lead_id, created_at, leads(name)')
+    .select('id, outcome, data, psid, page_id, lead_id, created_at, leads(name)')
     .eq('user_id', userId)
     .eq('action_page_id', actionPageId)
     .order('created_at', { ascending: false })
     .limit(limit)
   if (error) throw new Error(`fetchSubmissions: ${error.message}`)
-  return (data ?? []).map((row) => {
+
+  const rows = (data ?? []).map((row) => {
     const lead = Array.isArray(row.leads)
       ? row.leads[0]
       : (row.leads as { name?: string } | null)
@@ -115,11 +118,45 @@ export async function fetchSubmissions(
       outcome: (row.outcome as string | null) ?? null,
       data: (row.data as Record<string, unknown>) ?? {},
       psid: (row.psid as string | null) ?? null,
+      page_id: (row.page_id as string | null) ?? null,
       lead_id: (row.lead_id as string | null) ?? null,
       lead_name: lead?.name ?? null,
+      messenger_name: null as string | null,
       created_at: row.created_at as string,
     }
   })
+
+  const psids = Array.from(
+    new Set(rows.filter((r) => r.psid && r.page_id).map((r) => r.psid as string)),
+  )
+  const pageIds = Array.from(
+    new Set(rows.filter((r) => r.psid && r.page_id).map((r) => r.page_id as string)),
+  )
+  if (psids.length > 0 && pageIds.length > 0) {
+    const { data: threads } = await supabase
+      .from('messenger_threads')
+      .select('psid, page_id, full_name, leads(name)')
+      .in('psid', psids)
+      .in('page_id', pageIds)
+    const nameByKey = new Map<string, string>()
+    for (const t of (threads ?? []) as Array<{
+      psid: string
+      page_id: string
+      full_name: string | null
+      leads: { name?: string } | { name?: string }[] | null
+    }>) {
+      const linkedLead = Array.isArray(t.leads) ? t.leads[0] : t.leads
+      const resolved = linkedLead?.name || t.full_name
+      if (resolved) nameByKey.set(`${t.page_id}:${t.psid}`, resolved)
+    }
+    for (const r of rows) {
+      if (r.psid && r.page_id) {
+        r.messenger_name = nameByKey.get(`${r.page_id}:${r.psid}`) ?? null
+      }
+    }
+  }
+
+  return rows
 }
 
 export async function fetchPipelineStages(

@@ -1,4 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { createAdminClient } from '@/lib/supabase/admin'
+import { dispatchStageEntered } from '@/lib/workflow/dispatcher'
 import {
   HfRouterLlm,
   buildPrompt,
@@ -86,6 +88,7 @@ export async function answerWithClassification(
     buckets: ctx.buckets,
     config,
     maxContext: config.maxContext,
+    conversationSummary: options.conversationSummary,
   })
 
   const actionPages = options.actionPages ?? []
@@ -169,8 +172,8 @@ export async function classifyOnly(
 }
 
 /**
- * Apply a validated stage change. Returns the inserted event row id, or null
- * when the change was rejected (low confidence, no-op, unknown stage).
+ * Apply a validated stage change. Returns null when the change was rejected
+ * (low confidence, no-op, unknown stage) or the RPC declined it.
  * Never throws — caller can safely fire-and-forget.
  */
 export async function applyStageChange(
@@ -185,49 +188,40 @@ export async function applyStageChange(
   },
 ): Promise<string | null> {
   try {
-    const { leadId, userId, threadId, fromStageId, change, stages } = args
+    const { leadId, threadId, fromStageId, change, stages } = args
     if (change.confidence === 'low') return null
     if (change.to_stage_id === fromStageId) return null
     if (!stages.some((s) => s.id === change.to_stage_id)) return null
 
-    const { data: maxRow } = await admin
-      .from('leads')
-      .select('position')
-      .eq('user_id', userId)
-      .eq('stage_id', change.to_stage_id)
-      .order('position', { ascending: false })
-      .limit(1)
-      .maybeSingle<{ position: number }>()
-    const nextPosition = (maxRow?.position ?? -1) + 1
-
-    const { error: updErr } = await admin
-      .from('leads')
-      .update({ stage_id: change.to_stage_id, position: nextPosition })
-      .eq('id', leadId)
-    if (updErr) {
-      console.error('[classify] applyStageChange update failed', updErr.message)
-      return null
-    }
-
-    const { data: ev, error: evErr } = await admin
-      .from('lead_stage_events')
-      .insert({
-        lead_id: leadId,
-        user_id: userId,
-        from_stage_id: fromStageId,
-        to_stage_id: change.to_stage_id,
-        source: 'ai',
-        reason: change.reason?.slice(0, 500) ?? null,
-        confidence: change.confidence,
-        thread_id: threadId,
+    const idempotencyKey = `classify:${threadId}:${leadId}`
+    const { data, error } = await admin
+      .rpc('set_lead_stage', {
+        p_lead_id: leadId,
+        p_to_stage_id: change.to_stage_id,
+        p_source: 'classifier',
+        p_reason: change.reason?.slice(0, 500) ?? null,
+        p_idempotency_key: idempotencyKey,
+        p_expected_version: null,
+        p_confidence: change.confidence,
+        p_thread_id: threadId ?? null,
       })
-      .select('id')
-      .single<{ id: string }>()
-    if (evErr) {
-      console.error('[classify] event insert failed', evErr.message)
+    if (error) {
+      console.error('[classify] applyStageChange rpc failed', error.message)
       return null
     }
-    return ev?.id ?? null
+    if (data) {
+      const adminClient = createAdminClient()
+      // Fire-and-forget — trigger dispatch must never block the reply path.
+      dispatchStageEntered(adminClient, {
+        userId: args.userId,
+        leadId,
+        threadId: threadId ?? null,
+        toStageId: change.to_stage_id,
+        fromStageId: fromStageId ?? null,
+        idempotencyKey,
+      }).catch((e) => console.error('[classify] dispatchStageEntered threw', e))
+    }
+    return data ? leadId : null
   } catch (e) {
     console.error('[classify] applyStageChange threw', e)
     return null
@@ -250,10 +244,12 @@ function stageInstruction(
       'Pick at most one. Only use action_page_ids from the list below. ' +
       'The system will automatically attach the button as a SEPARATE message right after your reply — you do NOT need to send, link, or describe the button yourself.\n\n' +
       'STRICT REPLY RULES when attaching an action page:\n' +
-      '- `reply` must be a normal conversational message to the customer (e.g. introduce the form/booking naturally in the customer\'s language).\n' +
+      '- `reply` must be a normal conversational message — respond to what the customer said, nothing else.\n' +
+      '- Do NOT mention the button, form, booking link, or action page in `reply` at all. The system will send the button as a completely separate message automatically.\n' +
       '- NEVER copy, paraphrase, or echo the "send when" guidance text into `reply`.\n' +
-      '- NEVER write imperative phrases like "Send the X button", "[send button]", "Click here", URLs, or any instruction-style text in `reply`.\n' +
-      '- The "send when" text below is INTERNAL routing guidance for you — it is not a script to read aloud.\n\n' +
+      '- NEVER write any reference to a form, link, button, or action page in `reply` — in ANY language (English, Tagalog, Taglish, or other). This includes but is not limited to: "Fill out the form", "I-fill out ang form", "heto ang link", "link sa form", "i-click ang button", "Check the link", etc.\n' +
+      '- NEVER insert placeholder text like "[Insert Link]", "[form link here]", "[link]", or any bracketed template. If you would normally insert a link or URL, do NOT — the system sends the button separately.\n' +
+      '- The "send when" text below is INTERNAL routing guidance only — never mention it or act on it in the reply text.\n\n' +
       'BUTTON_TEXT RULES (the card caption shown above the button):\n' +
       '- Write a short, action-pushing call-to-action in the SAME language as the customer (e.g. Tagalog/Taglish if they wrote Tagalog).\n' +
       '- Max ~80 chars. One line. No greetings, no page title, no URL.\n' +

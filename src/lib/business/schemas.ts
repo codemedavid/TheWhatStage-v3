@@ -43,8 +43,18 @@ export const ProductFormInput = z
     status: BusinessItemStatusSchema,
     summary: z.string().trim().max(280).nullable().default(null),
     description: z.string().trim().max(8000).nullable().default(null),
-    price_amount: z.coerce.number().nonnegative().nullable().default(null),
-    compare_at_amount: z.coerce.number().nonnegative().nullable().default(null),
+    price_amount: z.coerce
+      .number()
+      .nonnegative()
+      .max(9_999_999_999.99, { message: 'Price must be 9,999,999,999.99 or less.' })
+      .nullable()
+      .default(null),
+    compare_at_amount: z.coerce
+      .number()
+      .nonnegative()
+      .max(9_999_999_999.99, { message: 'Compare-at price must be 9,999,999,999.99 or less.' })
+      .nullable()
+      .default(null),
     currency: CurrencyCode.default('PHP'),
     pricing_model: PricingModelSchema.default('fixed'),
     sku: z.string().trim().max(80).nullable().default(null),

@@ -94,7 +94,11 @@ export async function loadPublicActionPage(
 
   if (publicPage.kind === 'catalog') {
     const admin = createAdminClient()
-    const products = await fetchPublicCatalogProducts(admin, userId)
+    const products = await fetchPublicCatalogProducts(
+      admin,
+      userId,
+      publicPage.config as Parameters<typeof fetchPublicCatalogProducts>[2],
+    )
     return { page: publicPage, claims, attribution_error, products }
   }
 

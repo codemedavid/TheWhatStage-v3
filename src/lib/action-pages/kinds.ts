@@ -159,7 +159,11 @@ export const KIND_REGISTRY: Record<ActionPageKind, KindMeta> = {
     label: 'Product Catalog',
     blurb: 'E-commerce style listing with cart and checkout.',
     supportsEmbed: false,
-    defaultConfig: { products: [], currency: 'PHP' },
+    defaultConfig: {
+      theme: { accent_color: '#059669' },
+      product_ids: [],
+      categories: [],
+    },
     defaultPipelineRules: [{ outcome: 'checked_out', reason: 'Catalog checkout' }],
   },
   realestate: {

@@ -1,29 +1,126 @@
 import { getSession } from '@/lib/auth/get-session'
+import { createClient } from '@/lib/supabase/server'
+import DashboardClient, {
+  type DashStats,
+  type RecentSubmission,
+} from './_components/DashboardClient'
 
 export default async function DashboardPage() {
   const session = await getSession()
-  const name = session?.fullName ?? 'there'
+  const userId = session?.userId ?? ''
+  const userName = session?.fullName ?? 'there'
+
+  const supabase = await createClient()
+
+  const now = new Date()
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString()
+  const startOfWeek = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString()
+  const startOfMonth = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString()
+
+  /* ── 1. Fetch user's action page IDs (needed for submission queries) ── */
+  const { data: userPages } = await supabase
+    .from('action_pages')
+    .select('id, status, title')
+    .eq('user_id', userId)
+
+  const allPageIds = (userPages ?? []).map(p => p.id)
+  const hasActiveActionPages = (userPages ?? []).some(p => p.status === 'published')
+
+  /* ── 2. Parallel queries ── */
+  const [
+    personalityResult,
+    facebookResult,
+    bookingsTodayResult,
+    bookingsWeekResult,
+    submissionsMonthResult,
+    recentResult,
+  ] = await Promise.all([
+    supabase
+      .from('chatbot_configs')
+      .select('id')
+      .eq('user_id', userId)
+      .maybeSingle(),
+
+    supabase
+      .from('facebook_connections')
+      .select('id, facebook_pages(id)')
+      .eq('user_id', userId)
+      .maybeSingle(),
+
+    allPageIds.length > 0
+      ? supabase
+          .from('action_page_submissions')
+          .select('id', { count: 'exact', head: true })
+          .in('action_page_id', allPageIds)
+          .gte('created_at', startOfToday)
+      : Promise.resolve({ count: 0 }),
+
+    allPageIds.length > 0
+      ? supabase
+          .from('action_page_submissions')
+          .select('id', { count: 'exact', head: true })
+          .in('action_page_id', allPageIds)
+          .gte('created_at', startOfWeek)
+      : Promise.resolve({ count: 0 }),
+
+    allPageIds.length > 0
+      ? supabase
+          .from('action_page_submissions')
+          .select('id', { count: 'exact', head: true })
+          .in('action_page_id', allPageIds)
+          .gte('created_at', startOfMonth)
+      : Promise.resolve({ count: 0 }),
+
+    allPageIds.length > 0
+      ? supabase
+          .from('action_page_submissions')
+          .select('id, data, created_at, action_page_id')
+          .in('action_page_id', allPageIds)
+          .order('created_at', { ascending: false })
+          .limit(5)
+      : Promise.resolve({ data: [] }),
+  ])
+
+  const hasPersonality = !!personalityResult.data
+
+  const fbConn = facebookResult.data as { id: string; facebook_pages: { id: string }[] } | null
+  const hasFacebook = !!(fbConn && Array.isArray(fbConn.facebook_pages) && fbConn.facebook_pages.length > 0)
+
+  const stats: DashStats = {
+    bookingsToday: bookingsTodayResult.count ?? 0,
+    bookingsWeek: bookingsWeekResult.count ?? 0,
+    leadsWeek: bookingsWeekResult.count ?? 0,
+    submissionsMonth: submissionsMonthResult.count ?? 0,
+  }
+
+  /* Build page title lookup */
+  const pageTitleById = Object.fromEntries(
+    (userPages ?? []).map(p => [p.id, p.title ?? 'Action page'])
+  )
+
+  const recentSubmissions: RecentSubmission[] = ((recentResult.data ?? []) as {
+    id: string
+    data: Record<string, unknown>
+    created_at: string
+    action_page_id: string
+  }[]).map(row => ({
+    id: row.id,
+    name:
+      (row.data?.full_name as string | undefined) ??
+      (row.data?.name as string | undefined) ??
+      null,
+    actionPageTitle: pageTitleById[row.action_page_id] ?? 'Action page',
+    createdAt: row.created_at,
+  }))
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-[24px] font-semibold text-[#111827]">Dashboard</h1>
-        <p className="text-[14px] text-[#6B7280] mt-1">
-          Hi {name}, this is your workspace overview.
-        </p>
-      </div>
-
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-        {['Activity', 'Pipeline', 'Messages'].map((title) => (
-          <section
-            key={title}
-            className="rounded-xl border border-[#E5E7EB] bg-white p-5 min-h-40"
-          >
-            <h2 className="text-[14px] font-medium text-[#6B7280]">{title}</h2>
-            <p className="mt-2 text-[13px] text-[#9CA3AF]">No data yet.</p>
-          </section>
-        ))}
-      </div>
-    </div>
+    <DashboardClient
+      userName={userName}
+      hasPersonality={hasPersonality}
+      hasActiveActionPages={hasActiveActionPages}
+      hasFacebook={hasFacebook}
+      stats={stats}
+      recentSubmissions={recentSubmissions}
+    />
   )
 }
