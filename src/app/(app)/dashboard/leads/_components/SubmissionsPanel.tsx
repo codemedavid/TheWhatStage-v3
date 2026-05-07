@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useTransition } from 'react'
 import {
   loadLeadSubmissions,
   type LeadSubmission,
@@ -12,28 +12,39 @@ type State =
   | { kind: 'error'; message: string }
   | { kind: 'ready'; rows: LeadSubmission[] }
 
-export function SubmissionsPanel({ leadId }: { leadId: string }) {
+export function SubmissionsPanel({
+  leadId,
+  kinds,
+  emptyMessage,
+}: {
+  leadId: string
+  kinds?: string[]
+  emptyMessage?: string
+}) {
   const [state, setState] = useState<State>({ kind: 'loading' })
+  const [, startTransition] = useTransition()
+  const kindsKey = kinds?.join(',') ?? ''
 
   useEffect(() => {
     let cancelled = false
-    setState({ kind: 'loading' })
-    loadLeadSubmissions(leadId)
+    startTransition(() => setState({ kind: 'loading' }))
+    loadLeadSubmissions(leadId, kinds ? { kinds } : undefined)
       .then((rows) => {
-        if (!cancelled) setState({ kind: 'ready', rows })
+        if (!cancelled) startTransition(() => setState({ kind: 'ready', rows }))
       })
       .catch((e: unknown) => {
         if (!cancelled) {
-          setState({
+          startTransition(() => setState({
             kind: 'error',
             message: e instanceof Error ? e.message : 'Failed to load',
-          })
+          }))
         }
       })
     return () => {
       cancelled = true
     }
-  }, [leadId])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [leadId, kindsKey, startTransition])
 
   if (state.kind === 'loading') {
     return (
@@ -59,7 +70,7 @@ export function SubmissionsPanel({ leadId }: { leadId: string }) {
           color: 'var(--lead-muted)',
         }}
       >
-        This lead hasn’t submitted any action pages yet.
+        {emptyMessage ?? 'This lead hasn’t submitted any action pages yet.'}
       </div>
     )
   }

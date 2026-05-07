@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import type { ActionPageKind } from '@/lib/action-pages/kinds'
 import type { PipelineRule } from '../_lib/schemas'
 
 interface Stage {
@@ -8,15 +9,36 @@ interface Stage {
   name: string
 }
 
+const OUTCOMES_BY_KIND: Record<string, { value: string; label: string }[]> = {
+  form:          [{ value: 'submitted', label: 'Submitted' }],
+  booking:       [
+    { value: 'booked',   label: 'Booked' },
+    { value: 'no_show',  label: 'No-show' },
+  ],
+  qualification: [
+    { value: 'qualified',      label: 'Qualified' },
+    { value: 'disqualified',   label: 'Disqualified' },
+    { value: 'pending_review', label: 'Pending review' },
+  ],
+  sales:         [{ value: 'checked_out',     label: 'Checked out' }],
+  catalog:       [{ value: 'checked_out',     label: 'Checked out' }],
+  realestate:    [{ value: 'viewing_booked',  label: 'Viewing booked' }],
+}
+
 export function PipelineRulesEditor({
   initial,
   stages,
+  kind,
 }: {
   initial: PipelineRule[]
   stages: Stage[]
+  kind: ActionPageKind
 }) {
+  const outcomes = OUTCOMES_BY_KIND[kind] ?? []
+  const firstOutcome = outcomes[0]?.value ?? ''
+
   const [rules, setRules] = useState<PipelineRule[]>(
-    initial.length ? initial : [{ outcome: 'submitted', to_stage_id: null, reason: '' }],
+    initial.length ? initial : [{ outcome: firstOutcome, to_stage_id: null, reason: '' }],
   )
 
   function update(i: number, patch: Partial<PipelineRule>) {
@@ -26,12 +48,15 @@ export function PipelineRulesEditor({
     setRules((rs) => rs.filter((_, idx) => idx !== i))
   }
   function add() {
-    setRules((rs) => [...rs, { outcome: '', to_stage_id: null, reason: '' }])
+    setRules((rs) => [...rs, { outcome: firstOutcome, to_stage_id: null, reason: '' }])
   }
+
+  // Only submit rules that have a valid outcome selected.
+  const submittableRules = rules.filter((r) => r.outcome.trim().length > 0)
 
   return (
     <div className="space-y-2">
-      <input type="hidden" name="pipeline_rules" value={JSON.stringify(rules)} />
+      <input type="hidden" name="pipeline_rules" value={JSON.stringify(submittableRules)} />
       <p className="text-[12px] text-[#6B7280]">
         When a submission resolves to an outcome, move the lead into the configured
         stage and (optionally) send them a Messenger reply. Leave the stage empty
@@ -48,12 +73,26 @@ export function PipelineRulesEditor({
                 <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-[#6B7280]">
                   Outcome
                 </span>
-                <input
-                  value={rule.outcome}
-                  onChange={(e) => update(i, { outcome: e.target.value })}
-                  placeholder="submitted"
-                  className="w-full rounded border border-[#E5E7EB] px-2 py-1 font-mono text-[12px]"
-                />
+                {outcomes.length > 0 ? (
+                  <select
+                    value={rule.outcome}
+                    onChange={(e) => update(i, { outcome: e.target.value })}
+                    className="w-full rounded border border-[#E5E7EB] px-2 py-1 text-[13px]"
+                  >
+                    {outcomes.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    value={rule.outcome}
+                    onChange={(e) => update(i, { outcome: e.target.value })}
+                    placeholder="submitted"
+                    className="w-full rounded border border-[#E5E7EB] px-2 py-1 font-mono text-[12px]"
+                  />
+                )}
               </label>
               <label className="block">
                 <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-[#6B7280]">
@@ -110,13 +149,15 @@ export function PipelineRulesEditor({
           </div>
         ))}
       </div>
-      <button
-        type="button"
-        onClick={add}
-        className="rounded-md border border-[#E5E7EB] bg-white px-3 py-1.5 text-[12px] font-semibold text-[#374151] hover:bg-[#F9FAFB]"
-      >
-        + Add rule
-      </button>
+      {outcomes.length > 1 || rules.length === 0 ? (
+        <button
+          type="button"
+          onClick={add}
+          className="rounded-md border border-[#E5E7EB] bg-white px-3 py-1.5 text-[12px] font-semibold text-[#374151] hover:bg-[#F9FAFB]"
+        >
+          + Add rule
+        </button>
+      ) : null}
     </div>
   )
 }

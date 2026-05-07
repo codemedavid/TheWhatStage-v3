@@ -210,7 +210,12 @@ export async function claimJobs(
  * the row shape differs between sources and we keep the worker pure-ish.
  */
 export interface SourceFetchers {
-  fetchDocument: (id: string) => Promise<{ title: string; contentJson: unknown; version?: number }>;
+  fetchDocument: (id: string) => Promise<{
+    title: string;
+    contentJson: unknown;
+    contentText?: string | null;
+    version?: number;
+  }>;
   fetchFaq: (id: string) => Promise<{ question: string; answer: string; version?: number }>;
   fetchBusinessItem?: (id: string) => Promise<{
     title: string;
@@ -241,7 +246,12 @@ async function buildParseInput(
       kind: 'document',
       sourceId: job.document_id,
       sourceVersion: doc.version ?? 0,
-      parseInput: { kind: 'document', title: doc.title, contentJson: doc.contentJson },
+      parseInput: {
+        kind: 'document',
+        title: doc.title,
+        contentJson: doc.contentJson,
+        contentText: doc.contentText,
+      },
     };
   }
   if (job.faq_id) {

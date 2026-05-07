@@ -64,7 +64,8 @@ export function DocumentEditor({
   mediaAssets: MediaAssetRow[]
 }) {
   const [mounted, setMounted] = useState(false)
-  useEffect(() => setMounted(true), [])
+  const [, startTransitionMount] = useTransition()
+  useEffect(() => startTransitionMount(() => setMounted(true)), [startTransitionMount])
 
   if (!mounted) {
     return (
@@ -133,7 +134,7 @@ function DocumentEditorImpl({
 
   // Refs decouple Save from React render cycles & editor mount state.
   const titleRef = useRef(title)
-  titleRef.current = title
+  useEffect(() => { titleRef.current = title })
 
   const latestRef = useRef<{
     json: unknown
@@ -153,6 +154,14 @@ function DocumentEditorImpl({
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const userInteractedRef = useRef(false)
   const editorRef = useRef<Editor | null>(null)
+
+  // ProseMirror builds node attrs with Object.create(null). React Server Actions'
+  // Flight serializer drops nested null-prototype objects, so attrs round-trip
+  // as undefined and saved JSON becomes `{"type":"mention"}` with no `attrs`.
+  // Round-tripping through JSON.stringify normalises every node to a plain
+  // object so Flight preserves the attrs. Required for mention/image/etc.
+  const normalizeJson = (json: unknown): unknown =>
+    json == null ? null : JSON.parse(JSON.stringify(json))
 
   const uploadAndInsertImage = useCallback(
     async (file: File) => {
@@ -226,10 +235,76 @@ function DocumentEditorImpl({
   // Use a real ProseMirror-friendly empty value (`<p></p>`) — empty string can
   // cause the schema to reject the initial doc and silently produce a
   // non-editable view.
-  const initialContent: string | object =
-    (doc.draft_json as object | null) ??
-    (doc.content_json as object | null) ??
-    '<p></p>'
+  //
+  // When stored JSON has nodes with missing/empty `attrs` but the saved HTML
+  // still carries the `data-*` attributes (a side-effect of an earlier Server
+  // Action serialisation bug that dropped null-prototype attr objects), we
+  // load from HTML instead so the editor parses the attrs back. Re-saving then
+  // heals the JSON via `normalizeJson` above.
+  const jsonNeedsHtmlFallback = (json: unknown): boolean => {
+    if (!json || typeof json !== 'object') return false
+    const node = json as { type?: string; attrs?: unknown; content?: unknown[] }
+    if (
+      (node.type === 'mention' || node.type === 'image') &&
+      (!node.attrs || Object.keys(node.attrs as object).length === 0)
+    ) {
+      return true
+    }
+    if (Array.isArray(node.content)) {
+      for (const child of node.content) {
+        if (jsonNeedsHtmlFallback(child)) return true
+      }
+    }
+    return false
+  }
+
+  const runAutosave = useCallback(async () => {
+    const seq = ++seqRef.current
+    setState('saving-draft')
+    try {
+      await autosaveDocument({
+        id: doc.id,
+        title: titleRef.current.trim() || 'Untitled',
+        draftJson: latestRef.current.json ?? null,
+        draftHtml: latestRef.current.html,
+        draftText: latestRef.current.text,
+      })
+      if (seq < lastAppliedSeqRef.current) return
+      lastAppliedSeqRef.current = seq
+      setState((cur) => (cur === 'dirty' ? 'dirty' : 'saved-draft'))
+      setErrorMsg(null)
+    } catch (e) {
+      if (seq < lastAppliedSeqRef.current) return
+      setState('error')
+      setErrorMsg(e instanceof Error ? e.message : 'Autosave failed')
+    }
+  }, [doc.id])
+
+  const triggerAutosave = useCallback(() => {
+    setState('dirty')
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(() => {
+      void runAutosave()
+    }, AUTOSAVE_DEBOUNCE_MS)
+  }, [runAutosave])
+
+  const draftJson = (doc.draft_json as object | null) ?? null
+  const contentJson = (doc.content_json as object | null) ?? null
+  const draftHtml = doc.draft_html ?? null
+  const contentHtml = doc.content_html ?? null
+
+  let initialContent: string | object
+  if (draftJson && !jsonNeedsHtmlFallback(draftJson)) {
+    initialContent = draftJson
+  } else if (draftHtml) {
+    initialContent = draftHtml
+  } else if (contentJson && !jsonNeedsHtmlFallback(contentJson)) {
+    initialContent = contentJson
+  } else if (contentHtml) {
+    initialContent = contentHtml
+  } else {
+    initialContent = '<p></p>'
+  }
 
   const editor = useEditor({
     extensions: [
@@ -313,7 +388,7 @@ function DocumentEditorImpl({
       setEditorReady(true)
       editorRef.current = editor
       latestRef.current = {
-        json: editor.getJSON(),
+        json: normalizeJson(editor.getJSON()),
         html: editor.getHTML(),
         text: editor.getText(),
       }
@@ -321,7 +396,7 @@ function DocumentEditorImpl({
       console.log('[DocumentEditor] mounted')
     },
     onUpdate: ({ editor }) => {
-      const json = editor.getJSON()
+      const json = normalizeJson(editor.getJSON())
       latestRef.current = {
         json,
         html: editor.getHTML(),
@@ -334,36 +409,33 @@ function DocumentEditorImpl({
     },
   })
 
-  const triggerAutosave = useCallback(() => {
-    setState('dirty')
-    if (debounceRef.current) clearTimeout(debounceRef.current)
-    debounceRef.current = setTimeout(() => {
-      void runAutosave()
-    }, AUTOSAVE_DEBOUNCE_MS)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  const runAutosave = useCallback(async () => {
-    const seq = ++seqRef.current
-    setState('saving-draft')
-    try {
-      await autosaveDocument({
-        id: doc.id,
-        title: titleRef.current.trim() || 'Untitled',
-        draftJson: latestRef.current.json ?? null,
-        draftHtml: latestRef.current.html,
-        draftText: latestRef.current.text,
-      })
-      if (seq < lastAppliedSeqRef.current) return
-      lastAppliedSeqRef.current = seq
-      setState((cur) => (cur === 'dirty' ? 'dirty' : 'saved-draft'))
-      setErrorMsg(null)
-    } catch (e) {
-      if (seq < lastAppliedSeqRef.current) return
-      setState('error')
-      setErrorMsg(e instanceof Error ? e.message : 'Autosave failed')
-    }
-  }, [doc.id])
+  const handleSave = useCallback(() => {
+    startSave(async () => {
+      if (debounceRef.current) {
+        clearTimeout(debounceRef.current)
+        debounceRef.current = null
+      }
+      setState('saving')
+      try {
+        // Flush latest content (works even if editor is null — we'd just save title + previous content).
+        await autosaveDocument({
+          id: doc.id,
+          title: titleRef.current.trim() || 'Untitled',
+          draftJson: latestRef.current.json ?? null,
+          draftHtml: latestRef.current.html,
+          draftText: latestRef.current.text,
+        })
+        const result = await saveDocument({ id: doc.id })
+        setVersion(result.version)
+        setState('idle')
+        setErrorMsg(null)
+        router.refresh()
+      } catch (e) {
+        setState('error')
+        setErrorMsg(e instanceof Error ? e.message : 'Save failed')
+      }
+    })
+  }, [doc.id, router, startSave])
 
   // Cmd/Ctrl+S → save. Cmd/Ctrl+K → link the current selection.
   useEffect(() => {
@@ -381,8 +453,7 @@ function DocumentEditorImpl({
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [handleSave])
 
   // Warn on close if unsaved.
   useEffect(() => {
@@ -467,33 +538,6 @@ function DocumentEditorImpl({
     triggerAutosave()
   }
 
-  const handleSave = () => {
-    startSave(async () => {
-      if (debounceRef.current) {
-        clearTimeout(debounceRef.current)
-        debounceRef.current = null
-      }
-      setState('saving')
-      try {
-        // Flush latest content (works even if editor is null — we'd just save title + previous content).
-        await autosaveDocument({
-          id: doc.id,
-          title: titleRef.current.trim() || 'Untitled',
-          draftJson: latestRef.current.json ?? null,
-          draftHtml: latestRef.current.html,
-          draftText: latestRef.current.text,
-        })
-        const result = await saveDocument({ id: doc.id })
-        setVersion(result.version)
-        setState('idle')
-        setErrorMsg(null)
-        router.refresh()
-      } catch (e) {
-        setState('error')
-        setErrorMsg(e instanceof Error ? e.message : 'Save failed')
-      }
-    })
-  }
 
   const handleDelete = () => {
     if (!confirm('Delete this document? This cannot be undone.')) return
@@ -648,7 +692,7 @@ function DocumentEditorImpl({
                   Loading editor…
                 </div>
               )}
-              {editor && (
+              {editorReady && editor && (
                 <BubbleMenu
                   editor={editor}
                   className="flex items-center gap-0.5 rounded-lg border border-[#dadce0] bg-white px-1 py-1 shadow-md"
@@ -709,7 +753,7 @@ function DocumentEditorImpl({
                   </BubbleBtn>
                 </BubbleMenu>
               )}
-              {editor && (
+              {editorReady && editor && (
                 <FloatingMenu
                   editor={editor}
                   className="flex items-center gap-0.5 rounded-lg border border-[#dadce0] bg-white px-1 py-1 shadow-md"
@@ -860,32 +904,20 @@ function CategorySelect({
   )
 }
 
-function Toolbar({
-  editor,
-  mediaFolders,
-  mediaAssets,
-  onPickAsset,
-  onPickFolder,
+function ToolbarBtn({
+  onClick,
+  active,
+  children,
+  label,
+  disabled,
 }: {
-  editor: Editor | null
-  mediaFolders: MediaFolderRow[]
-  mediaAssets: MediaAssetRow[]
-  onPickAsset: (asset: PickedAsset) => void
-  onPickFolder: (folder: PickedFolder) => void
+  onClick: () => void
+  active?: boolean
+  children: React.ReactNode
+  label: string
+  disabled?: boolean
 }) {
-  const disabled = !editor
-
-  const Btn = ({
-    onClick,
-    active,
-    children,
-    label,
-  }: {
-    onClick: () => void
-    active?: boolean
-    children: React.ReactNode
-    label: string
-  }) => (
+  return (
     <button
       type="button"
       title={label}
@@ -903,148 +935,183 @@ function Toolbar({
       {children}
     </button>
   )
+}
+
+function Toolbar({
+  editor,
+  mediaFolders,
+  mediaAssets,
+  onPickAsset,
+  onPickFolder,
+}: {
+  editor: Editor | null
+  mediaFolders: MediaFolderRow[]
+  mediaAssets: MediaAssetRow[]
+  onPickAsset: (asset: PickedAsset) => void
+  onPickFolder: (folder: PickedFolder) => void
+}) {
+  const disabled = !editor
 
   const isActive = (name: string, attrs?: Record<string, unknown>) =>
     Boolean(editor?.isActive(name, attrs))
 
   return (
     <div className="mx-auto flex max-w-[920px] flex-wrap items-center gap-1 px-6 py-1.5">
-      <Btn
+      <ToolbarBtn
         label="Undo"
+        disabled={disabled}
         onClick={() => editor?.chain().focus().undo().run()}
       >
         <Icon path="M3 7v6h6M21 17a9 9 0 0 0-15-6.7L3 13" />
-      </Btn>
-      <Btn
+      </ToolbarBtn>
+      <ToolbarBtn
         label="Redo"
+        disabled={disabled}
         onClick={() => editor?.chain().focus().redo().run()}
       >
         <Icon path="M21 7v6h-6M3 17a9 9 0 0 1 15-6.7L21 13" />
-      </Btn>
+      </ToolbarBtn>
       <Divider />
-      <Btn
+      <ToolbarBtn
         label="Heading 1"
+        disabled={disabled}
         active={isActive('heading', { level: 1 })}
         onClick={() => editor?.chain().focus().toggleHeading({ level: 1 }).run()}
       >
         <span className="text-[13px] font-bold">H1</span>
-      </Btn>
-      <Btn
+      </ToolbarBtn>
+      <ToolbarBtn
         label="Heading 2"
+        disabled={disabled}
         active={isActive('heading', { level: 2 })}
         onClick={() => editor?.chain().focus().toggleHeading({ level: 2 }).run()}
       >
         <span className="text-[13px] font-bold">H2</span>
-      </Btn>
-      <Btn
+      </ToolbarBtn>
+      <ToolbarBtn
         label="Heading 3"
+        disabled={disabled}
         active={isActive('heading', { level: 3 })}
         onClick={() => editor?.chain().focus().toggleHeading({ level: 3 }).run()}
       >
         <span className="text-[13px] font-bold">H3</span>
-      </Btn>
+      </ToolbarBtn>
       <Divider />
-      <Btn
+      <ToolbarBtn
         label="Bold (⌘B)"
+        disabled={disabled}
         active={isActive('bold')}
         onClick={() => editor?.chain().focus().toggleBold().run()}
       >
         <span className="text-[14px] font-bold">B</span>
-      </Btn>
-      <Btn
+      </ToolbarBtn>
+      <ToolbarBtn
         label="Italic (⌘I)"
+        disabled={disabled}
         active={isActive('italic')}
         onClick={() => editor?.chain().focus().toggleItalic().run()}
       >
         <span className="text-[14px] italic">I</span>
-      </Btn>
-      <Btn
+      </ToolbarBtn>
+      <ToolbarBtn
         label="Underline (⌘U)"
+        disabled={disabled}
         active={isActive('underline')}
         onClick={() => editor?.chain().focus().toggleUnderline().run()}
       >
         <span className="text-[14px] underline">U</span>
-      </Btn>
-      <Btn
+      </ToolbarBtn>
+      <ToolbarBtn
         label="Strikethrough"
+        disabled={disabled}
         active={isActive('strike')}
         onClick={() => editor?.chain().focus().toggleStrike().run()}
       >
         <span className="text-[14px] line-through">S</span>
-      </Btn>
-      <Btn
+      </ToolbarBtn>
+      <ToolbarBtn
         label="Inline code"
+        disabled={disabled}
         active={isActive('code')}
         onClick={() => editor?.chain().focus().toggleCode().run()}
       >
         <Icon path="M8 6 2 12l6 6M16 6l6 6-6 6" />
-      </Btn>
+      </ToolbarBtn>
       <ColorPicker editor={editor} />
       <HighlightPicker editor={editor} />
       <Divider />
-      <Btn
+      <ToolbarBtn
         label="Align left"
+        disabled={disabled}
         active={Boolean(editor?.isActive({ textAlign: 'left' }))}
         onClick={() => editor?.chain().focus().setTextAlign('left').run()}
       >
         <Icon path="M3 6h18M3 12h12M3 18h18" />
-      </Btn>
-      <Btn
+      </ToolbarBtn>
+      <ToolbarBtn
         label="Align center"
+        disabled={disabled}
         active={Boolean(editor?.isActive({ textAlign: 'center' }))}
         onClick={() => editor?.chain().focus().setTextAlign('center').run()}
       >
         <Icon path="M3 6h18M6 12h12M3 18h18" />
-      </Btn>
-      <Btn
+      </ToolbarBtn>
+      <ToolbarBtn
         label="Align right"
+        disabled={disabled}
         active={Boolean(editor?.isActive({ textAlign: 'right' }))}
         onClick={() => editor?.chain().focus().setTextAlign('right').run()}
       >
         <Icon path="M3 6h18M9 12h12M3 18h18" />
-      </Btn>
-      <Btn
+      </ToolbarBtn>
+      <ToolbarBtn
         label="Justify"
+        disabled={disabled}
         active={Boolean(editor?.isActive({ textAlign: 'justify' }))}
         onClick={() => editor?.chain().focus().setTextAlign('justify').run()}
       >
         <Icon path="M3 6h18M3 12h18M3 18h18" />
-      </Btn>
+      </ToolbarBtn>
       <Divider />
-      <Btn
+      <ToolbarBtn
         label="Bullet list"
+        disabled={disabled}
         active={isActive('bulletList')}
         onClick={() => editor?.chain().focus().toggleBulletList().run()}
       >
         <Icon path="M9 6h12M9 12h12M9 18h12M4 6h.01M4 12h.01M4 18h.01" />
-      </Btn>
-      <Btn
+      </ToolbarBtn>
+      <ToolbarBtn
         label="Numbered list"
+        disabled={disabled}
         active={isActive('orderedList')}
         onClick={() => editor?.chain().focus().toggleOrderedList().run()}
       >
         <Icon path="M10 6h11M10 12h11M10 18h11M4 6h1v4M4 10h2M6 18H4c0-1 2-2 2-3s-1-1.5-2-1" />
-      </Btn>
-      <Btn
+      </ToolbarBtn>
+      <ToolbarBtn
         label="Quote"
+        disabled={disabled}
         active={isActive('blockquote')}
         onClick={() => editor?.chain().focus().toggleBlockquote().run()}
       >
         <Icon path="M3 21c3 0 7-1 7-8V5H3v8h4M14 21c3 0 7-1 7-8V5h-7v8h4" />
-      </Btn>
-      <Btn
+      </ToolbarBtn>
+      <ToolbarBtn
         label="Code block"
+        disabled={disabled}
         active={isActive('codeBlock')}
         onClick={() => editor?.chain().focus().toggleCodeBlock().run()}
       >
         <Icon path="M16 18l6-6-6-6M8 6l-6 6 6 6" />
-      </Btn>
-      <Btn
+      </ToolbarBtn>
+      <ToolbarBtn
         label="Divider"
+        disabled={disabled}
         onClick={() => editor?.chain().focus().setHorizontalRule().run()}
       >
         <Icon path="M5 12h14" />
-      </Btn>
+      </ToolbarBtn>
       <Divider />
       <MediaLibraryButton
         folders={mediaFolders}
@@ -1052,21 +1119,23 @@ function Toolbar({
         onPickAsset={onPickAsset}
         onPickFolder={onPickFolder}
       />
-      <Btn
+      <ToolbarBtn
         label="Link (⌘K)"
+        disabled={disabled}
         active={isActive('link')}
         onClick={() => editor && promptLink(editor)}
       >
         <Icon path="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1" />
-      </Btn>
-      <Btn
+      </ToolbarBtn>
+      <ToolbarBtn
         label="Clear formatting"
+        disabled={disabled}
         onClick={() =>
           editor?.chain().focus().unsetAllMarks().clearNodes().run()
         }
       >
         <Icon path="M3 3l18 18M7 4h10M9 4l-2 16M15 4l-2 16M5 20h14" />
-      </Btn>
+      </ToolbarBtn>
     </div>
   )
 }

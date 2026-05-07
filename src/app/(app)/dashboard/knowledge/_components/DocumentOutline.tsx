@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useTransition } from 'react'
 
 type Heading = { id: string; level: 1 | 2 | 3; text: string; index: number }
 
@@ -8,10 +8,11 @@ type Heading = { id: string; level: 1 | 2 | 3; text: string; index: number }
 export function DocumentOutline({ json }: { json: unknown }) {
   const [headings, setHeadings] = useState<Heading[]>([])
   const [activeIdx, setActiveIdx] = useState<number | null>(null)
+  const [, startTransition] = useTransition()
 
   useEffect(() => {
-    setHeadings(extractHeadings(json))
-  }, [json])
+    startTransition(() => setHeadings(extractHeadings(json)))
+  }, [json, startTransition])
 
   // Highlight the heading currently scrolled into view.
   useEffect(() => {

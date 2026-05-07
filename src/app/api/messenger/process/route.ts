@@ -9,7 +9,10 @@ import {
   sendMessengerSenderAction,
 } from '@/lib/facebook/messenger'
 import { sendOutbound } from '@/lib/messenger/outbound'
+import { handleCampaignSend } from '@/lib/messenger/campaignSend'
 import { deeplinkActionPageUrl } from '@/lib/action-pages/urls'
+import { fetchPublicCatalogProducts, type PublicProductCard } from '@/lib/business/public-dto'
+import type { MessengerGenericElement } from '@/lib/facebook/messenger'
 import { appendLeadContacts, extractEmails, extractPhones } from '@/lib/leads/contact-append'
 import { answer, summarizeConversation, type AnswerHistory } from '@/lib/chatbot/answer'
 import { type SelectedMediaAsset } from '@/lib/media/selector'
@@ -42,12 +45,14 @@ type AdminClient = ReturnType<typeof createAdminClient>
 interface JobRow {
   id: string
   thread_id: string
-  inbound_msg_id: string
+  inbound_msg_id: string | null
   user_id: string
   attempts: number
   outbound_text_fb_id: string | null
   outbound_button_fb_id: string | null
   outbound_media: Array<{ media_asset_id: string; fb_message_id: string }>
+  kind: string
+  payload: Record<string, unknown> | null
 }
 
 interface ThreadRow {
@@ -135,10 +140,41 @@ async function claimJobs(admin: AdminClient, limit: number): Promise<JobRow[]> {
   return ((data ?? []) as JobRow[]).map((row) => ({
     ...row,
     outbound_media: Array.isArray(row.outbound_media) ? row.outbound_media : [],
+    kind: row.kind ?? 'inbound_reply',
+    payload: row.payload ?? null,
   }))
 }
 
 async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
+  // Branch on job kind before any inbound-specific logic.
+  if (job.kind === 'agent_campaign_send') {
+    try {
+      await handleCampaignSend(admin, {
+        id: job.id,
+        thread_id: job.thread_id,
+        user_id: job.user_id,
+        payload: job.payload as { campaign_message_id: string } | null,
+      })
+    } catch (err) {
+      const attempts = job.attempts + 1
+      const failed = attempts >= MAX_ATTEMPTS
+      const msg = err instanceof Error ? err.message : String(err)
+      console.error('[messenger.worker] campaign job error', job.id, msg)
+      await admin
+        .from('messenger_jobs')
+        .update({
+          status: failed ? 'failed' : 'queued',
+          attempts,
+          last_error: msg.slice(0, 1000),
+          scheduled_at: new Date(Date.now() + Math.min(60_000 * attempts, 300_000)).toISOString(),
+          finished_at: failed ? new Date().toISOString() : null,
+          started_at: null,
+        })
+        .eq('id', job.id)
+    }
+    return
+  }
+
   try {
     // Read the inbound message + its parent thread in a single FK-joined query.
     // This avoids a first-touch race where the worker beats the webhook's
@@ -240,6 +276,60 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
           activeFunnel?.action_page_id ?? campaign?.goal_action_page_id ?? null,
         )
       : []
+
+    // Resolve !actionpage:slug mentions embedded in the chatbot instructions.
+    // Referenced pages are added to sendablePages so the bot can send them,
+    // and !actionpage:slug tokens are replaced with [Action Page: "Title"] in
+    // the resolved instructions string passed to the LLM.
+    let resolvedInstructions: string | undefined
+    if (thread.auto_reply_enabled) {
+      const { data: cbRow } = await admin
+        .from('chatbot_configs')
+        .select('instructions')
+        .eq('user_id', thread.user_id)
+        .maybeSingle()
+      const rawInstr = (cbRow?.instructions as string | null) ?? ''
+      const mentionedSlugs = parseActionPageMentions(rawInstr)
+      if (mentionedSlugs.length > 0) {
+        const existingSlugs = new Set(sendablePages.map((p) => p.slug))
+        const newSlugs = mentionedSlugs.filter((s) => !existingSlugs.has(s))
+        if (newSlugs.length > 0) {
+          const { data: mentionedPages } = await admin
+            .from('action_pages')
+            .select('id, slug, title, cta_label, signing_secret, kind, config, user_id')
+            .eq('user_id', thread.user_id)
+            .eq('status', 'published')
+            .in('slug', newSlugs)
+          for (const p of (mentionedPages ?? []) as Array<{
+            id: string; slug: string; title: string; cta_label: string | null
+            signing_secret: string; kind: string; config: unknown; user_id: string
+          }>) {
+            if (p.cta_label?.trim()) {
+              sendablePages.push({
+                id: p.id,
+                slug: p.slug,
+                title: p.title,
+                cta_label: p.cta_label.trim(),
+                bot_send_instructions: 'See chatbot instructions above',
+                signing_secret: p.signing_secret,
+                kind: p.kind,
+                config: (p.config as Record<string, unknown> | null) ?? null,
+                user_id: p.user_id,
+              })
+            }
+          }
+        }
+        const slugToTitle = new Map(sendablePages.map((p) => [p.slug, p.title]))
+        resolvedInstructions = rawInstr.replace(
+          /!actionpage:([a-z0-9][a-z0-9_-]*)/gi,
+          (_, slug: string) => {
+            const title = slugToTitle.get(slug)
+            return title ? `[Action Page: "${title}"]` : `[Action Page: "${slug}"]`
+          },
+        )
+      }
+    }
+
     const actionPages: ActionPageBrief[] = sendablePages.map((p) => ({
       id: p.id,
       title: p.title,
@@ -304,6 +394,9 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
       let actionPageChoice: Awaited<ReturnType<typeof answerWithClassification>>['actionPage'] = null
       let selectedMedia: SelectedMediaAsset[] = []
       const conversationSummary = thread.conversation_summary ?? undefined
+      const effectivePersona = resolvedInstructions !== undefined
+        ? { ...(campaignPersona ?? {}), instructions: resolvedInstructions }
+        : campaignPersona
       if ((classifyEnabled && stages.length > 0) || actionPages.length > 0) {
         try {
           const r = await answerWithClassification(
@@ -313,11 +406,12 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
             history,
             stages,
             currentStageId,
-            { rpcName: 'match_knowledge_hybrid_service', actionPages, campaignPersona, conversationSummary },
+            { rpcName: 'match_knowledge_hybrid_service', actionPages, campaignPersona: effectivePersona, conversationSummary },
           )
           reply = r.text.trim()
           stageChange = r.stageChange
           actionPageChoice = r.actionPage
+          selectedMedia = r.media
         } catch (e) {
           console.error('[messenger.worker] combined call failed, falling back', e)
         }
@@ -325,7 +419,7 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
       if (!reply) {
         const r = await answer(admin, thread.user_id, message, history, {
           rpcName: 'match_knowledge_hybrid_service',
-          campaignPersona,
+          campaignPersona: effectivePersona,
           conversationSummary,
         })
         reply = r.text.trim()
@@ -428,8 +522,69 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
             })
             const aiBtnText = (actionPageChoice.button_text ?? '').trim()
             const btnText = (aiBtnText || chosen.title).slice(0, 640)
+
+            // For catalog action pages, send a horizontally-scrollable
+            // carousel of products (image + title + price/summary + per-card
+            // "View product" / "View all" buttons) instead of a single
+            // button. Falls through to the button if no products are found.
+            let carouselProducts: PublicProductCard[] = []
+            if (chosen.kind === 'catalog') {
+              try {
+                carouselProducts = await fetchPublicCatalogProducts(
+                  admin,
+                  chosen.user_id,
+                  chosen.config as Parameters<typeof fetchPublicCatalogProducts>[2],
+                )
+              } catch (e) {
+                console.warn('[messenger.worker] catalog product fetch failed', e)
+              }
+            }
+
             // Idempotent on retry — see text-reply block above for rationale.
             let buttonFbId = job.outbound_button_fb_id
+            let carouselSent = false
+            if (!buttonFbId && carouselProducts.length > 0) {
+              const elements: MessengerGenericElement[] = carouselProducts
+                .slice(0, 10)
+                .map((p) => {
+                  const productUrl = `${targetUrl}${targetUrl.includes('?') ? '&' : '?'}product=${encodeURIComponent(p.slug)}`
+                  const subtitleParts = [p.price_label, p.summary || p.description || '']
+                    .map((s) => (s ?? '').trim())
+                    .filter(Boolean)
+                  return {
+                    title: p.title,
+                    subtitle: subtitleParts.join(' · '),
+                    imageUrl: p.cover_image_url ?? undefined,
+                    defaultActionUrl: productUrl,
+                    buttons: [
+                      { title: 'View product', url: productUrl },
+                      { title: chosen.cta_label || 'View all', url: targetUrl },
+                    ],
+                  }
+                })
+              const carouselResult = await sendOutbound({
+                admin,
+                thread: { id: thread.id, psid: thread.psid, last_inbound_at: thread.last_inbound_at },
+                pageToken,
+                payload: { kind: 'generic_template', elements },
+                kind: 'bot',
+              })
+              if (carouselResult.sent) {
+                buttonFbId = carouselResult.messageId ?? null
+                carouselSent = true
+                if (buttonFbId) {
+                  await admin
+                    .from('messenger_jobs')
+                    .update({ outbound_button_fb_id: buttonFbId })
+                    .eq('id', job.id)
+                }
+              } else {
+                console.warn('[messenger.worker] catalog carousel policy_blocked', {
+                  threadId: thread.id,
+                  reason: (carouselResult as { sent: false; reason: string }).reason,
+                })
+              }
+            }
             if (!buttonFbId) {
               const btnResult = await sendOutbound({
                 admin,
@@ -453,6 +608,17 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
                 })
               }
             }
+            const persistedBody = carouselSent
+              ? `${chosen.title} — ${carouselProducts.length} product${carouselProducts.length === 1 ? '' : 's'}\n` +
+                carouselProducts
+                  .slice(0, 10)
+                  .map((p) => `• ${p.title} (${p.price_label})`)
+                  .join('\n') +
+                `\nView all → ${targetUrl}`
+              : `${btnText}\n${chosen.cta_label} → ${targetUrl}`
+            const previewText = carouselSent
+              ? `${chosen.title} · ${carouselProducts.length} products`
+              : `${chosen.cta_label} · ${chosen.title}`
             const { error: btnInsertErr } = await admin
               .from('messenger_messages')
               .insert({
@@ -461,7 +627,7 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
                 direction: 'outbound',
                 sender: 'bot',
                 fb_message_id: buttonFbId,
-                body: `${btnText}\n${chosen.cta_label} → ${targetUrl}`,
+                body: persistedBody,
               })
             if (btnInsertErr && (btnInsertErr as { code?: string }).code !== '23505') {
               throw btnInsertErr
@@ -470,7 +636,7 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
               .from('messenger_threads')
               .update({
                 last_message_at: new Date().toISOString(),
-                last_message_preview: `${chosen.cta_label} · ${chosen.title}`.slice(0, 200),
+                last_message_preview: previewText.slice(0, 200),
               })
               .eq('id', thread.id)
           } catch (e) {
@@ -670,15 +836,16 @@ async function ensureLead(
 async function loadHistory(
   admin: AdminClient,
   threadId: string,
-  excludeMessageId: string,
+  excludeMessageId: string | null,
 ): Promise<AnswerHistory> {
-  const { data } = await admin
+  let query = admin
     .from('messenger_messages')
     .select('id, direction, sender, body, created_at')
     .eq('thread_id', threadId)
-    .neq('id', excludeMessageId)
     .order('created_at', { ascending: false })
     .limit(HISTORY_LIMIT)
+  if (excludeMessageId) query = query.neq('id', excludeMessageId)
+  const { data } = await query
   if (!data) return []
   return data
     .reverse()
@@ -777,6 +944,9 @@ interface SendableActionPage {
   cta_label: string
   bot_send_instructions: string
   signing_secret: string
+  kind: string
+  config: Record<string, unknown> | null
+  user_id: string
 }
 
 interface FunnelBrief {
@@ -882,7 +1052,7 @@ async function loadSendableActionPages(
 ): Promise<SendableActionPage[]> {
   let query = admin
     .from('action_pages')
-    .select('id, slug, title, cta_label, bot_send_instructions, signing_secret')
+    .select('id, slug, title, cta_label, bot_send_instructions, signing_secret, kind, config, user_id')
     .eq('user_id', userId)
     .eq('status', 'published')
     .not('cta_label', 'is', null)
@@ -910,7 +1080,25 @@ async function loadSendableActionPages(
       cta_label: (r.cta_label as string).trim(),
       bot_send_instructions: (r.bot_send_instructions as string).trim(),
       signing_secret: r.signing_secret as string,
+      kind: r.kind as string,
+      config: (r.config as Record<string, unknown> | null) ?? null,
+      user_id: r.user_id as string,
     }))
+}
+
+function parseActionPageMentions(text: string): string[] {
+  const re = /!actionpage:([a-z0-9][a-z0-9_-]*)/gi
+  const slugs: string[] = []
+  const seen = new Set<string>()
+  let m: RegExpExecArray | null
+  while ((m = re.exec(text))) {
+    const slug = m[1].toLowerCase()
+    if (!seen.has(slug)) {
+      slugs.push(slug)
+      seen.add(slug)
+    }
+  }
+  return slugs
 }
 
 async function loadThreadLeadId(

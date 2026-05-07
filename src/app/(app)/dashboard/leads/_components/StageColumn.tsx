@@ -184,10 +184,11 @@ function StageEditor({ stage, onClose }: { stage: StageRow; onClose: () => void 
   const [description, setDescription] = useState(stage.description ?? '')
   const [error, setError] = useState<string | null>(null)
   const [pending, start] = useTransition()
+  const [, startTransition] = useTransition()
   const [mounted, setMounted] = useState(false)
 
   useEffect(() => {
-    setMounted(true)
+    startTransition(() => setMounted(true))
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose()
     }
@@ -198,7 +199,7 @@ function StageEditor({ stage, onClose }: { stage: StageRow; onClose: () => void 
       window.removeEventListener('keydown', onKey)
       document.body.style.overflow = prevOverflow
     }
-  }, [onClose])
+  }, [onClose, startTransition])
 
   const save = () => {
     if (!name.trim()) {

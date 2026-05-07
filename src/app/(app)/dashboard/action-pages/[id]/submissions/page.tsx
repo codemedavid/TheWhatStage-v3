@@ -564,6 +564,11 @@ function CatalogCard({
    GENERIC VIEW  (sales, realestate, unknown)
 ═══════════════════════════════════════════════ */
 
+function countThisWeek(submissions: SubmissionListItem[]): number {
+  const oneWeekAgo = new Date(Date.now() - 604800000)
+  return submissions.filter((s) => new Date(s.created_at) >= oneWeekAgo).length
+}
+
 function GenericView({ submissions }: { submissions: SubmissionListItem[] }) {
   const groups = groupByCreatedDate(submissions)
   return (
@@ -571,7 +576,7 @@ function GenericView({ submissions }: { submissions: SubmissionListItem[] }) {
       <div className="grid grid-cols-2 gap-3">
         <StatCard value={submissions.length} label="Total submissions" color="indigo" />
         <StatCard
-          value={submissions.filter((s) => new Date(s.created_at) >= new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)).length}
+          value={countThisWeek(submissions)}
           label="This week"
           color="blue"
         />

@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, useTransition } from 'react'
 import type { CSSProperties } from 'react'
 import type { KindRendererProps } from '../types'
 import type { PublicProductCard } from '@/lib/business/public-dto'
@@ -54,6 +54,17 @@ export default function CatalogRenderer({
   const [cartOpen, setCartOpen] = useState(false)
   const [previewProduct, setPreviewProduct] = useState<PublicProductCard | null>(null)
   const [pulse, setPulse] = useState(0)
+  const [, startTransition] = useTransition()
+
+  // Open the product modal when arriving with ?product=<slug> — used by
+  // Messenger carousel "View product" links to deep-link into a single item.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const slug = new URLSearchParams(window.location.search).get('product')
+    if (!slug) return
+    const match = products.find((p) => p.slug === slug)
+    if (match) startTransition(() => setPreviewProduct(match))
+  }, [products, startTransition])
 
   const productMap = useMemo(
     () => new Map(products.map((p) => [p.id, p])),

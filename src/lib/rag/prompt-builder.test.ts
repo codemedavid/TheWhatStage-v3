@@ -12,7 +12,7 @@ const chunk = (id: string, content: string, score: number, heading: string | nul
   score,
 });
 
-const buckets = (useful: any[] = [], ambiguous: any[] = []): GradedBuckets<RetrievedChunk> => ({
+const buckets = (useful: (RetrievedChunk & { score: number })[] = [], ambiguous: (RetrievedChunk & { score: number })[] = []): GradedBuckets<RetrievedChunk> => ({
   useful,
   ambiguous,
   reject: [],

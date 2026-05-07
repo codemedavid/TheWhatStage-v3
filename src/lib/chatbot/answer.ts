@@ -23,6 +23,8 @@ export interface CampaignPersonaOverride {
   dontRules?: string[]
   /** Free-form instruction from the lead's active funnel — injected as the primary goal. */
   funnelInstruction?: string
+  /** Resolved instructions override — !actionpage:slug tokens substituted with page titles. */
+  instructions?: string
 }
 
 export interface AnswerOptions {
@@ -59,6 +61,7 @@ export async function answer(
         doRules: [...baseConfig.doRules, ...(cp.doRules ?? [])],
         dontRules: [...baseConfig.dontRules, ...(cp.dontRules ?? [])],
         ...(cp.funnelInstruction ? { funnelInstruction: cp.funnelInstruction } : {}),
+        ...(cp.instructions !== undefined ? { instructions: cp.instructions } : {}),
       }
     : baseConfig
 

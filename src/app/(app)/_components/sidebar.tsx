@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useTransition } from 'react'
 
 type IconName =
   | 'overview'
@@ -21,7 +21,7 @@ type IconName =
   | 'x'
   | 'chevron-left'
   | 'chevron-right'
-  | 'workflows'
+  | 'agent'
 
 const items: { href: string; label: string; icon: IconName }[] = [
   { href: '/dashboard', label: 'Overview', icon: 'overview' },
@@ -29,7 +29,7 @@ const items: { href: string; label: string; icon: IconName }[] = [
   { href: '/dashboard/knowledge', label: 'Knowledge', icon: 'knowledge' },
   { href: '/dashboard/chatbot', label: 'Chatbot', icon: 'chatbot' },
   { href: '/dashboard/action-pages', label: 'Action Pages', icon: 'actions' },
-  { href: '/dashboard/workflows', label: 'Workflows', icon: 'workflows' },
+  { href: '/dashboard/agent', label: 'Agent', icon: 'agent' },
   { href: '/dashboard/media', label: 'Media', icon: 'media' },
   { href: '/dashboard/settings', label: 'Settings', icon: 'settings' },
 ]
@@ -131,13 +131,12 @@ function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
     ),
     'chevron-left': <path d="M15 18l-6-6 6-6" />,
     'chevron-right': <path d="M9 18l6-6-6-6" />,
-    workflows: (
+    agent: (
       <>
-        <rect x="3" y="3" width="5" height="5" rx="1.2" />
-        <rect x="16" y="3" width="5" height="5" rx="1.2" />
-        <rect x="16" y="16" width="5" height="5" rx="1.2" />
-        <path d="M8 5.5h3.5a4 4 0 014 4V16" />
-        <path d="M8 5.5h3.5a4 4 0 004-4V3" />
+        <path d="M12 2a4 4 0 014 4v1h1a2 2 0 012 2v3a2 2 0 01-2 2h-1v1a4 4 0 01-8 0v-1H7a2 2 0 01-2-2V9a2 2 0 012-2h1V6a4 4 0 014-4z" />
+        <circle cx="9.5" cy="10.5" r="1" fill="currentColor" stroke="none" />
+        <circle cx="14.5" cy="10.5" r="1" fill="currentColor" stroke="none" />
+        <path d="M9.5 14.5s.8 1 2.5 1 2.5-1 2.5-1" />
       </>
     ),
   }
@@ -162,11 +161,12 @@ export function Sidebar({ userInitial = 'D', userName = 'David' }: { userInitial
   const pathname = usePathname() ?? '/dashboard'
   const [collapsed, setCollapsed] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
+  const [, startTransition] = useTransition()
 
   useEffect(() => {
     const stored = localStorage.getItem('ws-sidebar-collapsed')
-    if (stored !== null) setCollapsed(stored === 'true')
-  }, [])
+    if (stored !== null) startTransition(() => setCollapsed(stored === 'true'))
+  }, [startTransition])
 
   function toggleCollapse() {
     const next = !collapsed

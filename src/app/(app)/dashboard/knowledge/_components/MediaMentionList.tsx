@@ -23,6 +23,13 @@ export type MediaMentionItem =
       name: string
       assetCount: number
     }
+  | {
+      kind: 'action_page'
+      id: string
+      slug: string
+      name: string
+      ctaLabel: string
+    }
 
 export interface MediaMentionListProps {
   items: MediaMentionItem[]
@@ -91,6 +98,10 @@ export const MediaMentionList = forwardRef<MediaMentionListHandle, MediaMentionL
                 <span className="media-mention-folder-glyph" aria-hidden>
                   #
                 </span>
+              ) : item.kind === 'action_page' ? (
+                <span className="media-mention-folder-glyph" aria-hidden>
+                  !
+                </span>
               ) : (
                 <span className="media-mention-folder-glyph" aria-hidden>
                   @
@@ -104,6 +115,11 @@ export const MediaMentionList = forwardRef<MediaMentionListHandle, MediaMentionL
                   <>
                     <code>@{item.slug}</code>
                     {item.folderName ? <span> · {item.folderName}</span> : null}
+                  </>
+                ) : item.kind === 'action_page' ? (
+                  <>
+                    <code>!actionpage:{item.slug}</code>
+                    {item.ctaLabel ? <span> · {item.ctaLabel}</span> : null}
                   </>
                 ) : (
                   <>

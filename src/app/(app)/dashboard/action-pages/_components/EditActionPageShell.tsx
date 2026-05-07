@@ -59,6 +59,36 @@ export function EditActionPageShell({
     )
   }
 
+  return (
+    <EditActionPageShellInner
+      page={page}
+      stages={stages}
+      publicUrl={publicUrl}
+      embedUrl={embedUrl}
+      embedSnippet={embedSnippet}
+      saved={saved}
+      errorBanner={errorBanner}
+    />
+  )
+}
+
+function EditActionPageShellInner({
+  page,
+  stages,
+  publicUrl,
+  embedUrl,
+  embedSnippet,
+  saved,
+  errorBanner,
+}: {
+  page: ActionPageRow
+  stages: { id: string; name: string }[]
+  publicUrl: string
+  embedUrl: string
+  embedSnippet: string
+  saved: boolean
+  errorBanner: string | null
+}) {
   const meta = KIND_REGISTRY[page.kind]
   const [step, setStep] = useState<number>(0)
   const [completed, setCompleted] = useState<number[]>([])
@@ -221,6 +251,7 @@ export function EditActionPageShell({
                     <PipelineRulesEditor
                       initial={page.pipeline_rules}
                       stages={stages}
+                      kind={page.kind}
                     />
                   </div>
                 </div>

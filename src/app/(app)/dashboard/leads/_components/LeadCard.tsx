@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useTransition } from 'react'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import type { LeadRow } from '../_lib/queries'
@@ -31,7 +31,8 @@ export function LeadCard({ lead, onClick }: { lead: LeadRow; onClick: () => void
   // behavior on the first paint so the server HTML and first client render
   // match exactly; activate after mount.
   const [mounted, setMounted] = useState(false)
-  useEffect(() => setMounted(true), [])
+  const [, startTransition] = useTransition()
+  useEffect(() => startTransition(() => setMounted(true)), [startTransition])
 
   const style: React.CSSProperties = {
     transform: mounted ? CSS.Transform.toString(transform) : undefined,

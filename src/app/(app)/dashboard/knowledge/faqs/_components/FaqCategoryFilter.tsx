@@ -3,6 +3,30 @@ import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import type { CategoryRow } from '../../_lib/queries'
 
+function FaqPill({
+  href,
+  active,
+  children,
+}: {
+  href: string
+  active: boolean
+  children: React.ReactNode
+}) {
+  return (
+    <Link
+      href={href}
+      className={
+        'inline-flex h-7 items-center rounded-full px-3 text-[12.5px] font-medium transition-colors ' +
+        (active
+          ? 'bg-[rgba(5,150,105,0.1)] text-[#059669]'
+          : 'border border-[#E5E7EB] text-[#374151] hover:bg-[#F9FAFB]')
+      }
+    >
+      {children}
+    </Link>
+  )
+}
+
 export function FaqCategoryFilter({
   categories,
 }: {
@@ -19,40 +43,18 @@ export function FaqCategoryFilter({
     return qs ? `/dashboard/knowledge/faqs?${qs}` : '/dashboard/knowledge/faqs'
   }
 
-  const Pill = ({
-    href,
-    active,
-    children,
-  }: {
-    href: string
-    active: boolean
-    children: React.ReactNode
-  }) => (
-    <Link
-      href={href}
-      className={
-        'inline-flex h-7 items-center rounded-full px-3 text-[12.5px] font-medium transition-colors ' +
-        (active
-          ? 'bg-[rgba(5,150,105,0.1)] text-[#059669]'
-          : 'border border-[#E5E7EB] text-[#374151] hover:bg-[#F9FAFB]')
-      }
-    >
-      {children}
-    </Link>
-  )
-
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <Pill href={link(null)} active={selected === null}>
+      <FaqPill href={link(null)} active={selected === null}>
         All
-      </Pill>
-      <Pill href={link('uncategorized')} active={selected === 'uncategorized'}>
+      </FaqPill>
+      <FaqPill href={link('uncategorized')} active={selected === 'uncategorized'}>
         Uncategorized
-      </Pill>
+      </FaqPill>
       {categories.map((c) => (
-        <Pill key={c.id} href={link(c.id)} active={selected === c.id}>
+        <FaqPill key={c.id} href={link(c.id)} active={selected === c.id}>
           {c.name}
-        </Pill>
+        </FaqPill>
       ))}
     </div>
   )

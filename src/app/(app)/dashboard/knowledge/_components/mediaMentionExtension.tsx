@@ -4,6 +4,7 @@ import type { Editor, Range } from '@tiptap/core'
 import { mergeAttributes } from '@tiptap/core'
 import { PluginKey } from '@tiptap/pm/state'
 import Mention from '@tiptap/extension-mention'
+import type { SuggestionProps, SuggestionKeyDownProps } from '@tiptap/suggestion'
 import type { MediaAssetRow, MediaFolderRow } from '@/app/(app)/dashboard/media/_lib/queries'
 import type { MediaMentionItem } from './MediaMentionList'
 
@@ -150,7 +151,7 @@ export function buildMediaMention({ assets, folders }: BuildOptions) {
   }
 
   const makeRender = () => () => ({
-    onStart(props: any) {
+    onStart(props: SuggestionProps<MediaMentionItem>) {
       mediaMentionBus.emit({
         open: true,
         char: props.text?.[0] === '#' ? '#' : '@',
@@ -160,7 +161,7 @@ export function buildMediaMention({ assets, folders }: BuildOptions) {
         command: (item: MediaMentionItem) => props.command(item),
       })
     },
-    onUpdate(props: any) {
+    onUpdate(props: SuggestionProps<MediaMentionItem>) {
       mediaMentionBus.emit({
         open: true,
         char: props.text?.[0] === '#' ? '#' : '@',
@@ -170,7 +171,7 @@ export function buildMediaMention({ assets, folders }: BuildOptions) {
         command: (item: MediaMentionItem) => props.command(item),
       })
     },
-    onKeyDown(props: any) {
+    onKeyDown(props: SuggestionKeyDownProps) {
       if (props.event.key === 'Escape') {
         mediaMentionBus.emit({ open: false })
         return true

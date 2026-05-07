@@ -442,6 +442,7 @@ function WorkflowPanel({
           <PipelineRulesEditor
             initial={page.pipeline_rules}
             stages={stages}
+            kind={page.kind}
           />
         </div>
       </div>

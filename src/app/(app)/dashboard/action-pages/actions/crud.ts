@@ -71,7 +71,11 @@ export async function createActionPage(formData: FormData): Promise<void> {
 export async function updateActionPage(formData: FormData): Promise<void> {
   let pipeline_rules: unknown
   try {
-    pipeline_rules = JSON.parse(String(formData.get('pipeline_rules') ?? '[]'))
+    const raw = JSON.parse(String(formData.get('pipeline_rules') ?? '[]'))
+    // Filter out incomplete rules (empty outcome) so they don't block the save.
+    pipeline_rules = Array.isArray(raw)
+      ? raw.filter((r: { outcome?: string }) => typeof r.outcome === 'string' && r.outcome.trim().length > 0)
+      : []
   } catch {
     pipeline_rules = []
   }

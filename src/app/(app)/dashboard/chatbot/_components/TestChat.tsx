@@ -56,12 +56,28 @@ export function TestChat({ name = 'Assistant' }: { name?: string }) {
         signal: ctrl.signal,
       })
       if (!res.ok || !res.body) {
-        const errText = await res.text().catch(() => '')
+        const raw = await res.text().catch(() => '')
+        const looksLikeHtml = /^\s*<(!doctype|html|head|body)/i.test(raw)
+        let detail = ''
+        if (raw && !looksLikeHtml) {
+          try {
+            const parsed = JSON.parse(raw) as { error?: string; message?: string }
+            detail = parsed.error || parsed.message || ''
+          } catch {
+            detail = raw.slice(0, 200)
+          }
+        }
+        const friendly =
+          res.status === 404
+            ? "Sorry, I couldn't reach the assistant right now. Please try again in a moment."
+            : res.status >= 500
+              ? 'The assistant ran into a problem. Please try again shortly.'
+              : `Request failed (${res.status} ${res.statusText})`
         setMessages((m) => {
           const copy = [...m]
           copy[copy.length - 1] = {
             role: 'assistant',
-            content: `Error: ${res.status} ${errText || res.statusText}`,
+            content: detail ? `${friendly}\n\n${detail}` : friendly,
           }
           return copy
         })

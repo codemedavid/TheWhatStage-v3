@@ -298,6 +298,11 @@ body {
   color: #1a73e8;
   border-color: rgba(26, 115, 232, 0.25);
 }
+.media-mention--action-page {
+  background: rgba(124, 58, 237, 0.10);
+  color: #6d28d9;
+  border-color: rgba(124, 58, 237, 0.25);
+}
 
 .media-mention-floater {
   position: fixed;

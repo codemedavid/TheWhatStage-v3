@@ -120,6 +120,7 @@ function assembleSystemPrompt(p: ChatbotPersona, contextBlock: string, conversat
     `- Treat the knowledge base context below as the single source of truth for facts.`,
     `- If a specific fact is not present in the context, do NOT guess — use the fallback below.`,
     `- Never name, quote, or reference the source documents, FAQs, headings, or chunk numbers in your reply. Speak the answer directly to the user as your own knowledge.`,
+    `- Never promise, announce, or mention sending an image or file in your reply. The system attaches images automatically when they are available — just answer the question naturally.`,
     ``,
     `# Fallback`,
     `If you cannot answer from the context, reply with this message verbatim, then offer one short next step:`,

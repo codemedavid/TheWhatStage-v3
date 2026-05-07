@@ -16,13 +16,25 @@ export default async function ChatbotPage() {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const [config, templates, latestAdoption, mediaFolders, mediaAssets] = await Promise.all([
+  const [config, templates, latestAdoption, mediaFolders, mediaAssets, actionPagesData] = await Promise.all([
     getChatbotConfig(supabase, user.id),
     listPublicTemplates(supabase),
     getLatestAppliedAdoption(supabase, user.id),
     fetchMediaFolders(supabase, user.id),
     fetchMediaAssets(supabase, user.id, null),
+    supabase
+      .from('action_pages')
+      .select('id, slug, title, cta_label')
+      .eq('user_id', user.id)
+      .eq('status', 'published')
+      .order('title', { ascending: true }),
   ])
+  const actionPages = (actionPagesData.data ?? []).map((p) => ({
+    id: p.id as string,
+    slug: p.slug as string,
+    title: p.title as string,
+    ctaLabel: (p.cta_label as string | null) ?? '',
+  }))
 
   const activeTemplate = config.activeTemplateId
     ? (templates.find((t) => t.id === config.activeTemplateId) ?? null)
@@ -42,6 +54,7 @@ export default async function ChatbotPage() {
             initial={config}
             mediaFolders={mediaFolders}
             mediaAssets={mediaAssets}
+            actionPages={actionPages}
           />
         </div>
 

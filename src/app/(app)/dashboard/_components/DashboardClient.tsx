@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useTransition } from 'react'
 import Link from 'next/link'
 
 /* ── types ──────────────────────────────────────────────────────────── */
@@ -170,12 +170,19 @@ export default function DashboardClient({
   const [watched, setWatched] = useState<Set<string>>(new Set())
   const [playing, setPlaying] = useState<typeof VIDEOS[0] | null>(null)
   const overlayRef = useRef<HTMLDivElement>(null)
+  const [, startTransition] = useTransition()
 
   useEffect(() => {
-    if (localStorage.getItem('ws_onboarding_dismissed') === '1') setDismissed(true)
+    if (localStorage.getItem('ws_onboarding_dismissed') === '1') {
+      startTransition(() => setDismissed(true))
+    }
     const raw = localStorage.getItem(STORAGE_KEY)
-    if (raw) try { setWatched(new Set(JSON.parse(raw))) } catch { /* ignore */ }
-  }, [])
+    if (raw) {
+      try {
+        startTransition(() => setWatched(new Set(JSON.parse(raw) as string[])))
+      } catch { /* ignore */ }
+    }
+  }, [startTransition])
 
   function dismiss() {
     localStorage.setItem('ws_onboarding_dismissed', '1')

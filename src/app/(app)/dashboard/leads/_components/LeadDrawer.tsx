@@ -10,8 +10,15 @@ import type { StageRow, FieldDefRow, LeadRow, CampaignOption } from '../_lib/que
 import { ConversationPanel } from './ConversationPanel'
 import { CommentsPanel } from './CommentsPanel'
 import { SubmissionsPanel } from './SubmissionsPanel'
+import { OrdersPanel } from './OrdersPanel'
 
-type Tab = 'details' | 'conversation' | 'comments' | 'forms'
+type Tab =
+  | 'details'
+  | 'conversation'
+  | 'comments'
+  | 'orders'
+  | 'appointments'
+  | 'forms'
 
 type FormShape = {
   id: string
@@ -41,6 +48,7 @@ export function LeadDrawer({
 }) {
   const [pending, start] = useTransition()
   const [deleting, startDelete] = useTransition()
+  const [, startTransition] = useTransition()
   const [mounted, setMounted] = useState(false)
   const [tab, setTab] = useState<Tab>('details')
   const formRef = useRef<HTMLFormElement>(null)
@@ -68,14 +76,14 @@ export function LeadDrawer({
     setForm((f) => ({ ...f, custom_fields: { ...f.custom_fields, [key]: v } }))
 
   useEffect(() => {
-    setMounted(true)
+    startTransition(() => setMounted(true))
     firstFieldRef.current?.focus()
     const prev = document.body.style.overflow
     document.body.style.overflow = 'hidden'
     return () => {
       document.body.style.overflow = prev
     }
-  }, [])
+  }, [startTransition])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -193,7 +201,16 @@ export function LeadDrawer({
             className="flex gap-4 px-6"
             style={{ borderBottom: '1px solid var(--lead-line)' }}
           >
-            {(['details', 'conversation', 'comments', 'forms'] as const).map((t) => {
+            {(
+              [
+                'details',
+                'conversation',
+                'comments',
+                'orders',
+                'appointments',
+                'forms',
+              ] as const
+            ).map((t) => {
               const active = tab === t
               return (
                 <button
@@ -211,7 +228,11 @@ export function LeadDrawer({
                       ? 'Conversation'
                       : t === 'comments'
                         ? 'Comments'
-                        : 'Forms'}
+                        : t === 'orders'
+                          ? 'Orders'
+                          : t === 'appointments'
+                            ? 'Appointments'
+                            : 'Forms'}
                   {active && (
                     <span
                       aria-hidden
@@ -231,8 +252,20 @@ export function LeadDrawer({
             <ConversationPanel leadId={form.id} />
           ) : mode === 'edit' && tab === 'comments' ? (
             <CommentsPanel leadId={form.id} />
+          ) : mode === 'edit' && tab === 'orders' ? (
+            <OrdersPanel leadId={form.id} />
+          ) : mode === 'edit' && tab === 'appointments' ? (
+            <SubmissionsPanel
+              leadId={form.id}
+              kinds={['booking']}
+              emptyMessage="No appointments booked yet."
+            />
           ) : mode === 'edit' && tab === 'forms' ? (
-            <SubmissionsPanel leadId={form.id} />
+            <SubmissionsPanel
+              leadId={form.id}
+              kinds={['form', 'qualification']}
+              emptyMessage="No form or qualification submissions yet."
+            />
           ) : (
             <>
           {mode === 'edit' && form.id && (
@@ -402,20 +435,21 @@ export function LeadDrawer({
 
 function StageRationale({ leadId, stageId }: { leadId: string; stageId: string }) {
   const [data, setData] = useState<LatestStageRationale | null | 'loading'>('loading')
+  const [, startTransition] = useTransition()
   useEffect(() => {
     let cancelled = false
-    setData('loading')
+    startTransition(() => setData('loading'))
     loadLatestStageRationale(leadId)
       .then((r) => {
-        if (!cancelled) setData(r)
+        if (!cancelled) startTransition(() => setData(r))
       })
       .catch(() => {
-        if (!cancelled) setData(null)
+        if (!cancelled) startTransition(() => setData(null))
       })
     return () => {
       cancelled = true
     }
-  }, [leadId, stageId])
+  }, [leadId, stageId, startTransition])
 
   if (data === 'loading' || data === null) return null
   const isAi = data.source === 'ai'

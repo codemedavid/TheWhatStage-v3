@@ -54,6 +54,19 @@ function renderInline(nodes: TNode[] | undefined): string {
         const alt = String(n.attrs?.alt ?? '');
         return `![${alt}](${src})`;
       }
+      if (n.type === 'mention') {
+        // Media mentions: emit `@asset-slug` or `#folder-slug` so the RAG
+        // chunk text carries the slug. The media selector greps for these
+        // tokens to decide which images to attach to a reply.
+        const kind = n.attrs?.kind;
+        const char =
+          kind === 'folder'
+            ? '#'
+            : (n.attrs?.mentionSuggestionChar as string | undefined) ?? '@';
+        const label = (n.attrs?.label ?? n.attrs?.id ?? '') as string;
+        if (!label) return '';
+        return `${char}${label}`;
+      }
       return '';
     })
     .join('');
@@ -126,13 +139,51 @@ export function tiptapToMarkdown(json: unknown): string {
 }
 
 /**
+ * Walk the parsed JSON and detect mention/image nodes whose attrs were
+ * stripped by an earlier Server Action serialisation bug. Stored as
+ * `{ "type": "mention" }` with no `attrs`, these emit nothing from
+ * `tiptapToMarkdown`, so the media selector can't see the slug. When this
+ * corruption is detected we fall back to `content_text`, which the editor
+ * computes from `renderText` and therefore preserves `@slug`/`#slug` inline.
+ */
+function jsonHasStrippedMentionAttrs(json: unknown): boolean {
+  if (!json || typeof json !== 'object') return false;
+  const node = json as { type?: string; attrs?: unknown; content?: unknown[] };
+  if (
+    (node.type === 'mention' || node.type === 'image') &&
+    (!node.attrs || typeof node.attrs !== 'object' || Object.keys(node.attrs as object).length === 0)
+  ) {
+    return true;
+  }
+  if (Array.isArray(node.content)) {
+    for (const child of node.content) {
+      if (jsonHasStrippedMentionAttrs(child)) return true;
+    }
+  }
+  return false;
+}
+
+/**
  * TipTap document → ParsedSource. The first H1 in the body wins as title;
  * if absent, the caller-supplied title is prepended as one.
+ *
+ * `contentText` is optional and only consulted when the stored JSON has
+ * stripped mention attrs (see `jsonHasStrippedMentionAttrs`). In that case we
+ * use the editor's plain text — it carries `@slug` inline and keeps the
+ * surrounding context the retriever needs.
  */
-export function parseTiptap(input: { title: string; contentJson: unknown }): ParsedSource {
-  const md = tiptapToMarkdown(input.contentJson);
-  const hasH1 = /^#\s+/m.test(md);
+export function parseTiptap(input: {
+  title: string;
+  contentJson: unknown;
+  contentText?: string | null;
+}): ParsedSource {
   const title = input.title.trim() || 'Untitled';
-  const markdown = hasH1 ? md : `# ${title}\n\n${md}`.trim();
+  const useTextFallback =
+    jsonHasStrippedMentionAttrs(input.contentJson) && !!input.contentText?.trim();
+  const body = useTextFallback
+    ? (input.contentText ?? '').replace(/\r\n?/g, '\n').trim()
+    : tiptapToMarkdown(input.contentJson);
+  const hasH1 = /^#\s+/m.test(body);
+  const markdown = hasH1 ? body : `# ${title}\n\n${body}`.trim();
   return { kind: 'document', title, markdown, atomic: false };
 }

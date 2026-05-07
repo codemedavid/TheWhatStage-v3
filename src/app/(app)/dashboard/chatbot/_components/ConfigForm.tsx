@@ -9,14 +9,23 @@ import { MentionTextarea } from './MentionTextarea'
 
 type Tab = 'personality' | 'instructions'
 
+export interface ActionPageMentionItem {
+  id: string
+  slug: string
+  title: string
+  ctaLabel: string
+}
+
 export function ConfigForm({
   initial,
   mediaFolders,
   mediaAssets,
+  actionPages,
 }: {
   initial: ChatbotConfig
   mediaFolders: MediaFolderRow[]
   mediaAssets: MediaAssetRow[]
+  actionPages: ActionPageMentionItem[]
 }) {
   const [pending, startTransition] = useTransition()
   const [saved, setSaved] = useState(false)
@@ -172,14 +181,15 @@ export function ConfigForm({
                   placeholder={
                     'Examples:\n' +
                     '• When someone asks about pricing, always lead with the value before the number.\n' +
-                    '• Type @ to attach an image, # to reference a folder.\n' +
+                    '• Type @ to attach an image, # to reference a folder, ! to send an action page.\n' +
                     '• Always ask for the customer\'s name if it hasn\'t been shared yet.'
                   }
                   assets={mediaAssets}
                   folders={mediaFolders}
+                  actionPages={actionPages}
                 />
                 <div className="cb-field-help">
-                  Free-form directives. Use <code>@image-slug</code> to attach a specific image and <code>#folder-slug</code> to let the bot pick the best one from a folder.
+                  Free-form directives. Use <code>@image-slug</code> to attach a specific image, <code>#folder-slug</code> to pick from a folder, and <code>!actionpage:slug</code> to send an action page when the instructions say to.
                 </div>
               </div>
             </div>

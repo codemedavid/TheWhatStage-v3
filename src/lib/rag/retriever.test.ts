@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { retrieve } from './retriever';
+import { retrieve, type RetrieverDeps } from './retriever';
 
 const fakeClient = (rpcData: unknown) => ({
   from: () => ({}),
@@ -15,7 +15,7 @@ describe('retrieve', () => {
   it('returns empty buckets when RPC returns nothing', async () => {
     const reranker = { rank: vi.fn().mockResolvedValue([]) };
     const r = await retrieve(
-      { client: fakeClient([]) as any, embedder, reranker } as any,
+      { client: fakeClient([]), embedder, reranker } as unknown as RetrieverDeps,
       { userId: 'u1', query: 'hi' },
     );
     expect(r.buckets.useful).toEqual([]);
@@ -40,7 +40,7 @@ describe('retrieve', () => {
       ]),
     };
     const r = await retrieve(
-      { client: client as any, embedder, reranker } as any,
+      { client, embedder, reranker } as unknown as RetrieverDeps,
       { userId: 'u', query: 'q' },
     );
     expect(r.buckets.useful.map((x) => x.id)).toEqual(['1']);
@@ -56,7 +56,7 @@ describe('retrieve', () => {
     const client = fakeClient(candidates);
     const reranker = { rank: vi.fn().mockResolvedValue([]) };
     const r = await retrieve(
-      { client: client as any, embedder, reranker } as any,
+      { client, embedder, reranker } as unknown as RetrieverDeps,
       { userId: 'u', query: 'q' },
     );
     expect(reranker.rank).not.toHaveBeenCalled();
@@ -79,7 +79,7 @@ describe('retrieve', () => {
     const rewriteQuery = vi.fn().mockResolvedValue('rewritten');
 
     const r = await retrieve(
-      { client: client as any, embedder, reranker, rewriteQuery } as any,
+      { client, embedder, reranker, rewriteQuery } as unknown as RetrieverDeps,
       { userId: 'u', query: 'orig' },
     );
     expect(rewriteQuery).toHaveBeenCalledWith('orig');
@@ -109,7 +109,7 @@ describe('retrieve', () => {
     const rewriteQuery = vi.fn().mockResolvedValue('rewritten');
 
     const r = await retrieve(
-      { client: client as any, embedder, reranker, rewriteQuery } as any,
+      { client, embedder, reranker, rewriteQuery } as unknown as RetrieverDeps,
       { userId: 'u', query: 'orig' },
     );
     expect(rewriteQuery).not.toHaveBeenCalled();

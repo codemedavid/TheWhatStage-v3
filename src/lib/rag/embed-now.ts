@@ -29,12 +29,17 @@ async function fetchSource(
   if (input.kind === 'document') {
     const { data, error } = await supabase
       .from('knowledge_documents')
-      .select('title, content_json, version')
+      .select('title, content_json, content_text, version')
       .eq('id', input.sourceId)
       .single();
     if (error || !data) throw new Error(`document ${input.sourceId} missing: ${error?.message}`);
     return {
-      parseInput: { kind: 'document', title: data.title, contentJson: data.content_json },
+      parseInput: {
+        kind: 'document',
+        title: data.title,
+        contentJson: data.content_json,
+        contentText: data.content_text,
+      },
       sourceVersion: Number(data.version ?? 0),
     };
   }

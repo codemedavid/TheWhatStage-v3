@@ -1,6 +1,6 @@
 'use client'
 
-import { useActionState, useEffect, useState } from 'react'
+import { useActionState, useEffect, useState, useTransition } from 'react'
 import { useFormStatus } from 'react-dom'
 import { useSearchParams } from 'next/navigation'
 import type { ProductEditorRow } from '../_lib/queries'
@@ -79,6 +79,7 @@ export function ProductEditor({ product }: { product: ProductEditorRow }) {
   const [state, formAction] = useActionState(saveProduct, initialState)
   const [status, setStatus] = useState<string>(product.status)
   const [showSaved, setShowSaved] = useState(false)
+  const [, startTransition] = useTransition()
   const searchParams = useSearchParams()
   const fromParam = searchParams?.get('from') ?? null
   const back = isSafeReturnPath(fromParam)
@@ -87,11 +88,11 @@ export function ProductEditor({ product }: { product: ProductEditorRow }) {
 
   useEffect(() => {
     if (state.ok) {
-      setShowSaved(true)
-      const t = setTimeout(() => setShowSaved(false), 2400)
+      startTransition(() => setShowSaved(true))
+      const t = setTimeout(() => startTransition(() => setShowSaved(false)), 2400)
       return () => clearTimeout(t)
     }
-  }, [state.ok])
+  }, [state.ok, startTransition])
 
   const errors = state.fieldErrors ?? {}
 

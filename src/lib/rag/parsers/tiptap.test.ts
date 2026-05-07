@@ -60,6 +60,38 @@ describe('tiptapToMarkdown', () => {
     expect(tiptapToMarkdown(null)).toBe('');
     expect(tiptapToMarkdown(undefined)).toBe('');
   });
+
+  it('renders asset mentions as @slug for media selector pickup', () => {
+    const md = tiptapToMarkdown(
+      doc(
+        p(
+          t('Send '),
+          { type: 'mention', attrs: { id: 'review1', label: 'review1', kind: 'asset', mentionSuggestionChar: '@' } },
+          t(' for proof'),
+        ),
+      ),
+    );
+    expect(md).toBe('Send @review1 for proof');
+  });
+
+  it('renders folder mentions as #folder-slug', () => {
+    const md = tiptapToMarkdown(
+      doc(
+        p(
+          t('See '),
+          { type: 'mention', attrs: { id: 'reviews', label: 'reviews', kind: 'folder', mentionSuggestionChar: '#' } },
+        ),
+      ),
+    );
+    expect(md).toBe('See #reviews');
+  });
+
+  it('drops mention with missing label/id rather than emitting bare char', () => {
+    const md = tiptapToMarkdown(
+      doc(p(t('hi '), { type: 'mention', attrs: { kind: 'asset' } }, t(' there'))),
+    );
+    expect(md).toBe('hi  there');
+  });
 });
 
 describe('parseTiptap', () => {

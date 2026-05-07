@@ -10,6 +10,7 @@ import {
 } from '@/lib/rag'
 import { ragConfig } from '@/lib/rag/config'
 import { getChatbotConfig } from './config'
+import { selectMediaForReply, type SelectedMediaAsset } from '@/lib/media/selector'
 import type { AnswerHistory, AnswerOptions, AnswerResult } from './answer'
 
 export interface StageBrief {
@@ -65,6 +66,7 @@ export async function answerWithClassification(
         doRules: [...baseConfig.doRules, ...(cp.doRules ?? [])],
         dontRules: [...baseConfig.dontRules, ...(cp.dontRules ?? [])],
         ...(cp.funnelInstruction ? { funnelInstruction: cp.funnelInstruction } : {}),
+        ...(cp.instructions !== undefined ? { instructions: cp.instructions } : {}),
       }
     : baseConfig
 
@@ -94,6 +96,19 @@ export async function answerWithClassification(
   const actionPages = options.actionPages ?? []
   const stageSystem = stageInstruction(stages, currentStageId, actionPages)
   const system = `${built.system}\n\n${stageSystem}`
+
+  const mediaPromise = selectMediaForReply({
+    client: supabase,
+    embedder,
+    userId,
+    customerMessage: message,
+    retrievedChunks: built.contextChunks,
+    rpcName: options.rpcName === 'match_knowledge_hybrid_service' ? 'match_media_assets_service' : 'match_media_assets',
+    limit: 4,
+  }).catch((err) => {
+    console.warn('[classify.media] selection failed', err)
+    return [] as SelectedMediaAsset[]
+  })
 
   const raw = await llm.complete(
     [
@@ -131,8 +146,11 @@ export async function answerWithClassification(
     actionPage = null
   }
 
-  const sourceTitles = await resolveSourceTitles(supabase, userId, built.contextChunkIds)
-  return { text, sourceTitles, media: [], stageChange, actionPage }
+  const [sourceTitles, media] = await Promise.all([
+    resolveSourceTitles(supabase, userId, built.contextChunkIds),
+    mediaPromise,
+  ])
+  return { text, sourceTitles, media, stageChange, actionPage }
 }
 
 /**

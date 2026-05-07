@@ -229,6 +229,37 @@
 /* Textarea-with-mention overlay: invisible mirror behind the textarea
    renders highlight chips for @slug / #slug tokens. The textarea sits on
    top with a transparent background so the chips show through. */
+.mention-ta-outer {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+.mention-ta-toolbar {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.mention-ta-toolbar-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ws-ink-3);
+  background: var(--ws-surface-2);
+  border: 1px solid var(--ws-border);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: color 0.12s, border-color 0.12s, background 0.12s;
+  line-height: 1;
+}
+.mention-ta-toolbar-btn:hover {
+  color: var(--ws-ink);
+  border-color: var(--ws-ink-4);
+  background: var(--ws-surface-3, var(--ws-surface-2));
+}
 .mention-ta-wrap {
   position: relative;
   width: 100%;
@@ -239,14 +270,35 @@
   white-space: pre-wrap;
   word-wrap: break-word;
   overflow: hidden;
-  color: transparent;
+  color: transparent !important;
   pointer-events: none;
   /* mirror must match textarea typography exactly */
 }
 .mention-ta-mirror .media-mention {
-  /* the chip background/border IS visible — only its text is transparent
-     so the textarea text on top remains readable. */
+  /* In the mirror, the chip MUST occupy the exact same width as the raw
+     text in the textarea above — otherwise the tinted background drifts
+     out from under the visible text. So we strip layout-affecting props
+     (padding, border, font-family, font-size) and use an inset box-shadow
+     for the chip outline, which paints without changing geometry. */
+  display: inline;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: inherit;
+  white-space: inherit;
   color: transparent;
+  box-shadow: inset 0 0 0 1px rgba(5, 150, 105, 0.28);
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+.mention-ta-mirror .media-mention--folder {
+  box-shadow: inset 0 0 0 1px rgba(26, 115, 232, 0.28);
+}
+.mention-ta-mirror .media-mention--action-page {
+  box-shadow: inset 0 0 0 1px rgba(124, 58, 237, 0.28);
 }
 .mention-ta-input {
   position: relative;

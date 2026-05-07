@@ -3,7 +3,7 @@ import { parseFaq } from './faq';
 import { parseTiptap } from './tiptap';
 
 export type ParseInput =
-  | { kind: 'document'; title: string; contentJson: unknown }
+  | { kind: 'document'; title: string; contentJson: unknown; contentText?: string | null }
   | { kind: 'faq'; question: string; answer: string }
   | { kind: 'business_item'; title: string; ragText: string }
   | { kind: 'media_asset'; title: string; ragText: string };

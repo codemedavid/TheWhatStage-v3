@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, useTransition } from 'react'
 import type { CSSProperties, FormEvent } from 'react'
 import type { BookingConfig } from './schema'
 import { formatSlotLabel } from '@/lib/action-pages/handlers/booking.slots'
@@ -87,6 +87,7 @@ export default function BookingPicker({ slug, config, hidden }: Props) {
 
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
+  const [, startTransition] = useTransition()
   const formRef = useRef<HTMLFormElement>(null)
 
   const dateRange = config.date_range
@@ -109,13 +110,15 @@ export default function BookingPicker({ slug, config, hidden }: Props) {
 
   useEffect(() => {
     if (!selectedDate) {
-      setSlots([])
+      startTransition(() => setSlots([]))
       return
     }
     let cancelled = false
-    setLoadingSlots(true)
-    setSlotsError(null)
-    setPickedSlotIso(null)
+    startTransition(() => {
+      setLoadingSlots(true)
+      setSlotsError(null)
+      setPickedSlotIso(null)
+    })
     fetch(
       `/api/action-pages/${encodeURIComponent(slug)}/slots?date=${ymd(selectedDate)}`,
       { cache: 'no-store' },
@@ -139,7 +142,7 @@ export default function BookingPicker({ slug, config, hidden }: Props) {
     return () => {
       cancelled = true
     }
-  }, [slug, selectedDate])
+  }, [slug, selectedDate, startTransition])
 
   const availableSlots = slots.filter((s) => s.taken < s.capacity)
 

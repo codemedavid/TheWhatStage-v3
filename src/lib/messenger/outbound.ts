@@ -1,8 +1,10 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import {
   sendMessengerButton,
+  sendMessengerGenericTemplate,
   sendMessengerImage,
   sendMessengerText,
+  type MessengerGenericElement,
 } from '@/lib/facebook/messenger'
 
 type AdminClient = ReturnType<typeof createAdminClient>
@@ -14,6 +16,7 @@ export type OutboundPayload =
   | { kind: 'text'; text: string }
   | { kind: 'button'; text: string; url: string; ctaLabel: string }
   | { kind: 'image'; imageUrl: string }
+  | { kind: 'generic_template'; elements: MessengerGenericElement[] }
 
 // 'bot'                   — automated reply inside a job worker (24h window only)
 // 'operator'              — manual send from the dashboard inbox (HUMAN_AGENT 7d window)
@@ -116,12 +119,15 @@ export async function sendOutbound(args: {
     return { sent: false, reason: policy.reason }
   }
 
-  // MARKETING_MESSAGE: actual FB Marketing Message API requires Business-level
-  // registration (out of scope for v1). Fall through to RESPONSE.
+  // MARKETING_MESSAGE: Meta requires Business-level registration for this API.
+  // Until that is wired up, block the send so we never spam leads.
+  // The preview UI already shows these rows as "paused:optin" — this guard
+  // is a belt-and-braces check at dispatch time.
   if (policy.mode === 'MARKETING_MESSAGE') {
-    console.warn('[outbound] MARKETING_MESSAGE: sending as RESPONSE (full API wiring is Step 4b)', {
+    console.warn('[outbound] MARKETING_MESSAGE blocked — Meta registration not yet wired', {
       threadId: thread.id,
     })
+    return { sent: false, reason: 'marketing_blocked' }
   }
 
   // OTN: consume the token — mark it as used so it cannot be spent twice.
@@ -155,6 +161,13 @@ export async function sendOutbound(args: {
       text: payload.text,
       url: payload.url,
       ctaLabel: payload.ctaLabel,
+    })
+    messageId = result.message_id
+  } else if (payload.kind === 'generic_template') {
+    const result = await sendMessengerGenericTemplate({
+      pageAccessToken: pageToken,
+      recipientPsid: thread.psid,
+      elements: payload.elements,
     })
     messageId = result.message_id
   } else {

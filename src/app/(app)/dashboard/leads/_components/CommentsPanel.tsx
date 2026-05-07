@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useTransition } from 'react'
 import { loadLeadComments, type ConversationComment } from '../actions/messenger'
 
 const CLASSIFICATION_COLORS: Record<ConversationComment['classification'], string> = {
@@ -30,14 +30,17 @@ const STATUS_LABELS: Record<ConversationComment['graph_status'], string> = {
 export function CommentsPanel({ leadId }: { leadId: string }) {
   const [comments, setComments] = useState<ConversationComment[] | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [, startTransition] = useTransition()
 
   useEffect(() => {
-    setComments(null)
-    setError(null)
+    startTransition(() => {
+      setComments(null)
+      setError(null)
+    })
     loadLeadComments(leadId)
-      .then(setComments)
-      .catch((e) => setError(e.message ?? 'Failed to load comments'))
-  }, [leadId])
+      .then((c) => startTransition(() => setComments(c)))
+      .catch((e: Error) => startTransition(() => setError(e.message ?? 'Failed to load comments')))
+  }, [leadId, startTransition])
 
   if (error) {
     return (

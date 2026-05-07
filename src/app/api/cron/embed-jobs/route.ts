@@ -29,11 +29,16 @@ export async function GET(req: Request) {
     async fetchDocument(id: string) {
       const { data, error } = await client
         .from('knowledge_documents')
-        .select('title, content_json, version')
+        .select('title, content_json, content_text, version')
         .eq('id', id)
         .single();
       if (error || !data) throw new Error(`document ${id} missing: ${error?.message}`);
-      return { title: data.title, contentJson: data.content_json, version: data.version };
+      return {
+        title: data.title,
+        contentJson: data.content_json,
+        contentText: data.content_text,
+        version: data.version,
+      };
     },
     async fetchFaq(id: string) {
       const { data, error } = await client

@@ -23,14 +23,15 @@ async function requireUser() {
 }
 
 /**
- * Load all action-page submissions attributed to a given lead, newest first.
- * Used by the Lead drawer's "Forms" tab. RLS scopes results to the owner.
+ * Load action-page submissions attributed to a given lead, newest first,
+ * optionally filtered by action-page kind. RLS scopes results to the owner.
  */
 export async function loadLeadSubmissions(
   leadId: string,
+  opts: { kinds?: string[] } = {},
 ): Promise<LeadSubmission[]> {
   const { supabase } = await requireUser()
-  const { data, error } = await supabase
+  let query = supabase
     .from('action_page_submissions')
     .select(
       'id, action_page_id, outcome, data, created_at, action_pages!inner(title, kind)',
@@ -38,6 +39,10 @@ export async function loadLeadSubmissions(
     .eq('lead_id', leadId)
     .order('created_at', { ascending: false })
     .limit(100)
+  if (opts.kinds && opts.kinds.length > 0) {
+    query = query.in('action_pages.kind', opts.kinds)
+  }
+  const { data, error } = await query
   if (error) throw new Error(`loadLeadSubmissions: ${error.message}`)
   return (data ?? []).map((row) => {
     const ap = Array.isArray(row.action_pages)

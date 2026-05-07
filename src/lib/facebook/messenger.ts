@@ -139,6 +139,55 @@ export async function sendMessengerReaction(args: {
   })
 }
 
+export interface MessengerGenericElement {
+  title: string
+  subtitle?: string
+  imageUrl?: string
+  defaultActionUrl?: string
+  buttons?: Array<{ title: string; url: string }>
+}
+
+/**
+ * Send a Messenger generic-template carousel (horizontally scrollable cards).
+ * Up to 10 elements; each element supports an image, title (80c), subtitle
+ * (80c), a default web_url tap target, and up to 3 web_url buttons (titles
+ * trimmed to 20c). Used to surface a product catalog inline in chat.
+ */
+export async function sendMessengerGenericTemplate(args: {
+  pageAccessToken: string
+  recipientPsid: string
+  elements: MessengerGenericElement[]
+}): Promise<{ message_id: string }> {
+  const url = new URL(`${GRAPH}/me/messages`)
+  url.searchParams.set('access_token', args.pageAccessToken)
+  const elements = args.elements.slice(0, 10).map((el) => {
+    const out: Record<string, unknown> = { title: el.title.slice(0, 80) }
+    if (el.subtitle) out.subtitle = el.subtitle.slice(0, 80)
+    if (el.imageUrl) out.image_url = el.imageUrl
+    if (el.defaultActionUrl) {
+      out.default_action = { type: 'web_url', url: el.defaultActionUrl }
+    }
+    if (el.buttons && el.buttons.length) {
+      out.buttons = el.buttons.slice(0, 3).map((b) => ({
+        type: 'web_url',
+        url: b.url,
+        title: b.title.slice(0, 20),
+      }))
+    }
+    return out
+  })
+  return postJson<{ message_id: string }>(url.toString(), {
+    recipient: { id: args.recipientPsid },
+    messaging_type: 'RESPONSE',
+    message: {
+      attachment: {
+        type: 'template',
+        payload: { template_type: 'generic', elements },
+      },
+    },
+  })
+}
+
 export async function sendMessengerImage(args: {
   pageAccessToken: string
   recipientPsid: string
