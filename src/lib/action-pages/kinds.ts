@@ -16,6 +16,10 @@ export interface KindMeta {
   supportsEmbed: boolean
   defaultConfig: Record<string, unknown>
   defaultPipelineRules: { outcome: string; reason: string }[]
+  /** Default `cta_label` — the Messenger CTA button label the bot uses when sending this page. */
+  defaultCtaLabel: string
+  /** Default `notification_template.text` — Messenger echo sent back after a successful submission. */
+  defaultNotificationText: string
 }
 
 export const KIND_REGISTRY: Record<ActionPageKind, KindMeta> = {
@@ -51,6 +55,9 @@ export const KIND_REGISTRY: Record<ActionPageKind, KindMeta> = {
       success_message: 'Thanks! We got your submission.',
     },
     defaultPipelineRules: [{ outcome: 'submitted', reason: 'Form submitted' }],
+    defaultCtaLabel: 'Open form',
+    defaultNotificationText:
+      "Thanks! We got your details and will be in touch shortly.",
   },
   booking: {
     id: 'booking',
@@ -101,6 +108,9 @@ export const KIND_REGISTRY: Record<ActionPageKind, KindMeta> = {
       },
     },
     defaultPipelineRules: [{ outcome: 'booked', reason: 'Appointment booked' }],
+    defaultCtaLabel: 'Book a slot',
+    defaultNotificationText:
+      "You're booked! We'll send a reminder before your appointment.",
   },
   qualification: {
     id: 'qualification',
@@ -145,14 +155,68 @@ export const KIND_REGISTRY: Record<ActionPageKind, KindMeta> = {
       { outcome: 'disqualified', reason: 'Did not qualify' },
       { outcome: 'pending_review', reason: 'Awaiting manual qualification review' },
     ],
+    defaultCtaLabel: 'Start qualification',
+    defaultNotificationText:
+      "Thanks for answering! We'll review your responses and follow up shortly.",
   },
   sales: {
     id: 'sales',
     label: 'Sales Page',
-    blurb: 'Pre-templated offer page with a single call-to-action.',
+    blurb: 'Offer page with product details, gallery, and embedded conversion forms.',
     supportsEmbed: false,
-    defaultConfig: { headline: '', subhead: '', cta_label: 'Buy now' },
-    defaultPipelineRules: [{ outcome: 'checked_out', reason: 'Sales page checkout' }],
+    defaultConfig: {
+      theme: {
+        background_color: '#FFFFFF',
+        accent_color: '#059669',
+        button_text_color: '#FFFFFF',
+      },
+      product: {
+        name: '',
+        type: 'digital',
+        headline: '',
+        tagline: '',
+        description: '',
+      },
+      price: {
+        amount: null,
+        currency: 'PHP',
+        compare_at_amount: null,
+        display_label: '',
+        period: null,
+      },
+      gallery: [],
+      features: [],
+      benefits: [],
+      testimonials: [],
+      faqs: [],
+      guarantee: { enabled: false, title: '', body: '' },
+      cta: {
+        primary_label: 'Get it now',
+        secondary_label: '',
+        scroll_target: 'inline_form',
+      },
+      delivery: { type: 'email', notes: '' },
+      social_proof: [],
+      linked_action_page_ids: [],
+      fallback_form: {
+        enabled: true,
+        fields: [
+          { key: 'full_name', label: 'Your name', required: true, enabled: true },
+          { key: 'email', label: 'Email', required: true, enabled: true },
+          { key: 'phone', label: 'Phone', required: false, enabled: true },
+          { key: 'message', label: 'Message', required: false, enabled: false },
+        ],
+        submit_button_label: 'Buy now',
+        success_message: "Thanks! We'll be in touch shortly.",
+      },
+    },
+    defaultPipelineRules: [
+      { outcome: 'submitted', reason: 'Lead submitted via sales page' },
+      { outcome: 'checked_out', reason: 'Sales page checkout' },
+    ],
+    defaultCtaLabel: 'View offer',
+    defaultNotificationText:
+      "Thanks for your interest! We'll follow up with the next steps shortly.",
   },
   catalog: {
     id: 'catalog',
@@ -166,14 +230,60 @@ export const KIND_REGISTRY: Record<ActionPageKind, KindMeta> = {
       checkout_fields: [],
     },
     defaultPipelineRules: [{ outcome: 'checked_out', reason: 'Catalog checkout' }],
+    defaultCtaLabel: 'Browse catalog',
+    defaultNotificationText:
+      "Thanks for your order! We'll confirm the details on Messenger shortly.",
   },
   realestate: {
     id: 'realestate',
-    label: 'Real Estate',
-    blurb: 'Property listing with viewing-appointment request.',
+    label: 'Property',
+    blurb: 'Property listing with photos, map, financing, and linked action pages.',
     supportsEmbed: false,
-    defaultConfig: { property: {}, viewing_slots: [] },
-    defaultPipelineRules: [{ outcome: 'viewing_booked', reason: 'Viewing booked' }],
+    defaultConfig: {
+      theme: {
+        background_color: '#FFFFFF',
+        accent_color: '#0F766E',
+        button_text_color: '#FFFFFF',
+      },
+      status: 'for_sale',
+      price: {
+        amount: null,
+        currency: 'PHP',
+        period: null,
+        display_label: '',
+      },
+      gallery: [],
+      address: {
+        line1: '',
+        line2: '',
+        city: '',
+        region: '',
+        postal: '',
+        country: '',
+      },
+      description: '',
+      specs: {
+        property_type: null,
+        beds: null,
+        baths: null,
+        floor_area: null,
+        lot_area: null,
+        year_built: null,
+        parking: null,
+      },
+      custom_specs: [],
+      amenities: [],
+      financing_options: [],
+      financing_notes: '',
+      linked_action_page_ids: [],
+    },
+    defaultPipelineRules: [
+      { outcome: 'inquiry_submitted', reason: 'Property inquiry submitted' },
+      { outcome: 'viewing_booked', reason: 'Viewing booked' },
+    ],
+    defaultCtaLabel: 'View property',
+    defaultNotificationText:
+      "Thanks for your inquiry! We'll reach out about this property shortly.",
   },
 }
 

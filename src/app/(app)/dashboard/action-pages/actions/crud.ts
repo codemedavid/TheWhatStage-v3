@@ -55,6 +55,8 @@ export async function createActionPage(formData: FormData): Promise<void> {
         to_stage_id: null,
         reason: r.reason,
       })),
+      cta_label: meta.defaultCtaLabel,
+      notification_template: { text: meta.defaultNotificationText },
     })
     .select('id')
     .single<{ id: string }>()
