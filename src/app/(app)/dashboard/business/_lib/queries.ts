@@ -40,6 +40,7 @@ export interface OrderListItem {
 export interface OrderDetail extends OrderListItem {
   customer_email: string | null
   customer_notes: string | null
+  meta: Record<string, unknown> | null
   items: {
     id: string
     title_snapshot: string
@@ -165,7 +166,7 @@ export async function fetchOrder(
   const { data: order, error } = await supabase
     .from('business_orders')
     .select(
-      'id, status, payment_status, currency, subtotal_amount, customer_name, customer_phone, customer_email, customer_notes, created_at',
+      'id, status, payment_status, currency, subtotal_amount, customer_name, customer_phone, customer_email, customer_notes, meta, created_at',
     )
     .eq('user_id', userId)
     .eq('id', id)

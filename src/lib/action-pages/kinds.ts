@@ -163,6 +163,7 @@ export const KIND_REGISTRY: Record<ActionPageKind, KindMeta> = {
       theme: { accent_color: '#059669' },
       product_ids: [],
       categories: [],
+      checkout_fields: [],
     },
     defaultPipelineRules: [{ outcome: 'checked_out', reason: 'Catalog checkout' }],
   },

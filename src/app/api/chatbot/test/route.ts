@@ -128,7 +128,11 @@ export async function POST(req: NextRequest) {
           embedder,
           userId,
           customerMessage: message,
-          retrievedChunks: built.contextChunks,
+          retrievedChunks: [
+            ...ctx.buckets.useful,
+            ...ctx.buckets.ambiguous,
+            ...ctx.buckets.reject,
+          ],
           limit: 4,
         })
           .then(async (media) => {

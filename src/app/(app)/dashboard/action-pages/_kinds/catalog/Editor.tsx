@@ -26,10 +26,32 @@ interface Collection {
   product_ids: string[]
 }
 
+const CHECKOUT_FIELD_TYPES = [
+  { value: 'short_text', label: 'Short text' },
+  { value: 'long_text', label: 'Long text' },
+  { value: 'email', label: 'Email' },
+  { value: 'phone', label: 'Phone' },
+  { value: 'number', label: 'Number' },
+  { value: 'select', label: 'Dropdown' },
+] as const
+
+type CheckoutFieldType = (typeof CHECKOUT_FIELD_TYPES)[number]['value']
+
+interface CheckoutField {
+  id: string
+  key: string
+  label: string
+  type: CheckoutFieldType
+  required: boolean
+  placeholder?: string
+  options?: string[]
+}
+
 interface CatalogConfig {
   theme: { accent_color: string }
   product_ids: string[]
   categories: Collection[]
+  checkout_fields: CheckoutField[]
 }
 
 const PRESET_SWATCHES = [
@@ -44,6 +66,31 @@ const PRESET_SWATCHES = [
 
 function parseCatalogConfig(raw: Record<string, unknown>): CatalogConfig {
   const theme = (raw.theme ?? {}) as Record<string, unknown>
+  const fieldsRaw = Array.isArray(raw.checkout_fields)
+    ? (raw.checkout_fields as Record<string, unknown>[])
+    : []
+  const allowed = CHECKOUT_FIELD_TYPES.map((t) => t.value) as readonly string[]
+  const checkoutFields: CheckoutField[] = fieldsRaw
+    .map((f) => {
+      const key = typeof f.key === 'string' ? f.key.trim() : ''
+      const label = typeof f.label === 'string' ? f.label : ''
+      const type = (allowed.includes(String(f.type))
+        ? (f.type as CheckoutFieldType)
+        : 'short_text') as CheckoutFieldType
+      const options = Array.isArray(f.options)
+        ? (f.options as unknown[]).filter((o): o is string => typeof o === 'string')
+        : undefined
+      return {
+        id: typeof f.id === 'string' ? f.id : key || genId(),
+        key,
+        label,
+        type,
+        required: f.required === true,
+        placeholder: typeof f.placeholder === 'string' ? f.placeholder : undefined,
+        options,
+      }
+    })
+    .filter((f) => f.key && f.label)
   return {
     theme: {
       accent_color:
@@ -53,6 +100,7 @@ function parseCatalogConfig(raw: Record<string, unknown>): CatalogConfig {
     categories: Array.isArray(raw.categories)
       ? (raw.categories as Collection[])
       : [],
+    checkout_fields: checkoutFields,
   }
 }
 
@@ -211,6 +259,50 @@ export default function CatalogEditor({ page }: KindEditorProps) {
         }
       }),
     }))
+  }
+
+  function addCheckoutField() {
+    setConfig((c) => ({
+      ...c,
+      checkout_fields: [
+        ...c.checkout_fields,
+        {
+          id: genId(),
+          key: `field_${c.checkout_fields.length + 1}`,
+          label: 'New field',
+          type: 'short_text',
+          required: false,
+        },
+      ],
+    }))
+  }
+
+  function updateCheckoutField(id: string, patch: Partial<CheckoutField>) {
+    setConfig((c) => ({
+      ...c,
+      checkout_fields: c.checkout_fields.map((f) =>
+        f.id === id ? { ...f, ...patch } : f,
+      ),
+    }))
+  }
+
+  function removeCheckoutField(id: string) {
+    setConfig((c) => ({
+      ...c,
+      checkout_fields: c.checkout_fields.filter((f) => f.id !== id),
+    }))
+  }
+
+  function moveCheckoutField(id: string, dir: -1 | 1) {
+    setConfig((c) => {
+      const idx = c.checkout_fields.findIndex((f) => f.id === id)
+      if (idx < 0) return c
+      const next = idx + dir
+      if (next < 0 || next >= c.checkout_fields.length) return c
+      const arr = [...c.checkout_fields]
+      ;[arr[idx], arr[next]] = [arr[next], arr[idx]]
+      return { ...c, checkout_fields: arr }
+    })
   }
 
   const liveCount = visibleIds.length
@@ -432,6 +524,213 @@ export default function CatalogEditor({ page }: KindEditorProps) {
           )}
         </div>
       </div>
+
+      <CheckoutFieldsCard
+        fields={config.checkout_fields}
+        onAdd={addCheckoutField}
+        onUpdate={updateCheckoutField}
+        onRemove={removeCheckoutField}
+        onMove={moveCheckoutField}
+      />
+    </div>
+  )
+}
+
+/* ---------------- Checkout fields ---------------- */
+
+function CheckoutFieldsCard({
+  fields,
+  onAdd,
+  onUpdate,
+  onRemove,
+  onMove,
+}: {
+  fields: CheckoutField[]
+  onAdd: () => void
+  onUpdate: (id: string, patch: Partial<CheckoutField>) => void
+  onRemove: (id: string) => void
+  onMove: (id: string, dir: -1 | 1) => void
+}) {
+  return (
+    <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-[0_1px_0_rgba(17,24,39,0.04)]">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-100 px-4 py-3">
+        <div>
+          <h3 className="text-[13.5px] font-semibold text-zinc-900">
+            Checkout fields
+          </h3>
+          <p className="mt-0.5 text-[12px] text-zinc-500">
+            Extra info to collect from buyers — address, IG handle, delivery
+            preference, etc. Built-in name, phone, email, and notes are always
+            shown.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onAdd}
+          className="inline-flex items-center gap-1.5 rounded-md bg-emerald-600 px-3 py-1.5 text-[12.5px] font-semibold text-white shadow-sm hover:bg-emerald-700"
+        >
+          <PlusIcon /> Add field
+        </button>
+      </div>
+      {fields.length === 0 ? (
+        <div className="px-4 py-10 text-center text-[13px] text-zinc-500">
+          No custom fields yet. Add one to ask for things like delivery
+          address, IG handle, or shirt size.
+        </div>
+      ) : (
+        <ul className="divide-y divide-zinc-100">
+          {fields.map((f, i) => (
+            <li key={f.id} className="px-4 py-3">
+              <div className="flex flex-wrap items-start gap-2">
+                <div className="flex flex-col gap-0.5 pr-1 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => onMove(f.id, -1)}
+                    disabled={i === 0}
+                    className="rounded p-0.5 leading-none text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 disabled:opacity-30"
+                    aria-label="Move up"
+                  >
+                    <CaretIcon dir="up" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onMove(f.id, 1)}
+                    disabled={i === fields.length - 1}
+                    className="rounded p-0.5 leading-none text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 disabled:opacity-30"
+                    aria-label="Move down"
+                  >
+                    <CaretIcon dir="down" />
+                  </button>
+                </div>
+
+                <div className="grid min-w-[260px] flex-1 grid-cols-1 gap-2 sm:grid-cols-2">
+                  <FieldInput
+                    label="Label"
+                    value={f.label}
+                    onChange={(v) => onUpdate(f.id, { label: v })}
+                    placeholder="e.g. Delivery address"
+                  />
+                  <FieldInput
+                    label="Key"
+                    value={f.key}
+                    onChange={(v) =>
+                      onUpdate(f.id, {
+                        key: v
+                          .toLowerCase()
+                          .replace(/[^a-z0-9_]+/g, '_')
+                          .replace(/^_+|_+$/g, ''),
+                      })
+                    }
+                    placeholder="address"
+                    mono
+                  />
+                  <div>
+                    <label className="mb-0.5 block text-[10.5px] font-medium uppercase tracking-wide text-zinc-500">
+                      Type
+                    </label>
+                    <select
+                      value={f.type}
+                      onChange={(e) =>
+                        onUpdate(f.id, {
+                          type: e.target.value as CheckoutFieldType,
+                        })
+                      }
+                      className="w-full rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-[13px] text-zinc-900 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                    >
+                      {CHECKOUT_FIELD_TYPES.map((t) => (
+                        <option key={t.value} value={t.value}>
+                          {t.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <FieldInput
+                    label="Placeholder"
+                    value={f.placeholder ?? ''}
+                    onChange={(v) =>
+                      onUpdate(f.id, { placeholder: v || undefined })
+                    }
+                    placeholder="Hint shown in the input"
+                  />
+                  {f.type === 'select' && (
+                    <div className="sm:col-span-2">
+                      <label className="mb-0.5 block text-[10.5px] font-medium uppercase tracking-wide text-zinc-500">
+                        Options (one per line)
+                      </label>
+                      <textarea
+                        value={(f.options ?? []).join('\n')}
+                        onChange={(e) =>
+                          onUpdate(f.id, {
+                            options: e.target.value
+                              .split('\n')
+                              .map((o) => o.trim())
+                              .filter(Boolean),
+                          })
+                        }
+                        rows={3}
+                        className="w-full rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-[13px] text-zinc-900 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                        placeholder={'Small\nMedium\nLarge'}
+                      />
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex flex-col items-end gap-2">
+                  <label className="inline-flex cursor-pointer items-center gap-1.5 text-[12px] font-medium text-zinc-700">
+                    <input
+                      type="checkbox"
+                      checked={f.required}
+                      onChange={(e) =>
+                        onUpdate(f.id, { required: e.target.checked })
+                      }
+                      className="size-3.5 rounded border-zinc-300 text-emerald-600 focus:ring-emerald-500"
+                    />
+                    Required
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => onRemove(f.id)}
+                    className="inline-flex items-center gap-1 rounded-md border border-zinc-200 bg-white px-2 py-1 text-[11.5px] font-medium text-zinc-600 hover:bg-red-50 hover:text-red-700"
+                    aria-label="Remove field"
+                  >
+                    <XIcon size={10} /> Remove
+                  </button>
+                </div>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+function FieldInput({
+  label,
+  value,
+  onChange,
+  placeholder,
+  mono,
+}: {
+  label: string
+  value: string
+  onChange: (v: string) => void
+  placeholder?: string
+  mono?: boolean
+}) {
+  return (
+    <div>
+      <label className="mb-0.5 block text-[10.5px] font-medium uppercase tracking-wide text-zinc-500">
+        {label}
+      </label>
+      <input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className={`w-full rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-[13px] text-zinc-900 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 ${
+          mono ? 'font-mono' : ''
+        }`}
+      />
     </div>
   )
 }
@@ -1061,14 +1360,18 @@ function PencilIcon() {
     </svg>
   )
 }
-function CaretIcon({ dir }: { dir: 'left' | 'right' }) {
+function CaretIcon({ dir }: { dir: 'left' | 'right' | 'up' | 'down' }) {
+  const points =
+    dir === 'left'
+      ? '15 6 9 12 15 18'
+      : dir === 'right'
+        ? '9 6 15 12 9 18'
+        : dir === 'up'
+          ? '6 15 12 9 18 15'
+          : '6 9 12 15 18 9'
   return (
     <svg width={9} height={9} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-      {dir === 'left' ? (
-        <polygon points="15 6 9 12 15 18" />
-      ) : (
-        <polygon points="9 6 15 12 9 18" />
-      )}
+      <polygon points={points} />
     </svg>
   )
 }

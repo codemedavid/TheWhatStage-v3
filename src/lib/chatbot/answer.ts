@@ -88,12 +88,21 @@ export async function answer(
     conversationSummary: options.conversationSummary,
   })
 
+  // Scan ALL retrieved chunks (including grader-rejected ones) for @asset /
+  // #folder references. A standalone slug paragraph often gets a near-zero
+  // rerank score and lands in `reject`, which would otherwise hide its image
+  // even though the user explicitly attached it in the knowledge doc.
+  const refChunks = [
+    ...ctx.buckets.useful,
+    ...ctx.buckets.ambiguous,
+    ...ctx.buckets.reject,
+  ]
   const mediaPromise = selectMediaForReply({
     client: supabase,
     embedder,
     userId,
     customerMessage: message,
-    retrievedChunks: built.contextChunks,
+    retrievedChunks: refChunks,
     rpcName: options.rpcName === 'match_knowledge_hybrid_service' ? 'match_media_assets_service' : 'match_media_assets',
     limit: 4,
   }).catch((err) => {

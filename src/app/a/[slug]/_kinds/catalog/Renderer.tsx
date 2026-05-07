@@ -12,9 +12,20 @@ interface Category {
   product_ids: string[]
 }
 
+interface CheckoutField {
+  id: string
+  key: string
+  label: string
+  type: 'short_text' | 'long_text' | 'email' | 'phone' | 'number' | 'select'
+  required: boolean
+  placeholder?: string
+  options?: string[]
+}
+
 interface CatalogConfig {
   theme?: { accent_color?: string }
   categories?: Category[]
+  checkout_fields?: CheckoutField[]
 }
 
 const ALL_TAB = '__all__'
@@ -47,6 +58,13 @@ export default function CatalogRenderer({
   const accent = config.theme?.accent_color ?? S.accent
   const categories = (config.categories ?? []).filter((c) => c.product_ids.length > 0)
   const hasTabs = categories.length > 0
+  const checkoutFields = useMemo<CheckoutField[]>(
+    () =>
+      (config.checkout_fields ?? []).filter(
+        (f): f is CheckoutField => !!f && !!f.key && !!f.label,
+      ),
+    [config.checkout_fields],
+  )
 
   const [quantities, setQuantities] = useState<Record<string, number>>({})
   const [activeTab, setActiveTab] = useState<string>(ALL_TAB)
@@ -489,6 +507,7 @@ export default function CatalogRenderer({
         rawToken={rawToken}
         items={items}
         onChangeQty={setQty}
+        checkoutFields={checkoutFields}
       />
 
       {previewProduct ? (
@@ -813,6 +832,7 @@ function CartDrawer({
   rawToken,
   items,
   onChangeQty,
+  checkoutFields,
 }: {
   open: boolean
   onClose: () => void
@@ -825,7 +845,9 @@ function CartDrawer({
   rawToken: KindRendererProps['rawToken']
   items: { id: string; quantity: number }[]
   onChangeQty: (id: string, n: number) => void
+  checkoutFields: CheckoutField[]
 }) {
+  const [customValues, setCustomValues] = useState<Record<string, string>>({})
   return (
     <>
       <div
@@ -918,6 +940,11 @@ function CartDrawer({
             </>
           ) : null}
           <input type="hidden" name="data.items" value={JSON.stringify(items)} />
+          <input
+            type="hidden"
+            name="data.custom"
+            value={JSON.stringify(customValues)}
+          />
 
           <div className="shop-scroll" style={{ flex: 1, overflowY: 'auto', padding: '18px 22px' }}>
             {lines.length === 0 ? (
@@ -1116,6 +1143,64 @@ function CartDrawer({
                     className="shop-input"
                     style={{ resize: 'vertical' }}
                   />
+                  {checkoutFields.map((f) => {
+                    const value = customValues[f.key] ?? ''
+                    const setValue = (v: string) =>
+                      setCustomValues((prev) => ({ ...prev, [f.key]: v }))
+                    const placeholder =
+                      f.placeholder ?? (f.required ? f.label : `${f.label} (optional)`)
+                    if (f.type === 'long_text') {
+                      return (
+                        <textarea
+                          key={f.id}
+                          required={f.required}
+                          value={value}
+                          onChange={(e) => setValue(e.target.value)}
+                          placeholder={placeholder}
+                          rows={3}
+                          className="shop-input"
+                          style={{ resize: 'vertical' }}
+                        />
+                      )
+                    }
+                    if (f.type === 'select') {
+                      return (
+                        <select
+                          key={f.id}
+                          required={f.required}
+                          value={value}
+                          onChange={(e) => setValue(e.target.value)}
+                          className="shop-input"
+                        >
+                          <option value="">{placeholder}</option>
+                          {(f.options ?? []).map((opt) => (
+                            <option key={opt} value={opt}>
+                              {opt}
+                            </option>
+                          ))}
+                        </select>
+                      )
+                    }
+                    const inputType =
+                      f.type === 'email'
+                        ? 'email'
+                        : f.type === 'phone'
+                          ? 'tel'
+                          : f.type === 'number'
+                            ? 'number'
+                            : 'text'
+                    return (
+                      <input
+                        key={f.id}
+                        type={inputType}
+                        required={f.required}
+                        value={value}
+                        onChange={(e) => setValue(e.target.value)}
+                        placeholder={placeholder}
+                        className="shop-input"
+                      />
+                    )
+                  })}
                 </div>
               </div>
             ) : null}

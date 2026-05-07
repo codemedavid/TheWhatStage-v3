@@ -141,9 +141,10 @@ export async function POST(req: NextRequest) {
   }
 
   let businessOrderId: string | null = null
+  let catalogOrderResult: CatalogOrderResult | null = null
   if (page.kind === 'catalog') {
     try {
-      businessOrderId = await createBusinessOrderFromCatalog({
+      catalogOrderResult = await createBusinessOrderFromCatalog({
         admin,
         page,
         parsedData: parsed.data,
@@ -151,6 +152,7 @@ export async function POST(req: NextRequest) {
         psid,
         fbPageId,
       })
+      businessOrderId = catalogOrderResult.orderId
     } catch (e) {
       return NextResponse.json(
         {
@@ -159,6 +161,26 @@ export async function POST(req: NextRequest) {
         },
         { status: 400 },
       )
+    }
+  }
+
+  // If no Messenger deeplink attributed a lead, try to find one by customer
+  // phone/email so the pipeline rule still fires for direct-URL checkouts.
+  if (!leadId && catalogOrderResult) {
+    const { phone, email } = catalogOrderResult.customer
+    const filters: string[] = []
+    if (phone) filters.push(`phones.cs.{${phone}}`)
+    if (email) filters.push(`emails.cs.{${email}}`)
+    if (filters.length) {
+      const { data: matchedLeads } = await admin
+        .from('leads')
+        .select('id')
+        .eq('user_id', page.user_id)
+        .or(filters.join(','))
+        .limit(2)
+      if (matchedLeads?.length === 1) {
+        leadId = (matchedLeads[0] as { id: string }).id
+      }
     }
   }
 
@@ -322,12 +344,15 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // Echo back to Messenger. Per-outcome text on the matching pipeline rule
-  // wins; otherwise fall back to the global notification template.
+  // Echo back to Messenger. For catalog orders, prepend an order summary.
+  // Per-outcome notify_text wins over the global template for the closing line.
   const matchedRule = page.pipeline_rules.find((r) => r.outcome === parsed.outcome)
-  const echo =
+  const notifyText =
     (matchedRule?.notify_text && matchedRule.notify_text.trim()) ||
     page.notification_template?.text
+  const echo = catalogOrderResult
+    ? buildOrderEcho(catalogOrderResult, notifyText)
+    : notifyText
   if (echo && psid && fbPageId && messengerThreadId) {
     try {
       const { data: pageData } = await admin
@@ -394,6 +419,42 @@ export async function POST(req: NextRequest) {
   return NextResponse.redirect(`${base}/a/${slug}?submitted=1`, { status: 303 })
 }
 
+interface CatalogOrderResult {
+  orderId: string
+  lines: Array<{
+    title_snapshot: string
+    quantity: number
+    unit_amount: number
+    line_total_amount: number
+    currency: string
+  }>
+  subtotal: number
+  currency: string
+  customer: { name: string | null; phone: string | null; email: string | null; notes: string | null }
+  customFields: Record<string, string>
+}
+
+function buildOrderEcho(order: CatalogOrderResult, notifyText: string | undefined): string {
+  const fmt = (amount: number, currency: string) => {
+    try {
+      return new Intl.NumberFormat('en-PH', { style: 'currency', currency }).format(amount)
+    } catch {
+      return `${amount.toFixed(2)} ${currency}`
+    }
+  }
+  const lines = order.lines
+    .map((l) => `• ${l.quantity}x ${l.title_snapshot} — ${fmt(l.line_total_amount, l.currency)}`)
+    .join('\n')
+  const parts = [`Order received!\n${lines}\n\nTotal: ${fmt(order.subtotal, order.currency)}`]
+  const { name, phone, email, notes } = order.customer
+  if (name) parts.push(`Name: ${name}`)
+  if (phone) parts.push(`Phone: ${phone}`)
+  if (email) parts.push(`Email: ${email}`)
+  if (notes) parts.push(`Notes: ${notes}`)
+  if (notifyText?.trim()) parts.push(`\n${notifyText.trim()}`)
+  return parts.join('\n').slice(0, 1900)
+}
+
 async function createBusinessOrderFromCatalog(args: {
   admin: ReturnType<typeof createAdminClient>
   page: ActionPageRecord
@@ -401,7 +462,7 @@ async function createBusinessOrderFromCatalog(args: {
   leadId: string | null
   psid: string | null
   fbPageId: string | null
-}): Promise<string> {
+}): Promise<CatalogOrderResult> {
   const items = (args.parsedData.items ?? []) as {
     id: string
     quantity: number
@@ -458,6 +519,28 @@ async function createBusinessOrderFromCatalog(args: {
     0,
   )
   const customer = (args.parsedData.customer ?? {}) as Record<string, unknown>
+  const customFieldsRaw = (customer.custom ?? {}) as Record<string, unknown>
+  const customFields: Record<string, string> = {}
+  for (const [k, v] of Object.entries(customFieldsRaw)) {
+    if (v != null && String(v).length > 0) customFields[k] = String(v)
+  }
+  const fieldDefs = Array.isArray(
+    (args.page.config as Record<string, unknown>).checkout_fields,
+  )
+    ? ((args.page.config as Record<string, unknown>).checkout_fields as Array<
+        Record<string, unknown>
+      >)
+    : []
+  const labeledCustomFields = fieldDefs
+    .map((f) => {
+      const key = typeof f.key === 'string' ? f.key : ''
+      const label = typeof f.label === 'string' ? f.label : key
+      const value = key && customFields[key] ? customFields[key] : ''
+      return { key, label, value }
+    })
+    .filter((f) => f.key && f.value)
+  const meta: Record<string, unknown> = {}
+  if (labeledCustomFields.length > 0) meta.custom_fields = labeledCustomFields
 
   const { data: orderId, error: orderErr } = await args.admin.rpc('create_catalog_order', {
     p_order: {
@@ -474,7 +557,7 @@ async function createBusinessOrderFromCatalog(args: {
       customer_email: customer.email ?? null,
       customer_phone: customer.phone ?? null,
       customer_notes: customer.notes ?? null,
-      meta: {},
+      meta,
     },
     p_lines: lines,
   })
@@ -482,7 +565,19 @@ async function createBusinessOrderFromCatalog(args: {
   if (orderErr || !orderId) {
     throw new Error(orderErr?.message ?? 'order insert failed')
   }
-  return String(orderId)
+  return {
+    orderId: String(orderId),
+    lines,
+    subtotal,
+    currency,
+    customer: {
+      name: (customer.name as string | null) ?? null,
+      phone: (customer.phone as string | null) ?? null,
+      email: (customer.email as string | null) ?? null,
+      notes: (customer.notes as string | null) ?? null,
+    },
+    customFields,
+  }
 }
 
 async function applyStageMove(args: {

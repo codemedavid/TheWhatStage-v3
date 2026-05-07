@@ -97,12 +97,20 @@ export async function answerWithClassification(
   const stageSystem = stageInstruction(stages, currentStageId, actionPages)
   const system = `${built.system}\n\n${stageSystem}`
 
+  // Scan ALL retrieved chunks (including grader-rejected ones) for @asset /
+  // #folder references — a slug-only paragraph often scores low in the
+  // reranker and lands in `reject`, which would otherwise hide its image.
+  const refChunks = [
+    ...ctx.buckets.useful,
+    ...ctx.buckets.ambiguous,
+    ...ctx.buckets.reject,
+  ]
   const mediaPromise = selectMediaForReply({
     client: supabase,
     embedder,
     userId,
     customerMessage: message,
-    retrievedChunks: built.contextChunks,
+    retrievedChunks: refChunks,
     rpcName: options.rpcName === 'match_knowledge_hybrid_service' ? 'match_media_assets_service' : 'match_media_assets',
     limit: 4,
   }).catch((err) => {

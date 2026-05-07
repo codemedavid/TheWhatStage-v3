@@ -385,15 +385,17 @@ function DocumentEditorImpl({
       },
     },
     onCreate: ({ editor }) => {
-      setEditorReady(true)
       editorRef.current = editor
       latestRef.current = {
         json: normalizeJson(editor.getJSON()),
         html: editor.getHTML(),
         text: editor.getText(),
       }
-      setStats(computeStats(editor.getText()))
-      console.log('[DocumentEditor] mounted')
+      // Defer state updates until after React has finished mounting
+      setTimeout(() => {
+        setEditorReady(true)
+        setStats(computeStats(editor.getText()))
+      }, 0)
     },
     onUpdate: ({ editor }) => {
       const json = normalizeJson(editor.getJSON())

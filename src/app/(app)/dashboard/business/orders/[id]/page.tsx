@@ -22,6 +22,20 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
   if (!order) notFound()
 
   const itemsTotal = order.items.reduce((acc, i) => acc + i.line_total_amount, 0)
+  const customFieldsRaw = (order.meta && typeof order.meta === 'object'
+    ? (order.meta as Record<string, unknown>).custom_fields
+    : null)
+  const customFields: { key: string; label: string; value: string }[] = Array.isArray(
+    customFieldsRaw,
+  )
+    ? (customFieldsRaw as Array<Record<string, unknown>>)
+        .map((f) => ({
+          key: String(f.key ?? ''),
+          label: String(f.label ?? f.key ?? ''),
+          value: String(f.value ?? ''),
+        }))
+        .filter((f) => f.key && f.value)
+    : []
 
   return (
     <div className="space-y-5">
@@ -79,6 +93,16 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
               </p>
             </SectionCard>
           )}
+
+          {customFields.length > 0 && (
+            <SectionCard title="Additional details">
+              <dl className="space-y-2.5 text-[13px]">
+                {customFields.map((f) => (
+                  <Row key={f.key} label={f.label} value={f.value} />
+                ))}
+              </dl>
+            </SectionCard>
+          )}
         </div>
 
         <aside className="space-y-5">
@@ -107,8 +131,10 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
 function Row({ label, value, strong }: { label: string; value: string; strong?: boolean }) {
   return (
     <div className="flex items-baseline justify-between gap-3">
-      <dt className="text-[12.5px] text-[#6B7280]">{label}</dt>
-      <dd className={`text-right tabular-nums ${strong ? 'font-semibold text-[#111827]' : 'text-[#374151]'}`}>
+      <dt className="shrink-0 text-[12.5px] text-[#6B7280]">{label}</dt>
+      <dd
+        className={`whitespace-pre-wrap text-right ${strong ? 'font-semibold text-[#111827]' : 'text-[#374151]'}`}
+      >
         {value}
       </dd>
     </div>
