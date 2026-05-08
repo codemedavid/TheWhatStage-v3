@@ -2,6 +2,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto'
 import { after, NextResponse, type NextRequest } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { interruptWorkflowRun } from '@/lib/workflow/trigger'
+import { handlePostback } from './_postback'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -62,6 +63,7 @@ type FbMessaging = {
     payload?: string
     one_time_notif_token?: string
   }
+  postback?: { payload?: string; title?: string }
 }
 type FbFeedChange = {
   field?: string
@@ -123,10 +125,15 @@ export async function POST(req: NextRequest) {
 
     for (const ev of entry.messaging ?? []) {
       try {
+        if (ev.postback) {
+          const jobId = await handlePostback(admin, fbPageId, ev)
+          if (jobId) messengerEnqueued.push(jobId)
+          continue
+        }
         const jobId = await handleEvent(admin, fbPageId, ev)
         if (jobId) messengerEnqueued.push(jobId)
       } catch (e) {
-        console.error('[fb.webhook] handleEvent failed', e)
+        console.error('[fb.webhook] event handling failed', e)
       }
     }
 
