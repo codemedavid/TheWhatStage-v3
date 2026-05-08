@@ -678,7 +678,8 @@ describe('POST /api/messenger/process', () => {
     const res = await POST(makeWorkerRequest() as Parameters<typeof POST>[0])
     expect(res.status).toBe(200)
     expect(mocks.sendMessengerGenericTemplate).toHaveBeenCalledTimes(1)
-    const call = mocks.sendMessengerGenericTemplate.mock.calls[0][0]
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const call = (mocks.sendMessengerGenericTemplate.mock.calls as any)[0][0]
     const elements = call.elements
     expect(elements).toHaveLength(2) // Home A + Home C; Home B (sold) filtered out
     expect(elements.map((e: { title: string }) => e.title)).toEqual(['Home A', 'Home C'])
@@ -712,10 +713,12 @@ describe('POST /api/messenger/process', () => {
       stageChange: null,
       actionPage: { action_page_id: 'ap_realestate', reason: 'customer asked', button_text: 'See recommendation 👇' },
       productRecommendation: null,
-      propertyRecommendation: { query: '3BR condo in Cebu', filters: { priceMin: null, priceMax: 6_000_000, tags: ['condo'] }, actionPageId: 'ap_realestate', confidenceThreshold: 0.55 },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      propertyRecommendation: { query: '3BR condo in Cebu', filters: { priceMin: null, priceMax: 6_000_000, tags: ['condo'] }, actionPageId: 'ap_realestate', confidenceThreshold: 0.55 } as any,
       media: [],
     })
-    mocks.recommendProperty.mockResolvedValueOnce({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(mocks.recommendProperty.mockResolvedValueOnce as any)({
       ok: true,
       product: { id: 'item-1', slug: 'p-a', title: 'Home A', price_label: 'PHP 1M', cover_image_url: null, city: 'Cebu City', region: 'Cebu', property_status: 'for_sale', summary: null, description: null, price_amount: 1_000_000, currency: 'PHP', pricing_model: 'fixed', inventory_status: 'in_stock', tags: [] },
       confidence: 0.9,
