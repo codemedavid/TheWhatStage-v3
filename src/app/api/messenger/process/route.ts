@@ -10,6 +10,8 @@ import {
 } from '@/lib/facebook/messenger'
 import { sendOutbound, sendProductRecommendation } from '@/lib/messenger/outbound'
 import { recommendProduct } from '@/lib/chatbot/recommend'
+import { sendPropertyRecommendation } from '@/lib/messenger/property-outbound'
+import { recommendProperty } from '@/lib/chatbot/recommend-property'
 import { handleCampaignSend } from '@/lib/messenger/campaignSend'
 import { handleReminderFire } from '@/lib/reminders/fire'
 import { extractReminder } from '@/lib/reminders/extract'
@@ -444,8 +446,12 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
       let productRecommendation: Awaited<
         ReturnType<typeof answerWithClassification>
       >['productRecommendation'] = null
+      let propertyRecommendation: Awaited<
+        ReturnType<typeof answerWithClassification>
+      >['propertyRecommendation'] = null
       let selectedMedia: SelectedMediaAsset[] = []
       const activeCatalogPageId = sendablePages.find((p) => p.kind === 'catalog')?.id ?? null
+      const activeRealestatePageId = sendablePages.find((p) => p.kind === 'realestate')?.id ?? null
       const conversationSummary = thread.conversation_summary ?? undefined
       const effectivePersona = resolvedInstructions !== undefined
         ? { ...(campaignPersona ?? {}), instructions: resolvedInstructions }
@@ -465,6 +471,7 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
               campaignPersona: effectivePersona,
               conversationSummary,
               activeCatalogPageId,
+              activeRealestatePageId,
               leadContextBlock,
             },
           )
@@ -472,6 +479,7 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
           stageChange = r.stageChange
           actionPageChoice = r.actionPage
           productRecommendation = r.productRecommendation
+          propertyRecommendation = r.propertyRecommendation
           selectedMedia = r.media
         } catch (e) {
           console.error('[messenger.worker] combined call failed, falling back', e)
@@ -681,6 +689,107 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
             }
           } catch (e) {
             console.error('[messenger.worker] product recommendation flow failed', e)
+          }
+        }
+      }
+
+      // Property recommendation — same shape as the product flow but operates
+      // on the realestate page's curated list. Skips silently if the product
+      // flow already sent.
+      if (!recommendationSent && propertyRecommendation && activeRealestatePageId) {
+        const realestatePage = sendablePages.find((p) => p.id === activeRealestatePageId)
+        if (realestatePage) {
+          try {
+            const match = await recommendProperty(
+              { client: admin },
+              {
+                userId: thread.user_id,
+                actionPageId: realestatePage.id,
+                query: propertyRecommendation.query,
+                filters: {
+                  priceMin: propertyRecommendation.filters.priceMin,
+                  priceMax: propertyRecommendation.filters.priceMax,
+                  tags: propertyRecommendation.filters.tags,
+                },
+                confidenceThreshold: propertyRecommendation.confidenceThreshold,
+              },
+            )
+            if (match.ok) {
+              const sendResult = await sendPropertyRecommendation({
+                admin,
+                thread: {
+                  id: thread.id,
+                  psid: thread.psid,
+                  last_inbound_at: thread.last_inbound_at,
+                },
+                pageToken,
+                facebookPageId: thread.page_id,
+                page: {
+                  id: realestatePage.id,
+                  slug: realestatePage.slug,
+                  signing_secret: realestatePage.signing_secret,
+                },
+                property: {
+                  id: match.product.id,
+                  slug: match.product.slug,
+                  title: match.product.title,
+                  price_label: match.product.price_label,
+                  cover_image_url: match.product.cover_image_url,
+                  city: match.product.city,
+                  region: match.product.region,
+                },
+                confidence: match.confidence,
+              })
+              if (sendResult.sent) {
+                recommendationSent = true
+                if (sendResult.messageIds.length > 0) {
+                  await admin
+                    .from('messenger_jobs')
+                    .update({ outbound_button_fb_id: sendResult.messageIds.at(-1) ?? null })
+                    .eq('id', job.id)
+                }
+                const persistedBody =
+                  `Recommended: ${match.product.title} — ${match.product.price_label}\n` +
+                  `View → ${sendResult.deeplinkUrl}`
+                const previewText = `Recommended · ${match.product.title}`
+                await admin.from('messenger_messages').insert({
+                  thread_id: thread.id,
+                  user_id: thread.user_id,
+                  direction: 'outbound',
+                  sender: 'bot',
+                  fb_message_id: sendResult.messageIds.at(-1) ?? null,
+                  body: persistedBody,
+                  attachments: {
+                    kind: 'property_recommendation',
+                    property_id: match.product.id,
+                    action_page_id: realestatePage.id,
+                    confidence: match.confidence,
+                    image_sent: sendResult.imageSent,
+                    deeplink_url: sendResult.deeplinkUrl,
+                  },
+                })
+                await admin
+                  .from('messenger_threads')
+                  .update({
+                    last_message_at: new Date().toISOString(),
+                    last_message_preview: previewText.slice(0, 200),
+                  })
+                  .eq('id', thread.id)
+              } else {
+                console.warn('[messenger.worker] property recommendation send blocked', {
+                  threadId: thread.id,
+                  reason: sendResult.reason,
+                })
+              }
+            } else {
+              console.log('[messenger.worker] recommendProperty declined', {
+                threadId: thread.id,
+                reason: match.reason,
+                bestConfidence: 'bestConfidence' in match ? match.bestConfidence : undefined,
+              })
+            }
+          } catch (e) {
+            console.error('[messenger.worker] property recommendation flow failed', e)
           }
         }
       }
