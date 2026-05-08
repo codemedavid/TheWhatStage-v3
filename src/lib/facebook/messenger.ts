@@ -141,19 +141,24 @@ export async function sendMessengerReaction(args: {
   })
 }
 
+export type MessengerGenericButton =
+  | { title: string; url: string }
+  | { title: string; postback: string }
+
 export interface MessengerGenericElement {
   title: string
   subtitle?: string
   imageUrl?: string
   defaultActionUrl?: string
-  buttons?: Array<{ title: string; url: string }>
+  buttons?: MessengerGenericButton[]
 }
 
 /**
  * Send a Messenger generic-template carousel (horizontally scrollable cards).
  * Up to 10 elements; each element supports an image, title (80c), subtitle
- * (80c), a default web_url tap target, and up to 3 web_url buttons (titles
- * trimmed to 20c). Used to surface a product catalog inline in chat.
+ * (80c), a default web_url tap target, and up to 3 buttons (titles trimmed
+ * to 20c). Buttons are either URL (`web_url`) or postback. Used to surface
+ * a product or property catalog inline in chat.
  */
 export async function sendMessengerGenericTemplate(args: {
   pageAccessToken: string
@@ -170,11 +175,11 @@ export async function sendMessengerGenericTemplate(args: {
       out.default_action = { type: 'web_url', url: el.defaultActionUrl }
     }
     if (el.buttons && el.buttons.length) {
-      out.buttons = el.buttons.slice(0, 3).map((b) => ({
-        type: 'web_url',
-        url: b.url,
-        title: b.title.slice(0, 20),
-      }))
+      out.buttons = el.buttons.slice(0, 3).map((b) => {
+        const title = b.title.slice(0, 20)
+        if ('url' in b) return { type: 'web_url', url: b.url, title }
+        return { type: 'postback', payload: b.postback, title }
+      })
     }
     return out
   })
