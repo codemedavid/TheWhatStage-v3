@@ -1,6 +1,7 @@
 import type { MessengerGenericElement } from '@/lib/facebook/messenger'
 import type { RealestateProperty } from '@/app/a/[slug]/_kinds/realestate/schema'
 import { deeplinkActionPageUrl } from '@/lib/action-pages/urls'
+import { propertySlug } from '@/lib/action-pages/rag/property-rag-text'
 import { sendOutbound, type SendKind } from '@/lib/messenger/outbound'
 import type { createAdminClient } from '@/lib/supabase/admin'
 
@@ -45,7 +46,7 @@ export function buildRealestateCarouselElements(
     (p) => ACTIVE_STATUSES.has(p.status) && p.title.trim().length > 0,
   )
   return active.slice(0, 10).map((p) => {
-    const slug = `property_${p.id}`
+    const slug = propertySlug(p.id)
     const productUrl = appendQuery(pageDeeplink, 'property', slug)
     const subtitleParts = [priceLabel(p.price), locationLabel(p.address)].filter(Boolean)
     return {

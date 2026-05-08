@@ -160,10 +160,10 @@ describe('buildRealestateCarouselElements', () => {
       'View all listings',
     )
     expect(out[0].buttons).toEqual([
-      { title: 'View property', url: 'https://example.com/a/page?sig=abc&property=property_abc-123' },
+      { title: 'View property', url: 'https://example.com/a/page?sig=abc&property=p-abc-123' },
       { title: 'View all listings', url: 'https://example.com/a/page?sig=abc' },
     ])
-    expect(out[0].defaultActionUrl).toBe('https://example.com/a/page?sig=abc&property=property_abc-123')
+    expect(out[0].defaultActionUrl).toBe('https://example.com/a/page?sig=abc&property=p-abc-123')
   })
 
   it('uses ? when the base URL has no query string', () => {
@@ -172,7 +172,7 @@ describe('buildRealestateCarouselElements', () => {
       'https://example.com/a/page',
       'View all',
     )
-    expect(out[0].defaultActionUrl).toBe('https://example.com/a/page?property=property_abc')
+    expect(out[0].defaultActionUrl).toBe('https://example.com/a/page?property=p-abc')
   })
 
   it('truncates title and subtitle to Messenger limits', () => {
@@ -202,7 +202,7 @@ const PAGE = { id: 'page-1', slug: 'my-realestate', signing_secret: 'secret' }
 function makeProperty(over: Partial<Parameters<typeof sendPropertyRecommendation>[0]['property']> = {}) {
   return {
     id: 'item-1',
-    slug: 'property_abc-123',
+    slug: 'p-abc-123',
     title: 'Sunny 3BR House',
     price_label: 'PHP 5,000,000',
     cover_image_url: 'https://i/cover.jpg',
@@ -242,14 +242,14 @@ describe('sendPropertyRecommendation', () => {
     expect(elements).toHaveLength(1)
     expect(elements[0].title).toBe('Sunny 3BR House')
     expect(elements[0].buttons).toEqual([
-      { title: 'View property', url: 'https://example.com/a/realestate?sig=signed&property=property_abc-123' },
-      { title: 'Inquire', postback: 'rec_inquire:property_abc-123' },
+      { title: 'View property', url: 'https://example.com/a/realestate?sig=signed&property=p-abc-123' },
+      { title: 'Inquire', postback: 'rec_inquire:p-abc-123' },
     ])
     expect(res).toEqual({
       sent: true,
       messageIds: ['mid-img', 'mid-card'],
       imageSent: true,
-      deeplinkUrl: 'https://example.com/a/realestate?sig=signed&property=property_abc-123',
+      deeplinkUrl: 'https://example.com/a/realestate?sig=signed&property=p-abc-123',
     })
   })
 
