@@ -1,6 +1,13 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { sendOutbound } from './outbound'
+import { sendOutbound, type OutboundPayload } from './outbound'
 import { isInsideWindow } from '@/lib/agent/classifyPolicy'
+import {
+  renderTemplateVariables,
+  findFirstUrlButtonIndex,
+  type VariableMap,
+} from '@/lib/messenger-templates/render'
+import { renderTemplate, type TemplateButton } from '@/lib/messenger-templates/types'
+import { deeplinkActionPageUrl } from '@/lib/action-pages/urls'
 
 const COOLDOWN_HOURS = 48
 
@@ -27,6 +34,11 @@ interface CampaignRow {
   id: string
   status: string
   user_id: string
+  send_mode: 'per_lead_ai' | 'shared_template'
+  template_id: string | null
+  template_variables: VariableMap | null
+  attached_action_page_id: string | null
+  attached_button_index: number
 }
 
 interface ThreadRow {
@@ -74,7 +86,7 @@ export async function handleCampaignSend(
   // Load parent campaign to check for cancellation.
   const { data: campaign } = await admin
     .from('agent_campaigns')
-    .select('id, status, user_id')
+    .select('id, status, user_id, send_mode, template_id, template_variables, attached_action_page_id, attached_button_index')
     .eq('id', msg.campaign_id)
     .maybeSingle<CampaignRow>()
 
@@ -155,6 +167,32 @@ export async function handleCampaignSend(
   const { decryptToken } = await import('@/lib/facebook/crypto')
   const pageToken = decryptToken(page.page_access_token)
 
+  // Build the outbound payload. Shared-template campaigns dispatch via the
+  // utility-template send path so they can reach leads outside the 24h
+  // window without an opt-in. Per-lead-AI campaigns send free-form text.
+  let payload: OutboundPayload
+  let bodyForLog = msg.draft_text
+  if (campaign.send_mode === 'shared_template' && campaign.template_id) {
+    const built = await buildUtilityTemplatePayload(admin, campaign, {
+      lead_id: msg.lead_id,
+      thread_psid: thread.psid,
+      page_id: thread.page_id,
+    })
+    if (!built) {
+      await updateMessage(admin, campaignMessageId, {
+        status: 'failed',
+        error: 'template missing or not approved',
+      })
+      await bumpCounter(admin, msg.campaign_id, 'failed')
+      await markJobDone(admin, job.id, 'failed')
+      return
+    }
+    payload = built.payload
+    bodyForLog = built.renderedBody
+  } else {
+    payload = { kind: 'text', text: msg.draft_text }
+  }
+
   const result = await sendOutbound({
     admin,
     thread: {
@@ -163,7 +201,7 @@ export async function handleCampaignSend(
       last_inbound_at: thread.last_inbound_at,
     },
     pageToken,
-    payload: { kind: 'text', text: msg.draft_text },
+    payload,
     kind: sendKind,
   })
 
@@ -196,7 +234,7 @@ export async function handleCampaignSend(
     direction: 'outbound',
     sender: 'bot',
     fb_message_id: result.messageId,
-    body: msg.draft_text,
+    body: bodyForLog,
   }).then(({ error }) => {
     if (error && (error as { code?: string }).code !== '23505') {
       console.warn('[campaignSend] message insert failed', error.message)
@@ -320,4 +358,86 @@ async function markJobDone(
     .from('messenger_jobs')
     .update({ status, finished_at: new Date().toISOString() })
     .eq('id', jobId)
+}
+
+/**
+ * Resolve the per-lead utility-template payload: pulls the approved template,
+ * substitutes campaign variables against the lead's row, and (when an action
+ * page is attached) signs a deeplink for this PSID and overrides the chosen
+ * URL button. Returns null when the template is missing or no longer
+ * approved — caller should fail the message with that reason.
+ */
+async function buildUtilityTemplatePayload(
+  admin: SupabaseClient,
+  campaign: CampaignRow,
+  recipient: { lead_id: string; thread_psid: string; page_id: string },
+): Promise<{ payload: OutboundPayload; renderedBody: string } | null> {
+  const { data: tpl } = await admin
+    .from('messenger_message_templates')
+    .select('id, name, language, body_text, variable_count, buttons, meta_status')
+    .eq('id', campaign.template_id!)
+    .maybeSingle<{
+      id: string
+      name: string
+      language: string
+      body_text: string
+      variable_count: number
+      buttons: TemplateButton[]
+      meta_status: string
+    }>()
+  if (!tpl || tpl.meta_status !== 'approved') return null
+
+  const { data: lead } = await admin
+    .from('leads')
+    .select('name, custom_fields')
+    .eq('id', recipient.lead_id)
+    .maybeSingle<{ name: string | null; custom_fields: Record<string, unknown> | null }>()
+
+  const variables = campaign.template_variables ?? {}
+  const bodyParameters = renderTemplateVariables(
+    variables,
+    tpl.variable_count,
+    { name: lead?.name ?? null, custom_fields: lead?.custom_fields ?? null },
+  )
+  const renderedBody = renderTemplate(tpl.body_text, bodyParameters)
+
+  // Optional: attach the action page deeplink to a URL button on the template.
+  const buttonOverrides: Array<{ index: number; url: string }> = []
+  if (campaign.attached_action_page_id) {
+    const { data: page } = await admin
+      .from('action_pages')
+      .select('slug, signing_secret')
+      .eq('id', campaign.attached_action_page_id)
+      .maybeSingle<{ slug: string; signing_secret: string }>()
+    if (page) {
+      // Fall back to the first URL button when the campaign's chosen index
+      // doesn't point at a URL button (e.g. user picked a template with
+      // postback buttons + an attached action page).
+      let idx = campaign.attached_button_index
+      if (!tpl.buttons[idx] || tpl.buttons[idx].type !== 'url') {
+        idx = findFirstUrlButtonIndex(tpl.buttons)
+      }
+      if (idx >= 0) {
+        const exp = Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60
+        const url = deeplinkActionPageUrl(page.signing_secret, {
+          slug: page.slug,
+          psid: recipient.thread_psid,
+          pageId: recipient.page_id,
+          exp,
+        })
+        buttonOverrides.push({ index: idx, url })
+      }
+    }
+  }
+
+  return {
+    payload: {
+      kind: 'utility_template',
+      templateName: tpl.name,
+      language: tpl.language,
+      bodyParameters,
+      buttonUrlOverrides: buttonOverrides.length > 0 ? buttonOverrides : undefined,
+    },
+    renderedBody,
+  }
 }

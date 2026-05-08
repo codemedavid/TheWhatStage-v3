@@ -25,6 +25,7 @@ export default function BookingRenderer({
   claims,
   rawToken,
   variant,
+  sourceContext,
 }: KindRendererProps) {
   const config = parseBookingConfig(page.config)
   const standalone = variant === 'standalone'
@@ -121,6 +122,7 @@ export default function BookingRenderer({
             e: claims ? String(claims.exp) : null,
             t: rawToken ?? null,
           }}
+          sourceContext={sourceContext ?? null}
         />
       </div>
     </section>

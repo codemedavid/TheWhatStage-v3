@@ -9,7 +9,11 @@ import {
   retrieve,
 } from '@/lib/rag'
 import { ragConfig } from '@/lib/rag/config'
-import { getChatbotConfig } from './config'
+import {
+  getActionPageRecommendationRules,
+  getChatbotConfig,
+  type ActionPageRecommendationRules,
+} from './config'
 import { selectMediaForReply, type SelectedMediaAsset } from '@/lib/media/selector'
 import type { AnswerHistory, AnswerOptions, AnswerResult } from './answer'
 
@@ -38,9 +42,25 @@ export interface ActionPageChoice {
   button_text: string
 }
 
+export interface ProductRecommendationRequest {
+  /** Distilled query the LLM extracted from the conversation, used for retrieval. */
+  query: string
+  /** Filters the LLM extracted (budget range, tags). All optional. */
+  filters: {
+    priceMin: number | null
+    priceMax: number | null
+    tags: string[]
+  }
+  /** The action page id whose catalog should be searched. */
+  actionPageId: string
+  /** Threshold to apply when matching — comes from the page's rules. */
+  confidenceThreshold: number
+}
+
 export interface AnswerWithClassificationResult extends AnswerResult {
   stageChange: StageChange | null
   actionPage: ActionPageChoice | null
+  productRecommendation: ProductRecommendationRequest | null
 }
 
 /**
@@ -55,7 +75,12 @@ export async function answerWithClassification(
   history: AnswerHistory,
   stages: StageBrief[],
   currentStageId: string | null,
-  options: AnswerOptions & { actionPages?: ActionPageBrief[] } = {},
+  options: AnswerOptions & {
+    actionPages?: ActionPageBrief[]
+    /** When the lead is on a catalog action page, pass its id so we can attach
+     *  the matching recommendation rules from chatbot_configs.recommendation_rules. */
+    activeCatalogPageId?: string | null
+  } = {},
 ): Promise<AnswerWithClassificationResult> {
   const baseConfig = await getChatbotConfig(supabase, userId)
   const cp = options.campaignPersona
@@ -94,8 +119,10 @@ export async function answerWithClassification(
   })
 
   const actionPages = options.actionPages ?? []
-  const stageSystem = stageInstruction(stages, currentStageId, actionPages)
-  const system = `${built.system}\n\n${stageSystem}`
+  const recommendRules = getActionPageRecommendationRules(config, options.activeCatalogPageId)
+  const stageSystem = stageInstruction(stages, currentStageId, actionPages, recommendRules)
+  const leadContext = options.leadContextBlock?.trim()
+  const system = [built.system, stageSystem, leadContext].filter(Boolean).join('\n\n')
 
   // Scan ALL retrieved chunks (including grader-rejected ones) for @asset /
   // #folder references — a slug-only paragraph often scores low in the
@@ -131,19 +158,35 @@ export async function answerWithClassification(
   let text = ''
   let stageChange: StageChange | null = null
   let actionPage: ActionPageChoice | null = null
+  let productRecommendation: ProductRecommendationRequest | null = null
   if (parsed && typeof parsed === 'object') {
-    const r = parsed as { reply?: unknown; stage_change?: unknown; action_page?: unknown }
+    const r = parsed as {
+      reply?: unknown
+      stage_change?: unknown
+      action_page?: unknown
+      recommend_product?: unknown
+    }
     if (typeof r.reply === 'string') text = r.reply.trim()
     stageChange = coerceStageChange(r.stage_change, stages, currentStageId)
     actionPage = coerceActionPage(r.action_page, actionPages)
+    if (recommendRules && options.activeCatalogPageId) {
+      productRecommendation = coerceRecommendation(
+        r.recommend_product,
+        options.activeCatalogPageId,
+        recommendRules.confidenceThreshold,
+      )
+    }
   }
 
   // Fallback: if JSON parse / shape failed, run a plain follow-up generation
   // so the customer still gets a reply. Skip stage change in this branch.
   if (!text) {
+    const fallbackSystem = leadContext
+      ? `${built.system}\n\n${leadContext}`
+      : built.system
     const fallback = await llm.complete(
       [
-        { role: 'system', content: built.system },
+        { role: 'system', content: fallbackSystem },
         ...history,
         { role: 'user', content: built.user },
       ],
@@ -152,13 +195,14 @@ export async function answerWithClassification(
     text = fallback.trim()
     stageChange = null
     actionPage = null
+    productRecommendation = null
   }
 
   const [sourceTitles, media] = await Promise.all([
     resolveSourceTitles(supabase, userId, built.contextChunkIds),
     mediaPromise,
   ])
-  return { text, sourceTitles, media, stageChange, actionPage }
+  return { text, sourceTitles, media, stageChange, actionPage, productRecommendation }
 }
 
 /**
@@ -258,11 +302,25 @@ function stageInstruction(
   stages: StageBrief[],
   currentStageId: string | null,
   actionPages: ActionPageBrief[],
+  recommendRules: ActionPageRecommendationRules | null,
 ): string {
   const hasActionPages = actionPages.length > 0
-  const schema = hasActionPages
-    ? '{"reply": string, "stage_change": {"to_stage_id": string, "confidence": "low"|"medium"|"high", "reason": string} | null, "action_page": {"action_page_id": string, "reason": string, "button_text": string} | null}'
-    : '{"reply": string, "stage_change": {"to_stage_id": string, "confidence": "low"|"medium"|"high", "reason": string} | null}'
+  const hasRecommend = !!recommendRules
+  const schemaParts = [
+    '"reply": string',
+    '"stage_change": {"to_stage_id": string, "confidence": "low"|"medium"|"high", "reason": string} | null',
+  ]
+  if (hasActionPages) {
+    schemaParts.push(
+      '"action_page": {"action_page_id": string, "reason": string, "button_text": string} | null',
+    )
+  }
+  if (hasRecommend) {
+    schemaParts.push(
+      '"recommend_product": {"query": string, "filters": {"price_min": number|null, "price_max": number|null, "tags": string[]}} | null',
+    )
+  }
+  const schema = `{${schemaParts.join(', ')}}`
   const apSection = hasActionPages
     ? '\n\n' +
       'ACTION PAGES — INTERNAL ROUTING ONLY:\n' +
@@ -284,17 +342,80 @@ function stageInstruction(
       '- NEVER use the action page title (e.g. "Lead Gen", "Booking") as the button_text.\n\n' +
       actionPageList(actionPages)
     : ''
+  const recommendSection = hasRecommend ? recommendInstruction(recommendRules!) : ''
   return (
     'You are also responsible for classifying the lead\'s pipeline stage' +
     (hasActionPages ? ' and deciding whether to attach an action page button to your reply' : '') +
+    (hasRecommend ? ' and deciding whether to recommend a specific product' : '') +
     '. Output a single JSON object with this exact shape and NOTHING ELSE:\n' +
     schema +
     '\n`reply` is what the customer sees — write it in the same persona/rules above. ' +
     '`stage_change` is null when the lead should stay in the current stage. ' +
     'Only use stage_ids from the list. Pick the stage whose description best matches the customer\'s intent in the latest message + conversation.\n\n' +
     stageList(stages, currentStageId) +
-    apSection
+    apSection +
+    recommendSection
   )
+}
+
+function recommendInstruction(rules: ActionPageRecommendationRules): string {
+  const slotsLine =
+    rules.requiredSlots.length > 0
+      ? `Required info you must collect FIRST before recommending: ${rules.requiredSlots.join(', ')}.`
+      : 'No required slots — you may recommend as soon as the customer\'s need is clear.'
+  return (
+    '\n\n' +
+    'PRODUCT RECOMMENDATION — INTERNAL ROUTING ONLY:\n' +
+    'Set `recommend_product` ONLY when ONE of these is true:\n' +
+    '  (a) The customer EXPLICITLY asks for a recommendation, suggestion, or "what do you have for…".\n' +
+    '  (b) The operator rules below tell you to recommend at this point.\n' +
+    'Otherwise, set `recommend_product` to null and keep chatting normally.\n\n' +
+    `Operator rules: ${rules.rules}\n` +
+    slotsLine +
+    '\n\n' +
+    'When you DO recommend:\n' +
+    '- `query` is a 1-sentence summary of what the customer is looking for, distilled from the conversation. Used for search — write it in clear English even if the customer wrote Tagalog.\n' +
+    '- `filters.price_min` / `filters.price_max` are extracted from any budget the customer mentioned (in PHP, numbers only). null when not mentioned.\n' +
+    '- `filters.tags` are short keywords (1–3 words each) the customer cares about. Empty array when none.\n' +
+    '- The system will pick the actual product, send the image and a button card AUTOMATICALLY in a SEPARATE message. Do NOT name a specific product, price, or link in `reply`.\n' +
+    '- `reply` should be a short, warm acknowledgement like "Got it — let me share the best fit 👇" in the customer\'s language. Do NOT describe the product itself.\n' +
+    '- If the required slots are not yet filled, set `recommend_product` to null and ask for the missing info in `reply` instead.'
+  )
+}
+
+function coerceRecommendation(
+  raw: unknown,
+  actionPageId: string,
+  confidenceThreshold: number,
+): ProductRecommendationRequest | null {
+  if (!raw || typeof raw !== 'object') return null
+  const r = raw as { query?: unknown; filters?: unknown }
+  const query = typeof r.query === 'string' ? r.query.trim() : ''
+  if (!query) return null
+  const f =
+    r.filters && typeof r.filters === 'object'
+      ? (r.filters as { price_min?: unknown; price_max?: unknown; tags?: unknown })
+      : {}
+  const priceMin =
+    typeof f.price_min === 'number' && Number.isFinite(f.price_min) && f.price_min >= 0
+      ? f.price_min
+      : null
+  const priceMax =
+    typeof f.price_max === 'number' && Number.isFinite(f.price_max) && f.price_max >= 0
+      ? f.price_max
+      : null
+  const tags = Array.isArray(f.tags)
+    ? f.tags
+        .map((t) => (typeof t === 'string' ? t.trim() : ''))
+        .filter((t): t is string => !!t)
+        .slice(0, 8)
+    : []
+  return {
+    query: query.slice(0, 400),
+    filters: { priceMin, priceMax, tags },
+    actionPageId,
+    confidenceThreshold,
+  }
 }
 
 function actionPageList(pages: ActionPageBrief[]): string {

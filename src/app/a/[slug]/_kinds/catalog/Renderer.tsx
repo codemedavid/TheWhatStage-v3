@@ -1,9 +1,10 @@
 'use client'
 
-import { useEffect, useMemo, useState, useTransition } from 'react'
+import { useEffect, useMemo, useRef, useState, useTransition } from 'react'
 import type { CSSProperties } from 'react'
 import type { KindRendererProps } from '../types'
 import type { PublicProductCard } from '@/lib/business/public-dto'
+import type { PublicPaymentMethod } from '@/lib/payment-methods/public'
 import './catalog.css'
 
 interface Category {
@@ -16,14 +17,22 @@ interface CheckoutField {
   id: string
   key: string
   label: string
-  type: 'short_text' | 'long_text' | 'email' | 'phone' | 'number' | 'select'
+  type: 'short_text' | 'long_text' | 'email' | 'phone' | 'number' | 'select' | 'image'
   required: boolean
   placeholder?: string
   options?: string[]
 }
 
+interface CatalogBrand {
+  name?: string
+  tagline?: string
+  description?: string
+  logo_url?: string
+}
+
 interface CatalogConfig {
   theme?: { accent_color?: string }
+  brand?: CatalogBrand
   categories?: Category[]
   checkout_fields?: CheckoutField[]
 }
@@ -53,9 +62,16 @@ export default function CatalogRenderer({
   rawToken,
   claims,
   products = [],
+  paymentMethods = [],
 }: KindRendererProps) {
   const config = (page.config ?? {}) as CatalogConfig
   const accent = config.theme?.accent_color ?? S.accent
+  const brand = config.brand ?? {}
+  const brandName = brand.name?.trim() || page.title || 'Store'
+  const brandTagline = brand.tagline?.trim() || ''
+  const brandDescription = brand.description?.trim() || page.description || ''
+  const brandLogoUrl = brand.logo_url?.trim() || ''
+  const brandInitial = brandName.slice(0, 1).toUpperCase()
   const categories = (config.categories ?? []).filter((c) => c.product_ids.length > 0)
   const hasTabs = categories.length > 0
   const checkoutFields = useMemo<CheckoutField[]>(
@@ -169,87 +185,126 @@ export default function CatalogRenderer({
 
   return (
     <div className="shop-wrap" style={accentVar}>
-      {/* Top bar */}
+      {/* Nav */}
       <header
         style={{
           position: 'sticky',
           top: 0,
           zIndex: 30,
           borderBottom: `1px solid ${S.border}`,
-          background: 'rgba(251,249,244,0.85)',
-          backdropFilter: 'blur(10px)',
+          background: 'rgba(251,249,244,0.86)',
+          backdropFilter: 'blur(14px)',
+          WebkitBackdropFilter: 'blur(14px)',
         }}
       >
         <div
           style={{
             maxWidth: 1200,
             margin: '0 auto',
-            padding: '14px 24px',
-            display: 'flex',
+            padding: '14px 28px',
+            display: 'grid',
+            gridTemplateColumns: 'auto 1fr auto',
             alignItems: 'center',
-            gap: 16,
+            gap: 24,
           }}
         >
-          <div style={{ minWidth: 0, flex: 1 }}>
-            <div className="shop-eyebrow" style={{ marginBottom: 2 }}>
-              Shop
-            </div>
-            <h1
+          {/* Brand mark */}
+          <a
+            href="#"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 10,
+              textDecoration: 'none',
+              color: S.ink,
+            }}
+          >
+            <span
               style={{
+                width: 30,
+                height: 30,
+                borderRadius: 8,
+                background: S.ink,
+                color: 'white',
+                display: 'grid',
+                placeItems: 'center',
                 fontFamily: S.serif,
-                fontSize: 'clamp(20px, 2.6vw, 26px)',
-                fontWeight: 400,
-                letterSpacing: '-0.015em',
-                margin: 0,
-                color: S.ink,
-                whiteSpace: 'nowrap',
+                fontSize: 17,
                 overflow: 'hidden',
-                textOverflow: 'ellipsis',
+                flexShrink: 0,
               }}
             >
-              {page.title || 'Store'}
-            </h1>
-          </div>
+              {brandLogoUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={brandLogoUrl}
+                  alt=""
+                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                />
+              ) : (
+                brandInitial
+              )}
+            </span>
+            <span
+              style={{
+                fontSize: 15,
+                fontWeight: 600,
+                letterSpacing: '-0.005em',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {brandName}
+            </span>
+          </a>
 
-          <div className="shop-hide-mobile" style={{ flex: 1, maxWidth: 320 }}>
+          {/* Search — centred, hidden on mobile */}
+          <div className="shop-hide-mobile" style={{ display: 'flex', justifyContent: 'center' }}>
             <SearchInput value={search} onChange={setSearch} />
           </div>
 
-          <button
-            type="button"
-            onClick={() => setCartOpen(true)}
-            className="shop-btn-primary"
-            style={{ position: 'relative' }}
-          >
-            <CartIcon />
-            <span className="shop-hide-mobile" style={{ display: 'inline' }}>
-              Cart
-            </span>
-            {count > 0 ? (
-              <span
-                key={pulse}
-                className="shop-badge-pop"
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  minWidth: 20,
-                  height: 20,
-                  padding: '0 6px',
-                  borderRadius: 999,
-                  background: 'white',
-                  color: S.ink,
-                  fontSize: 11,
-                  fontWeight: 700,
-                  fontFamily: S.mono,
-                }}
-              >
-                {count}
+          {/* Cart */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <button
+              type="button"
+              onClick={() => setCartOpen(true)}
+              className="shop-btn-primary"
+              style={{ position: 'relative' }}
+            >
+              <CartIcon />
+              <span className="shop-hide-mobile" style={{ display: 'inline' }}>
+                Cart
               </span>
-            ) : null}
-          </button>
+              {count > 0 ? (
+                <span
+                  key={pulse}
+                  className="shop-badge-pop"
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    minWidth: 18,
+                    height: 18,
+                    padding: '0 5px',
+                    borderRadius: 999,
+                    background: accent,
+                    color: 'white',
+                    fontSize: 10,
+                    fontWeight: 700,
+                    fontFamily: S.mono,
+                    position: 'absolute',
+                    top: -4,
+                    right: -4,
+                    border: '2px solid #FBF9F4',
+                  }}
+                >
+                  {count}
+                </span>
+              ) : null}
+            </button>
+          </div>
         </div>
 
+        {/* Mobile search */}
         <div
           className="shop-show-mobile"
           style={{ maxWidth: 1200, margin: '0 auto', padding: '0 24px 12px' }}
@@ -258,151 +313,170 @@ export default function CatalogRenderer({
         </div>
       </header>
 
-      <main style={{ maxWidth: 1200, margin: '0 auto', padding: '32px 24px 120px' }}>
-        {page.description ? (
-          <section
+      {/* Hero — profile style */}
+      <section
+        style={{
+          maxWidth: 720,
+          margin: '0 auto',
+          padding: 'clamp(40px, 6vw, 64px) 28px clamp(28px, 4vw, 40px)',
+          textAlign: 'center',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          gap: 0,
+        }}
+      >
+        {/* Avatar */}
+        <div
+          style={{
+            width: 64,
+            height: 64,
+            borderRadius: 999,
+            background: S.ink,
+            color: 'white',
+            display: 'grid',
+            placeItems: 'center',
+            marginBottom: 18,
+            fontFamily: S.serif,
+            fontSize: 26,
+            overflow: 'hidden',
+            boxShadow: '0 0 0 4px rgba(255,255,255,0.6), 0 0 0 5px ' + S.border,
+          }}
+        >
+          {brandLogoUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={brandLogoUrl}
+              alt={brandName}
+              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+            />
+          ) : (
+            brandInitial
+          )}
+        </div>
+
+        {/* Tagline eyebrow */}
+        {brandTagline && (
+          <div
             style={{
-              background: `linear-gradient(135deg, ${S.surface} 0%, ${S.surface2} 100%)`,
-              border: `1px solid ${S.border}`,
-              borderRadius: 18,
-              padding: '24px 28px',
-              marginBottom: 28,
-              display: 'flex',
-              alignItems: 'center',
-              gap: 24,
-              flexWrap: 'wrap',
-              boxShadow: S.shadowSm,
+              fontFamily: S.mono,
+              fontSize: 11,
+              textTransform: 'uppercase',
+              letterSpacing: '0.08em',
+              color: accent,
+              fontWeight: 500,
+              marginBottom: 14,
             }}
           >
-            <div style={{ flex: 1, minWidth: 260 }}>
-              <div
-                className="shop-eyebrow"
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  background: 'rgba(31,122,77,0.08)',
-                  color: S.accentInk,
-                  padding: '5px 10px',
-                  borderRadius: 999,
-                }}
-              >
-                <span
-                  style={{
-                    width: 6,
-                    height: 6,
-                    borderRadius: 999,
-                    background: accent,
-                    boxShadow: '0 0 0 3px rgba(31,122,77,0.18)',
-                  }}
-                />
-                Featured collection
-              </div>
-              <p
-                style={{
-                  margin: '10px 0 0',
-                  fontSize: 14.5,
-                  color: S.ink2,
-                  lineHeight: 1.55,
-                  maxWidth: 620,
-                }}
-              >
-                {page.description}
-              </p>
-            </div>
-            <div
-              style={{
-                display: 'flex',
-                gap: 18,
-                alignItems: 'baseline',
-                fontFamily: S.mono,
-                color: S.ink3,
-                fontSize: 12,
-              }}
-            >
-              <span>
-                <strong
-                  style={{ color: S.ink, fontSize: 16, fontFamily: S.serif, fontWeight: 400 }}
-                >
-                  {products.length}
-                </strong>{' '}
-                items
-              </span>
-              {hasTabs ? (
-                <span>
-                  <strong
-                    style={{ color: S.ink, fontSize: 16, fontFamily: S.serif, fontWeight: 400 }}
-                  >
-                    {categories.length}
-                  </strong>{' '}
-                  categories
-                </span>
-              ) : null}
-            </div>
-          </section>
-        ) : null}
+            {brandTagline}
+          </div>
+        )}
 
+        {/* Brand name */}
+        <h1
+          style={{
+            fontFamily: S.serif,
+            fontSize: 'clamp(36px, 6vw, 56px)',
+            fontWeight: 400,
+            letterSpacing: '-0.02em',
+            lineHeight: 1.04,
+            margin: '0 0 14px',
+            color: S.ink,
+          }}
+        >
+          {brandName}
+        </h1>
+
+        {/* Description */}
+        {brandDescription && (
+          <p
+            style={{
+              fontSize: 16,
+              lineHeight: 1.55,
+              color: S.ink3,
+              margin: '0 auto',
+              maxWidth: 480,
+            }}
+          >
+            {brandDescription}
+          </p>
+        )}
+      </section>
+
+      <main style={{ maxWidth: 1200, margin: '0 auto', padding: '0 24px 120px' }}>
         {products.length === 0 ? (
           <EmptyState />
         ) : (
           <>
+            {/* Toolbar: tabs + search */}
             <div
-              role="tablist"
               style={{
-                display: 'flex',
-                gap: 4,
-                overflowX: 'auto',
-                marginBottom: 24,
-                borderBottom: `1px solid ${S.border}`,
-                paddingBottom: 1,
+                display: 'grid',
+                gridTemplateColumns: hasTabs ? '1fr auto' : '1fr',
+                gap: 12,
+                alignItems: 'center',
+                borderTop: `1px solid ${S.border}`,
+                padding: '14px 0 20px',
+                marginBottom: 8,
               }}
             >
-              {[
-                { id: ALL_TAB, name: 'All' },
-                ...categories.map((c) => ({ id: c.id, name: c.name })),
-              ].map((tab) => {
-                const active = activeTab === tab.id
-                return (
-                  <button
-                    key={tab.id}
-                    type="button"
-                    role="tab"
-                    aria-selected={active}
-                    data-active={active}
-                    onClick={() => setActiveTab(tab.id)}
-                    className="shop-tab"
-                    style={{
-                      flexShrink: 0,
-                      padding: '12px 16px',
-                      background: 'transparent',
-                      border: 'none',
-                      cursor: 'pointer',
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: 8,
-                      fontSize: 13.5,
-                      fontWeight: active ? 600 : 500,
-                      color: active ? S.ink : S.ink3,
-                      transition: 'color 120ms',
-                    }}
-                  >
-                    {tab.name}
-                    <span
+              <div
+                role="tablist"
+                style={{
+                  display: 'flex',
+                  gap: 4,
+                  overflowX: 'auto',
+                  flexWrap: 'wrap',
+                }}
+              >
+                {[
+                  { id: ALL_TAB, name: 'All' },
+                  ...categories.map((c) => ({ id: c.id, name: c.name })),
+                ].map((tab) => {
+                  const active = activeTab === tab.id
+                  return (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      role="tab"
+                      aria-selected={active}
+                      onClick={() => setActiveTab(tab.id)}
+                      className="shop-tab"
                       style={{
-                        fontFamily: S.mono,
-                        fontSize: 11,
-                        padding: '2px 7px',
+                        flexShrink: 0,
+                        height: 34,
+                        padding: '0 14px',
+                        background: active ? S.ink : 'transparent',
+                        border: active ? 'none' : `1px solid transparent`,
                         borderRadius: 999,
-                        background: active ? `${accent}18` : S.surface2,
-                        color: active ? accent : S.ink4,
-                        fontWeight: 600,
+                        cursor: 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 8,
+                        fontSize: 13,
+                        fontWeight: 500,
+                        color: active ? 'white' : S.ink2,
+                        transition: 'all 120ms',
                       }}
                     >
-                      {tabCount(tab.id)}
-                    </span>
-                  </button>
-                )
-              })}
+                      {tab.name}
+                      <span
+                        style={{
+                          fontFamily: S.mono,
+                          fontSize: 10.5,
+                          padding: '1px 7px',
+                          borderRadius: 999,
+                          background: active ? 'rgba(255,255,255,0.16)' : S.surface2,
+                          color: active ? 'white' : S.ink4,
+                          fontWeight: 600,
+                        }}
+                      >
+                        {tabCount(tab.id)}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
             </div>
 
             {visibleProducts.length === 0 ? (
@@ -508,6 +582,7 @@ export default function CatalogRenderer({
         items={items}
         onChangeQty={setQty}
         checkoutFields={checkoutFields}
+        paymentMethods={paymentMethods}
       />
 
       {previewProduct ? (
@@ -520,6 +595,43 @@ export default function CatalogRenderer({
           onChange={(n) => setQty(previewProduct.id, n)}
         />
       ) : null}
+
+      {/* Footer */}
+      <footer
+        style={{
+          borderTop: `1px solid ${S.border}`,
+          padding: '20px 28px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: 12,
+          maxWidth: 1200,
+          margin: '0 auto',
+        }}
+      >
+        <span style={{ fontSize: 12.5, color: S.ink4 }}>
+          &copy; {brandName}, {new Date().getFullYear()}
+        </span>
+        <div
+          style={{
+            display: 'flex',
+            gap: 18,
+            fontSize: 12.5,
+            color: S.ink3,
+          }}
+        >
+          {['Privacy', 'Terms', 'Refunds'].map((l) => (
+            <a
+              key={l}
+              href="#"
+              style={{ color: S.ink3, textDecoration: 'none' }}
+            >
+              {l}
+            </a>
+          ))}
+        </div>
+      </footer>
     </div>
   )
 }
@@ -833,6 +945,7 @@ function CartDrawer({
   items,
   onChangeQty,
   checkoutFields,
+  paymentMethods,
 }: {
   open: boolean
   onClose: () => void
@@ -846,8 +959,16 @@ function CartDrawer({
   items: { id: string; quantity: number }[]
   onChangeQty: (id: string, n: number) => void
   checkoutFields: CheckoutField[]
+  paymentMethods: PublicPaymentMethod[]
 }) {
   const [customValues, setCustomValues] = useState<Record<string, string>>({})
+  const [paymentMethodId, setPaymentMethodId] = useState<string>(() =>
+    paymentMethods.length === 1 ? paymentMethods[0].id : '',
+  )
+  const selectedMethod = useMemo(
+    () => paymentMethods.find((m) => m.id === paymentMethodId) ?? null,
+    [paymentMethods, paymentMethodId],
+  )
   return (
     <>
       <div
@@ -945,6 +1066,13 @@ function CartDrawer({
             name="data.custom"
             value={JSON.stringify(customValues)}
           />
+          {paymentMethodId ? (
+            <input
+              type="hidden"
+              name="data.payment_method_id"
+              value={paymentMethodId}
+            />
+          ) : null}
 
           <div className="shop-scroll" style={{ flex: 1, overflowY: 'auto', padding: '18px 22px' }}>
             {lines.length === 0 ? (
@@ -1181,6 +1309,19 @@ function CartDrawer({
                         </select>
                       )
                     }
+                    if (f.type === 'image') {
+                      return (
+                        <ImageUploadField
+                          key={f.id}
+                          label={f.label}
+                          required={f.required}
+                          value={value}
+                          slug={page.slug}
+                          onChange={setValue}
+                          accent={accent}
+                        />
+                      )
+                    }
                     const inputType =
                       f.type === 'email'
                         ? 'email'
@@ -1202,6 +1343,23 @@ function CartDrawer({
                     )
                   })}
                 </div>
+
+                {paymentMethods.length > 0 ? (
+                  <div style={{ marginTop: 22 }}>
+                    <div className="shop-eyebrow" style={{ marginBottom: 10 }}>
+                      Payment
+                    </div>
+                    <PaymentMethodsPicker
+                      methods={paymentMethods}
+                      selectedId={paymentMethodId}
+                      onSelect={setPaymentMethodId}
+                      accent={accent}
+                    />
+                    {selectedMethod ? (
+                      <PaymentMethodDetails method={selectedMethod} />
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
             ) : null}
           </div>
@@ -1480,6 +1638,324 @@ function EmptyState() {
       <p style={{ marginTop: 6, fontSize: 13, color: S.ink3 }}>
         Check back soon — new arrivals are on the way.
       </p>
+    </div>
+  )
+}
+
+function ImageUploadField({
+  label,
+  required,
+  value,
+  slug,
+  onChange,
+  accent,
+}: {
+  label: string
+  required: boolean
+  value: string
+  slug: string
+  onChange: (v: string) => void
+  accent: string
+}) {
+  const inputRef = useRef<HTMLInputElement | null>(null)
+  const [uploading, setUploading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function upload(file: File) {
+    setUploading(true)
+    setError(null)
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      const res = await fetch(`/api/action-pages/${slug}/customer-images`, {
+        method: 'POST',
+        body: fd,
+      })
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string }
+        throw new Error(body.error ?? `upload failed (${res.status})`)
+      }
+      const { url } = (await res.json()) as { url: string }
+      onChange(url)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Upload failed')
+    } finally {
+      setUploading(false)
+      if (inputRef.current) inputRef.current.value = ''
+    }
+  }
+
+  return (
+    <div>
+      <div
+        style={{
+          fontSize: 11,
+          color: S.ink3,
+          marginBottom: 6,
+          fontWeight: 500,
+        }}
+      >
+        {label}
+        {required ? (
+          <span style={{ color: '#DC2626', marginLeft: 4 }}>*</span>
+        ) : null}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+        <button
+          type="button"
+          onClick={() => inputRef.current?.click()}
+          disabled={uploading}
+          style={{
+            width: 96,
+            height: 96,
+            flexShrink: 0,
+            borderRadius: 12,
+            border: `1.5px dashed ${value ? accent : S.borderStrong}`,
+            background: value ? S.surface : S.surface2,
+            color: S.ink3,
+            cursor: 'pointer',
+            display: 'grid',
+            placeItems: 'center',
+            overflow: 'hidden',
+            padding: 0,
+          }}
+        >
+          {value ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={value}
+              alt={label}
+              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+            />
+          ) : (
+            <span
+              style={{
+                fontFamily: S.mono,
+                fontSize: 10.5,
+                letterSpacing: '0.05em',
+                textTransform: 'uppercase',
+                color: S.ink4,
+              }}
+            >
+              {uploading ? 'Uploading…' : 'Tap to upload'}
+            </span>
+          )}
+        </button>
+        <input
+          ref={inputRef}
+          type="file"
+          accept="image/jpeg,image/png,image/webp"
+          style={{ display: 'none' }}
+          onChange={(e) => {
+            const f = e.target.files?.[0]
+            if (f) void upload(f)
+          }}
+          required={required && !value}
+        />
+        <div style={{ flex: 1, fontSize: 12, color: S.ink3, lineHeight: 1.45 }}>
+          JPEG, PNG, or WebP — up to 5 MB.
+          {value ? (
+            <button
+              type="button"
+              onClick={() => onChange('')}
+              style={{
+                display: 'block',
+                marginTop: 6,
+                padding: 0,
+                background: 'transparent',
+                border: 'none',
+                color: '#DC2626',
+                cursor: 'pointer',
+                fontSize: 12,
+                fontWeight: 500,
+              }}
+            >
+              Remove
+            </button>
+          ) : null}
+          {error ? (
+            <p
+              style={{
+                marginTop: 4,
+                color: '#DC2626',
+                fontSize: 11.5,
+              }}
+            >
+              {error}
+            </p>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function PaymentMethodsPicker({
+  methods,
+  selectedId,
+  onSelect,
+  accent,
+}: {
+  methods: PublicPaymentMethod[]
+  selectedId: string
+  onSelect: (id: string) => void
+  accent: string
+}) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {methods.map((m) => {
+        const active = m.id === selectedId
+        return (
+          <label
+            key={m.id}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 12,
+              padding: '12px 14px',
+              borderRadius: 12,
+              cursor: 'pointer',
+              background: active ? `${accent}10` : S.surface,
+              border: `1.5px solid ${active ? accent : S.border}`,
+              transition: 'all 140ms',
+            }}
+          >
+            <input
+              type="radio"
+              name="__pm_select"
+              value={m.id}
+              checked={active}
+              onChange={() => onSelect(m.id)}
+              style={{ accentColor: accent }}
+            />
+            <div
+              style={{
+                width: 36,
+                height: 36,
+                borderRadius: 8,
+                overflow: 'hidden',
+                background: S.surface2,
+                flexShrink: 0,
+                display: 'grid',
+                placeItems: 'center',
+                fontFamily: S.mono,
+                fontSize: 10,
+                color: S.ink3,
+                textTransform: 'uppercase',
+              }}
+            >
+              {m.qr_image_url ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={m.qr_image_url}
+                  alt=""
+                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                />
+              ) : m.kind === 'gcash' ? (
+                'GC'
+              ) : m.kind === 'bank_transfer' ? (
+                'BANK'
+              ) : (
+                '···'
+              )}
+            </div>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{ fontSize: 13.5, fontWeight: 600, color: S.ink }}>
+                {m.name}
+              </div>
+              <div style={{ fontSize: 11.5, color: S.ink3, marginTop: 1 }}>
+                {m.kind === 'gcash'
+                  ? 'GCash'
+                  : m.kind === 'bank_transfer'
+                    ? `Bank transfer${m.bank_name ? ' · ' + m.bank_name : ''}`
+                    : 'Other'}
+              </div>
+            </div>
+          </label>
+        )
+      })}
+    </div>
+  )
+}
+
+function PaymentMethodDetails({ method }: { method: PublicPaymentMethod }) {
+  return (
+    <div
+      style={{
+        marginTop: 12,
+        background: S.surface2,
+        border: `1px solid ${S.border}`,
+        borderRadius: 12,
+        padding: 14,
+      }}
+    >
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: method.qr_image_url ? 'auto 1fr' : '1fr',
+          gap: 14,
+        }}
+      >
+        {method.qr_image_url ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={method.qr_image_url}
+            alt={`${method.name} QR`}
+            style={{
+              width: 120,
+              height: 120,
+              objectFit: 'contain',
+              borderRadius: 8,
+              background: S.surface,
+              border: `1px solid ${S.border}`,
+            }}
+          />
+        ) : null}
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 6,
+            fontSize: 12.5,
+            color: S.ink2,
+          }}
+        >
+          {method.account_name ? (
+            <div>
+              <span style={{ color: S.ink4 }}>Account name · </span>
+              {method.account_name}
+            </div>
+          ) : null}
+          {method.account_number ? (
+            <div>
+              <span style={{ color: S.ink4 }}>
+                {method.kind === 'gcash' ? 'Number · ' : 'Account # · '}
+              </span>
+              <span style={{ fontFamily: S.mono }}>{method.account_number}</span>
+            </div>
+          ) : null}
+          {method.bank_name ? (
+            <div>
+              <span style={{ color: S.ink4 }}>Bank · </span>
+              {method.bank_name}
+              {method.branch ? ` · ${method.branch}` : ''}
+            </div>
+          ) : null}
+          {method.instructions ? (
+            <p
+              style={{
+                marginTop: 4,
+                color: S.ink3,
+                fontSize: 12,
+                lineHeight: 1.5,
+                whiteSpace: 'pre-line',
+              }}
+            >
+              {method.instructions}
+            </p>
+          ) : null}
+        </div>
+      </div>
     </div>
   )
 }

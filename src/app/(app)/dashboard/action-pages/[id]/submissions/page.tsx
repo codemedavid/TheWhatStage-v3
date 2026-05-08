@@ -5,6 +5,10 @@ import { fetchActionPage, fetchSubmissions } from '../../_lib/queries'
 import type { SubmissionListItem } from '../../_lib/queries'
 import BookingSubmissionsView from './BookingSubmissionsView'
 import type { BookingEntry } from './BookingSubmissionsView'
+import PropertySubmissionsView, {
+  type PropertySubmissionRow,
+} from './PropertySubmissionsView'
+import CatalogOrdersView, { type CatalogOrderEntry } from './CatalogOrdersView'
 
 export default async function SubmissionsPage({
   params,
@@ -20,10 +24,243 @@ export default async function SubmissionsPage({
 
   const page = await fetchActionPage(supabase, user.id, id)
   if (!page) notFound()
+
+  // For realestate pages, "submissions" means anything tagged with this
+  // property id via the meta convention — fetched separately.
+  if (page.kind === 'realestate') {
+    const { data: rows } = await supabase
+      .from('action_page_submissions')
+      .select(
+        'id, outcome, data, meta, created_at, lead_id, action_page_id, leads(name)',
+      )
+      .eq('user_id', user.id)
+      .filter('meta->>source_property_action_page_id', 'eq', id)
+      .order('created_at', { ascending: false })
+      .limit(200)
+
+    const sourceIds = Array.from(
+      new Set(((rows ?? []) as Array<{ action_page_id: string }>).map((r) => r.action_page_id)),
+    )
+    const sourceById = new Map<
+      string,
+      { id: string; title: string; kind: string; slug: string }
+    >()
+    if (sourceIds.length > 0) {
+      const { data: sources } = await supabase
+        .from('action_pages')
+        .select('id, title, kind, slug')
+        .in('id', sourceIds)
+        .eq('user_id', user.id)
+      for (const s of (sources ?? []) as Array<{
+        id: string
+        title: string
+        kind: string
+        slug: string
+      }>) {
+        sourceById.set(s.id, s)
+      }
+    }
+
+    const submissionRows: PropertySubmissionRow[] = (
+      (rows ?? []) as Array<{
+        id: string
+        outcome: string | null
+        data: Record<string, unknown>
+        meta: Record<string, unknown> | null
+        created_at: string
+        lead_id: string | null
+        action_page_id: string
+        leads: { name?: string } | { name?: string }[] | null
+      }>
+    ).map((r) => {
+      const lead = Array.isArray(r.leads) ? r.leads[0] : r.leads
+      return {
+        id: r.id,
+        outcome: r.outcome ?? null,
+        data: r.data ?? {},
+        meta: r.meta ?? null,
+        created_at: r.created_at,
+        lead_id: r.lead_id ?? null,
+        lead_name: lead?.name ?? null,
+        source_action_page: sourceById.get(r.action_page_id) ?? null,
+      }
+    })
+
+    return (
+      <PropertySubmissionsView
+        pageId={id}
+        pageTitle={page.title}
+        pageStatus={page.status}
+        submissions={submissionRows}
+      />
+    )
+  }
+
+  // For sales pages, "submissions" means anything tagged with this sales page
+  // id via meta.source_sales_page_id, plus any direct submissions on the
+  // sales page itself (fallback form path).
+  if (page.kind === 'sales') {
+    const [taggedRes, directRes] = await Promise.all([
+      supabase
+        .from('action_page_submissions')
+        .select(
+          'id, outcome, data, meta, created_at, lead_id, action_page_id, leads(name)',
+        )
+        .eq('user_id', user.id)
+        .filter('meta->>source_sales_page_id', 'eq', id)
+        .order('created_at', { ascending: false })
+        .limit(200),
+      supabase
+        .from('action_page_submissions')
+        .select(
+          'id, outcome, data, meta, created_at, lead_id, action_page_id, leads(name)',
+        )
+        .eq('user_id', user.id)
+        .eq('action_page_id', id)
+        .order('created_at', { ascending: false })
+        .limit(200),
+    ])
+
+    type Row = {
+      id: string
+      outcome: string | null
+      data: Record<string, unknown>
+      meta: Record<string, unknown> | null
+      created_at: string
+      lead_id: string | null
+      action_page_id: string
+      leads: { name?: string } | { name?: string }[] | null
+    }
+
+    const seen = new Set<string>()
+    const merged: Row[] = []
+    for (const r of [
+      ...((taggedRes.data ?? []) as Row[]),
+      ...((directRes.data ?? []) as Row[]),
+    ]) {
+      if (seen.has(r.id)) continue
+      seen.add(r.id)
+      merged.push(r)
+    }
+    merged.sort(
+      (a, b) =>
+        new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+    )
+
+    const sourceIds = Array.from(new Set(merged.map((r) => r.action_page_id)))
+    const sourceById = new Map<
+      string,
+      { id: string; title: string; kind: string; slug: string }
+    >()
+    if (sourceIds.length > 0) {
+      const { data: sources } = await supabase
+        .from('action_pages')
+        .select('id, title, kind, slug')
+        .in('id', sourceIds)
+        .eq('user_id', user.id)
+      for (const s of (sources ?? []) as Array<{
+        id: string
+        title: string
+        kind: string
+        slug: string
+      }>) {
+        sourceById.set(s.id, s)
+      }
+    }
+
+    const submissionRows: PropertySubmissionRow[] = merged.map((r) => {
+      const lead = Array.isArray(r.leads) ? r.leads[0] : r.leads
+      return {
+        id: r.id,
+        outcome: r.outcome ?? null,
+        data: r.data ?? {},
+        meta: r.meta ?? null,
+        created_at: r.created_at,
+        lead_id: r.lead_id ?? null,
+        lead_name: lead?.name ?? null,
+        source_action_page: sourceById.get(r.action_page_id) ?? null,
+      }
+    })
+
+    return (
+      <PropertySubmissionsView
+        pageId={id}
+        pageTitle={page.title}
+        pageStatus={page.status}
+        submissions={submissionRows}
+        breadcrumbLabel="Sales submissions"
+        editLabel="Edit sales page"
+        description="Forms, bookings, qualifications, and direct submissions collected from this sales page."
+        emptyMessage="No submissions yet. When buyers fill out the form (or a linked action page) on this sales page, their submissions will appear here."
+      />
+    )
+  }
+
+  /* ---- Catalog kind: fetch from business_orders for rich order data ---- */
+  if (page.kind === 'catalog') {
+    const { data: rawOrders } = await supabase
+      .from('business_orders')
+      .select('id, payment_status, currency, subtotal_amount, customer_name, customer_email, customer_phone, customer_notes, created_at, psid, lead_id, business_order_items(title_snapshot, quantity, unit_amount, line_total_amount, currency)')
+      .eq('action_page_id', id)
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false })
+      .limit(500)
+
+    const catalogOrders: CatalogOrderEntry[] = ((rawOrders ?? []) as Array<{
+      id: string
+      payment_status: string
+      currency: string
+      subtotal_amount: number
+      customer_name: string | null
+      customer_email: string | null
+      customer_phone: string | null
+      customer_notes: string | null
+      created_at: string
+      psid: string | null
+      lead_id: string | null
+      business_order_items: Array<{
+        title_snapshot: string
+        quantity: number
+        unit_amount: number
+        line_total_amount: number
+        currency: string
+      }>
+    }>).map(o => ({
+      id: o.id,
+      shortId: '#' + o.id.replace(/-/g, '').slice(0, 6),
+      createdAt: o.created_at,
+      dateKey: o.created_at.slice(0, 10),
+      paymentStatus: o.payment_status as CatalogOrderEntry['paymentStatus'],
+      currency: o.currency,
+      subtotalAmount: Number(o.subtotal_amount),
+      customerName: o.customer_name,
+      customerEmail: o.customer_email,
+      customerPhone: o.customer_phone,
+      customerNotes: o.customer_notes,
+      items: (o.business_order_items ?? []).map(i => ({
+        title: i.title_snapshot,
+        quantity: i.quantity,
+        unitAmount: Number(i.unit_amount),
+        lineTotalAmount: Number(i.line_total_amount),
+        currency: i.currency,
+      })),
+      source: o.psid ? 'Messenger' : 'Web',
+      leadId: o.lead_id,
+    }))
+
+    return (
+      <CatalogOrdersView
+        orders={catalogOrders}
+        pageTitle={page.title}
+        pageStatus={page.status}
+        pageId={id}
+      />
+    )
+  }
+
   const submissions = await fetchSubmissions(supabase, user.id, id)
 
   const kind = page.kind
-  const config = page.config as Record<string, unknown>
 
   const now = new Date()
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
@@ -182,19 +419,10 @@ export default async function SubmissionsPage({
       {kind === 'qualification' && (
         <QualificationView
           submissions={submissions}
-          monthStart={monthStart}
           weekAgo={weekAgo}
         />
       )}
-      {kind === 'catalog' && (
-        <CatalogView
-          submissions={submissions}
-          config={config}
-          monthStart={monthStart}
-          weekAgo={weekAgo}
-        />
-      )}
-      {kind !== 'form' && kind !== 'qualification' && kind !== 'catalog' && (
+      {kind !== 'form' && kind !== 'qualification' && (
         <GenericView submissions={submissions} />
       )}
     </div>
@@ -266,17 +494,14 @@ function FormCard({ submission: s }: { submission: SubmissionListItem }) {
 
 function QualificationView({
   submissions,
-  monthStart,
   weekAgo,
 }: {
   submissions: SubmissionListItem[]
-  monthStart: Date
   weekAgo: Date
 }) {
   const qualified = submissions.filter((s) => s.outcome === 'qualified')
   const disqualified = submissions.filter((s) => s.outcome === 'disqualified')
   const pending = submissions.filter((s) => s.outcome === 'pending_review')
-  const thisMonth = submissions.filter((s) => new Date(s.created_at) >= monthStart)
   const thisWeek = submissions.filter((s) => new Date(s.created_at) >= weekAgo)
   const groups = groupByCreatedDate(submissions)
 
@@ -405,160 +630,6 @@ function QualificationCard({ submission: s }: { submission: SubmissionListItem }
 /* ═══════════════════════════════════════════════
    CATALOG VIEW
 ═══════════════════════════════════════════════ */
-
-function CatalogView({
-  submissions,
-  config,
-  monthStart,
-  weekAgo,
-}: {
-  submissions: SubmissionListItem[]
-  config: Record<string, unknown>
-  monthStart: Date
-  weekAgo: Date
-}) {
-  const checkedOut = submissions.filter((s) => s.outcome === 'checked_out')
-  const thisMonth = checkedOut.filter((s) => new Date(s.created_at) >= monthStart)
-  const thisWeek = checkedOut.filter((s) => new Date(s.created_at) >= weekAgo)
-
-  // Build item name lookup from config
-  const configItems = Array.isArray(config.items) ? config.items as Record<string, unknown>[] : []
-  const itemNames = new Map<string, string>()
-  for (const it of configItems) {
-    if (typeof it.id === 'string' && typeof it.name === 'string') {
-      itemNames.set(it.id, it.name)
-    }
-  }
-
-  const groups = groupByCreatedDate(submissions)
-
-  return (
-    <>
-      <div className="grid grid-cols-3 gap-3">
-        <StatCard value={checkedOut.length} label="Total orders" color="green" />
-        <StatCard value={thisMonth.length} label="This month" color="indigo" />
-        <StatCard value={thisWeek.length} label="This week" color="blue" />
-      </div>
-
-      {submissions.length === 0 ? (
-        <EmptyState icon="layers" message="No orders yet. Checkout submissions will appear once leads place an order." />
-      ) : (
-        <div className="space-y-8">
-          {groups.map(({ dateKey, dateLabel, isToday, items }) => (
-            <section key={dateKey}>
-              <DayDivider label={dateLabel} count={items.length} isToday={isToday} />
-              <div className="space-y-2.5">
-                {items.map((s) => (
-                  <CatalogCard key={s.id} submission={s} itemNames={itemNames} />
-                ))}
-              </div>
-            </section>
-          ))}
-        </div>
-      )}
-    </>
-  )
-}
-
-function CatalogCard({
-  submission: s,
-  itemNames,
-}: {
-  submission: SubmissionListItem
-  itemNames: Map<string, string>
-}) {
-  const data = s.data as Record<string, unknown>
-  const items = Array.isArray(data.items)
-    ? (data.items as Array<{ id: string; quantity: number }>)
-    : []
-  const customer = data.customer && typeof data.customer === 'object'
-    ? (data.customer as Record<string, unknown>)
-    : {}
-
-  return (
-    <div className="overflow-hidden rounded-xl border border-[#E5E7EB] bg-white shadow-[0_1px_3px_rgba(0,0,0,0.06)] hover:shadow-[0_2px_8px_rgba(0,0,0,0.08)] transition-shadow">
-      <div className="flex flex-col gap-3 p-4">
-        {/* Customer row */}
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#F0FDF4] text-[#16A34A]">
-              <PersonIcon size={14} />
-            </div>
-            <div className="min-w-0">
-              {s.lead_id ? (
-                <Link
-                  href={`/dashboard/leads?lead=${s.lead_id}`}
-                  className="block truncate text-[14px] font-semibold text-[#111827] hover:text-[#0EA5E9] transition-colors"
-                >
-                  {s.lead_name ?? (customer.name as string) ?? s.messenger_name ?? 'Unknown lead'}
-                </Link>
-              ) : (
-                <span className="block truncate text-[14px] font-semibold text-[#374151]">
-                  {(customer.name as string) ?? s.lead_name ?? s.messenger_name ?? 'Anonymous'}
-                </span>
-              )}
-              <div className="mt-0.5 flex items-center gap-2">
-                {s.psid && (
-                  <span className="inline-flex items-center gap-1 text-[11px] text-[#6B7280]">
-                    <MessengerIcon size={10} />
-                    via Messenger
-                  </span>
-                )}
-                {s.lead_id && (
-                  <Link href={`/dashboard/leads?lead=${s.lead_id}`} className="text-[11px] text-[#0EA5E9] hover:underline">
-                    View lead →
-                  </Link>
-                )}
-              </div>
-            </div>
-          </div>
-          <div className="flex shrink-0 flex-col items-end gap-1">
-            <span className="rounded-full bg-[#D1FAE5] px-2.5 py-0.5 text-[11px] font-semibold text-[#065F46]">
-              {s.outcome ?? 'checked_out'}
-            </span>
-            <span className="text-[11px] text-[#9CA3AF]">{relTime(new Date(s.created_at))}</span>
-          </div>
-        </div>
-
-        {items.length > 0 ? (
-          <div className="flex flex-wrap gap-2 border-t border-[#F3F4F6] pt-3">
-            {items.map((it, i) => {
-              const name = itemNames.get(String(it.id)) ?? `Item #${String(it.id).slice(0, 6)}`
-              const qty = Number(it.quantity ?? 1)
-              return (
-                <span
-                  key={i}
-                  className="inline-flex items-center gap-1 rounded-lg bg-[#F0FDF4] px-2.5 py-1 text-[12px] font-medium text-[#166534]"
-                >
-                  {name}
-                  <span className="ml-0.5 rounded-full bg-[#16A34A] px-1.5 py-0 text-[10px] font-bold text-white">
-                    ×{qty}
-                  </span>
-                </span>
-              )
-            })}
-          </div>
-        ) : null}
-
-        {customer.email != null || customer.phone != null || customer.notes != null ? (
-          <div className="grid grid-cols-1 gap-1.5 border-t border-[#F3F4F6] pt-2 sm:grid-cols-2">
-            {customer.email != null ? (
-              <FieldRow label="Email" value={String(customer.email)} />
-            ) : null}
-            {customer.phone != null ? (
-              <FieldRow label="Phone" value={String(customer.phone)} />
-            ) : null}
-            {customer.notes != null ? (
-              <div className="col-span-full">
-                <FieldRow label="Notes" value={String(customer.notes)} />
-              </div>
-            ) : null}
-          </div>
-        ) : null}
-      </div>
-    </div>
-  )
-}
 
 /* ═══════════════════════════════════════════════
    GENERIC VIEW  (sales, realestate, unknown)
@@ -755,46 +826,6 @@ function DayDivider({
   )
 }
 
-function FailedSection({ submissions }: { submissions: SubmissionListItem[] }) {
-  return (
-    <section>
-      <div className="mb-3 flex items-center gap-3">
-        <span className="text-[13px] font-semibold text-[#6B7280]">Failed / Invalid</span>
-        <div className="flex-1 border-t border-dashed border-[#E5E7EB]" />
-        <span className="text-[12px] text-[#9CA3AF]">{submissions.length}</span>
-      </div>
-      <div className="space-y-2">
-        {submissions.map((s) => {
-          const data = s.data as Record<string, unknown>
-          const reason = typeof data.reason === 'string' ? humanize(data.reason) : s.outcome ?? 'Invalid'
-          return (
-            <div
-              key={s.id}
-              className="flex items-center gap-3 rounded-lg border border-[#FEF3C7] bg-[#FFFBEB] px-4 py-3"
-            >
-              <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#FDE68A] text-[#92400E]">
-                <WarningIcon size={11} />
-              </div>
-              <div className="flex-1 min-w-0">
-                {s.lead_id ? (
-                  <Link href={`/dashboard/leads?lead=${s.lead_id}`} className="text-[13px] font-medium text-[#78350F] hover:text-[#92400E]">
-                    {s.lead_name ?? s.messenger_name ?? 'Unknown lead'}
-                  </Link>
-                ) : (
-                  <span className="text-[13px] font-medium text-[#78350F]">{s.lead_name ?? s.messenger_name ?? 'Anonymous'}</span>
-                )}
-                <span className="mx-2 text-[#D97706]">·</span>
-                <span className="text-[12px] text-[#92400E]">{reason}</span>
-              </div>
-              <span className="shrink-0 text-[11px] text-[#B45309]">{relTime(new Date(s.created_at))}</span>
-            </div>
-          )
-        })}
-      </div>
-    </section>
-  )
-}
-
 function StatCard({
   value,
   label,
@@ -851,37 +882,6 @@ interface DayGroup {
   items: SubmissionListItem[]
 }
 
-function bookingSlotDate(s: SubmissionListItem): Date | null {
-  const iso = (s.data as Record<string, unknown>)?.slot_iso
-  if (typeof iso !== 'string') return null
-  const d = new Date(iso)
-  return Number.isNaN(d.getTime()) ? null : d
-}
-
-function groupBySlotDate(submissions: SubmissionListItem[]): DayGroup[] {
-  const todayKey = new Date().toISOString().slice(0, 10)
-  const map = new Map<string, SubmissionListItem[]>()
-  for (const s of submissions) {
-    const d = bookingSlotDate(s)
-    const key = d ? d.toISOString().slice(0, 10) : s.created_at.slice(0, 10)
-    const arr = map.get(key) ?? []
-    arr.push(s)
-    map.set(key, arr)
-  }
-  return [...map.entries()]
-    .sort(([a], [b]) => b.localeCompare(a))
-    .map(([dateKey, items]) => ({
-      dateKey,
-      dateLabel: formatDateLabel(dateKey),
-      isToday: dateKey === todayKey,
-      items: items.sort((a, b) => {
-        const ia = (a.data as Record<string, unknown>)?.slot_iso ?? a.created_at
-        const ib = (b.data as Record<string, unknown>)?.slot_iso ?? b.created_at
-        return String(ia).localeCompare(String(ib))
-      }),
-    }))
-}
-
 function groupByCreatedDate(submissions: SubmissionListItem[]): DayGroup[] {
   const todayKey = new Date().toISOString().slice(0, 10)
   const map = new Map<string, SubmissionListItem[]>()
@@ -914,20 +914,6 @@ function formatDateLabel(dateKey: string): string {
 /* ═══════════════════════════════════════════════
    FORMATTING
 ═══════════════════════════════════════════════ */
-
-interface TimeParts { hour: string; minute: string; ampm: string }
-
-function timeParts(iso: string): TimeParts | null {
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return null
-  const h = d.getHours()
-  const m = d.getMinutes()
-  return {
-    hour: String(h % 12 || 12),
-    minute: String(m).padStart(2, '0'),
-    ampm: h >= 12 ? 'PM' : 'AM',
-  }
-}
 
 function formatFieldValue(v: unknown): string {
   if (v === null || v === undefined || v === '') return '—'
@@ -1060,12 +1046,3 @@ function MessengerIcon({ size = 12 }: { size?: number }) {
   )
 }
 
-function WarningIcon({ size = 12 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
-      <line x1="12" y1="9" x2="12" y2="13" />
-      <line x1="12" y1="17" x2="12.01" y2="17" />
-    </svg>
-  )
-}

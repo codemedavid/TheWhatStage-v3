@@ -10,6 +10,7 @@ export default function FormRenderer({
   page,
   claims,
   rawToken,
+  sourceContext,
 }: KindRendererProps) {
   const config = parseFormConfig(page.config)
 
@@ -48,6 +49,48 @@ export default function FormRenderer({
             <input type="hidden" name="g" value={claims.pageId} />
             <input type="hidden" name="e" value={String(claims.exp)} />
             <input type="hidden" name="t" value={rawToken} />
+          </>
+        )}
+        {sourceContext?.source_property_action_page_id && (
+          <>
+            <input
+              type="hidden"
+              name="source_property_action_page_id"
+              value={sourceContext.source_property_action_page_id}
+            />
+            <input
+              type="hidden"
+              name="source_property_title"
+              value={sourceContext.source_property_title ?? ''}
+            />
+            {sourceContext.source_property_unit_id && (
+              <>
+                <input
+                  type="hidden"
+                  name="source_property_unit_id"
+                  value={sourceContext.source_property_unit_id}
+                />
+                <input
+                  type="hidden"
+                  name="source_property_unit_title"
+                  value={sourceContext.source_property_unit_title ?? ''}
+                />
+              </>
+            )}
+          </>
+        )}
+        {sourceContext?.source_sales_page_id && (
+          <>
+            <input
+              type="hidden"
+              name="source_sales_page_id"
+              value={sourceContext.source_sales_page_id}
+            />
+            <input
+              type="hidden"
+              name="source_sales_page_title"
+              value={sourceContext.source_sales_page_title ?? ''}
+            />
           </>
         )}
 

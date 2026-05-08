@@ -208,6 +208,62 @@ export async function loadLatestStageRationale(
   }
 }
 
+export interface StageJourneyEvent {
+  id: string
+  from_stage_name: string | null
+  to_stage_name: string | null
+  source: 'ai' | 'user'
+  reason: string | null
+  confidence: 'low' | 'medium' | 'high' | null
+  created_at: string
+}
+
+export interface StageJourney {
+  events: StageJourneyEvent[]
+  current_stage_name: string | null
+  created_at: string | null
+}
+
+/**
+ * Full stage transition history for a lead, oldest first, with stage names
+ * resolved. Used to render the journey timeline in the lead drawer.
+ */
+export async function loadStageJourney(leadId: string): Promise<StageJourney> {
+  const { supabase } = await requireUser()
+
+  const [{ data: events }, { data: stages }, { data: lead }] = await Promise.all([
+    supabase
+      .from('lead_stage_events')
+      .select('id, from_stage_id, to_stage_id, source, reason, confidence, created_at')
+      .eq('lead_id', leadId)
+      .order('created_at', { ascending: true })
+      .limit(500),
+    supabase.from('pipeline_stages').select('id, name'),
+    supabase
+      .from('leads')
+      .select('stage_id, created_at')
+      .eq('id', leadId)
+      .maybeSingle<{ stage_id: string; created_at: string }>(),
+  ])
+
+  const stageName = new Map((stages ?? []).map((s) => [s.id as string, s.name as string]))
+  const journey: StageJourneyEvent[] = (events ?? []).map((e) => ({
+    id: e.id as string,
+    from_stage_name: e.from_stage_id ? (stageName.get(e.from_stage_id as string) ?? null) : null,
+    to_stage_name: e.to_stage_id ? (stageName.get(e.to_stage_id as string) ?? null) : null,
+    source: e.source as 'ai' | 'user',
+    reason: (e.reason as string | null) ?? null,
+    confidence: (e.confidence as StageJourneyEvent['confidence']) ?? null,
+    created_at: e.created_at as string,
+  }))
+
+  return {
+    events: journey,
+    current_stage_name: lead?.stage_id ? (stageName.get(lead.stage_id) ?? null) : null,
+    created_at: lead?.created_at ?? null,
+  }
+}
+
 export async function undoStageEvent(eventId: string): Promise<void> {
   const { supabase, userId } = await requireUser()
 

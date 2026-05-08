@@ -73,6 +73,17 @@ type FbFeedChange = {
     post_id?: string
     from?: { id?: string; name?: string }
     message?: string
+    // message_template_status_update fields (per Meta docs):
+    //   event: 'APPROVED' | 'REJECTED' | 'PENDING' | 'DISABLED'
+    //   message_template_id: string  (Meta's template id)
+    //   message_template_name: string
+    //   message_template_language: string
+    //   reason?: string
+    event?: string
+    message_template_id?: string
+    message_template_name?: string
+    message_template_language?: string
+    reason?: string
   }
 }
 type FbEntry = {
@@ -121,6 +132,10 @@ export async function POST(req: NextRequest) {
 
     for (const change of entry.changes ?? []) {
       try {
+        if (change.field === 'message_template_status_update') {
+          await handleTemplateStatusUpdate(admin, change)
+          continue
+        }
         const jobId = await handleFeedChange(admin, fbPageId, change)
         if (jobId) commentEnqueued.push(jobId)
       } catch (e) {
@@ -380,6 +395,72 @@ async function triggerWorker(): Promise<void> {
   } catch (e) {
     console.warn('[fb.webhook] worker trigger failed', e)
   }
+}
+
+/**
+ * Process a `message_template_status_update` change. Meta sends these when
+ * an approval state changes for a template registered against any page that
+ * has subscribed our app. Match by `message_template_id` first; fall back to
+ * `(name, language)` so the row updates correctly even when the template was
+ * submitted before we started persisting Meta's id.
+ */
+async function handleTemplateStatusUpdate(
+  admin: AdminClient,
+  change: FbFeedChange,
+): Promise<void> {
+  const v = change.value
+  if (!v) return
+  const event = (v.event ?? '').toUpperCase()
+  const reason = v.reason ?? null
+  const metaId = v.message_template_id ?? null
+  const name = v.message_template_name ?? null
+  const language = v.message_template_language ?? null
+
+  let status: 'approved' | 'rejected' | 'pending' | 'disabled'
+  switch (event) {
+    case 'APPROVED': status = 'approved'; break
+    case 'REJECTED': status = 'rejected'; break
+    case 'PENDING':  status = 'pending';  break
+    case 'DISABLED': status = 'disabled'; break
+    default:
+      console.warn('[fb.webhook] unknown template event', { event })
+      return
+  }
+
+  // Locate the row.
+  let query = admin
+    .from('messenger_message_templates')
+    .select('id, meta_template_id, meta_status')
+  if (metaId) {
+    query = query.eq('meta_template_id', metaId)
+  } else if (name && language) {
+    query = query.eq('name', name).eq('language', language)
+  } else {
+    console.warn('[fb.webhook] template event missing identifiers', v)
+    return
+  }
+  const { data: row } = await query.maybeSingle<{
+    id: string
+    meta_template_id: string | null
+    meta_status: string
+  }>()
+
+  if (!row) {
+    console.warn('[fb.webhook] template event for unknown template', { metaId, name })
+    return
+  }
+
+  const update: Record<string, unknown> = {
+    meta_status: status,
+    meta_rejection_reason: status === 'rejected' ? reason : null,
+  }
+  if (status === 'approved') update.approved_at = new Date().toISOString()
+  if (metaId && !row.meta_template_id) update.meta_template_id = metaId
+
+  await admin
+    .from('messenger_message_templates')
+    .update(update)
+    .eq('id', row.id)
 }
 
 async function triggerCommentWorker(): Promise<void> {

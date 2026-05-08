@@ -13,6 +13,7 @@ const CHECKOUT_FIELD_TYPES = [
   'phone',
   'number',
   'select',
+  'image',
 ] as const
 
 type CheckoutFieldType = (typeof CHECKOUT_FIELD_TYPES)[number]
@@ -76,6 +77,7 @@ export const CatalogSubmissionPayload = z.object({
   customer_email: z.string().trim().max(320).optional(),
   customer_phone: z.string().trim().max(40).optional(),
   customer_notes: z.string().trim().max(2000).optional(),
+  payment_method_id: z.string().uuid().optional(),
   custom: z
     .union([
       z.string().transform((value, ctx) => {
@@ -114,6 +116,9 @@ function validateCustom(
     if (f.type === 'select' && f.options && !f.options.includes(str)) {
       throw new Error(`Invalid choice for ${f.label}`)
     }
+    if (f.type === 'image' && !/^https?:\/\//i.test(str)) {
+      throw new Error(`Invalid image upload for ${f.label}`)
+    }
     out[f.key] = str
   }
   return out
@@ -131,6 +136,7 @@ export function parseCatalogSubmission(
     outcome: 'checked_out',
     data: {
       items: parsed.items,
+      payment_method_id: parsed.payment_method_id ?? null,
       customer: {
         name: parsed.customer_name ?? null,
         email: parsed.customer_email ?? null,

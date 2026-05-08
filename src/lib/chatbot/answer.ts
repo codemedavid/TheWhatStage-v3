@@ -38,6 +38,11 @@ export interface AnswerOptions {
   /** Rolling summary of older turns beyond the history window. Injected into the
    *  system prompt so the bot retains context from early in long conversations. */
   conversationSummary?: string
+  /** Pre-rendered, closed-world snapshot of this lead's bookings, orders,
+   *  qualification, and form submissions. Appended to the system prompt so the
+   *  bot can answer "when is my booking?"-style questions without hallucinating.
+   *  Empty string when the lead has no records. */
+  leadContextBlock?: string
 }
 
 /**
@@ -110,9 +115,13 @@ export async function answer(
     return [] as SelectedMediaAsset[]
   })
 
+  const system = options.leadContextBlock
+    ? `${built.system}\n\n${options.leadContextBlock}`
+    : built.system
+
   const text = await llm.complete(
     [
-      { role: 'system', content: built.system },
+      { role: 'system', content: system },
       ...history,
       { role: 'user', content: built.user },
     ],

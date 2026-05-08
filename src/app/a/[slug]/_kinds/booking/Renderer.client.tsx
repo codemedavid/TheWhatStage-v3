@@ -22,6 +22,14 @@ interface Props {
     e?: string | null
     t?: string | null
   }
+  sourceContext?: {
+    source_property_action_page_id?: string
+    source_property_title?: string
+    source_property_unit_id?: string
+    source_property_unit_title?: string
+    source_sales_page_id?: string
+    source_sales_page_title?: string
+  } | null
 }
 
 const MONTHS = [
@@ -65,7 +73,7 @@ function fmtShort(d: Date): string {
   })
 }
 
-export default function BookingPicker({ slug, config, hidden }: Props) {
+export default function BookingPicker({ slug, config, hidden, sourceContext }: Props) {
   const accent = config.theme.accent_color
   const buttonText = config.theme.button_text_color
 
@@ -449,6 +457,48 @@ export default function BookingPicker({ slug, config, hidden }: Props) {
               <input type="hidden" name="g" value={hidden.g} />
               <input type="hidden" name="e" value={hidden.e} />
               <input type="hidden" name="t" value={hidden.t} />
+            </>
+          )}
+          {sourceContext?.source_property_action_page_id && (
+            <>
+              <input
+                type="hidden"
+                name="source_property_action_page_id"
+                value={sourceContext.source_property_action_page_id}
+              />
+              <input
+                type="hidden"
+                name="source_property_title"
+                value={sourceContext.source_property_title ?? ''}
+              />
+              {sourceContext.source_property_unit_id && (
+                <>
+                  <input
+                    type="hidden"
+                    name="source_property_unit_id"
+                    value={sourceContext.source_property_unit_id}
+                  />
+                  <input
+                    type="hidden"
+                    name="source_property_unit_title"
+                    value={sourceContext.source_property_unit_title ?? ''}
+                  />
+                </>
+              )}
+            </>
+          )}
+          {sourceContext?.source_sales_page_id && (
+            <>
+              <input
+                type="hidden"
+                name="source_sales_page_id"
+                value={sourceContext.source_sales_page_id}
+              />
+              <input
+                type="hidden"
+                name="source_sales_page_title"
+                value={sourceContext.source_sales_page_title ?? ''}
+              />
             </>
           )}
           <input type="hidden" name="data.slot_iso" value={pickedSlotIso} />

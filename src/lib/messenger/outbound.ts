@@ -4,8 +4,10 @@ import {
   sendMessengerGenericTemplate,
   sendMessengerImage,
   sendMessengerText,
+  sendMessengerUtilityTemplate,
   type MessengerGenericElement,
 } from '@/lib/facebook/messenger'
+import { deeplinkActionPageUrl } from '@/lib/action-pages/urls'
 
 type AdminClient = ReturnType<typeof createAdminClient>
 
@@ -17,6 +19,20 @@ export type OutboundPayload =
   | { kind: 'button'; text: string; url: string; ctaLabel: string }
   | { kind: 'image'; imageUrl: string }
   | { kind: 'generic_template'; elements: MessengerGenericElement[] }
+  // Approved Meta utility-message template. Used for sends outside the 24h
+  // window (e.g. agent campaigns to leads who haven't replied recently).
+  // `templateName`/`language` must match an APPROVED row in
+  // `messenger_message_templates`. `bodyParameters` are filled into the
+  // template's {{1}}, {{2}}, ... slots in order. `buttonUrlOverrides` lets
+  // callers attach a per-recipient deeplink (e.g. an action page URL signed
+  // for that PSID) to a URL button defined on the approved template.
+  | {
+      kind: 'utility_template'
+      templateName: string
+      language: string
+      bodyParameters: string[]
+      buttonUrlOverrides?: Array<{ index: number; url: string }>
+    }
 
 // 'bot'                   — automated reply inside a job worker (24h window only)
 // 'operator'              — manual send from the dashboard inbox (HUMAN_AGENT 7d window)
@@ -33,6 +49,7 @@ export type SendPolicy =
   | { mode: 'RESPONSE' }
   | { mode: 'HUMAN_AGENT' }
   | { mode: 'MARKETING_MESSAGE' }
+  | { mode: 'UTILITY_MESSAGE' }
   | { mode: 'OTN'; token: string }
   | { mode: 'paused'; reason: 'window' | 'optin' | 'otn' }
 
@@ -107,6 +124,27 @@ export async function sendOutbound(args: {
   kind: SendKind
 }): Promise<OutboundResult> {
   const { admin, thread, pageToken, payload, kind } = args
+
+  // Utility templates short-circuit policy resolution: an approved template
+  // is its own permission to send out-of-window via the UTILITY_MESSAGE tag.
+  // Inside the 24h window we still prefer RESPONSE so we don't burn a tag.
+  if (payload.kind === 'utility_template') {
+    const insideWindow = isInsideWindow(thread.last_inbound_at)
+    const result = await sendMessengerUtilityTemplate({
+      pageAccessToken: pageToken,
+      recipientPsid: thread.psid,
+      templateName: payload.templateName,
+      language: payload.language,
+      bodyParameters: payload.bodyParameters,
+      buttonUrlOverrides: payload.buttonUrlOverrides,
+      insideWindow,
+    })
+    await admin
+      .from('messenger_threads')
+      .update({ last_outbound_at: new Date().toISOString() })
+      .eq('id', thread.id)
+    return { sent: true, messageId: result.message_id }
+  }
 
   const policy = await resolveSendPolicy(admin, thread.id, thread.last_inbound_at, kind)
 
@@ -185,4 +223,119 @@ export async function sendOutbound(args: {
     .eq('id', thread.id)
 
   return { sent: true, messageId }
+}
+
+// ---------------------------------------------------------------------------
+// Product recommendation send — sends an image of the picked product followed
+// by a button card with a signed deeplink to the single-product view of the
+// catalog action page. Falls back to a text-only button card when the image
+// is missing or the image send fails for any reason.
+//
+// Both sub-sends route through sendOutbound() so they respect the 24h /
+// HUMAN_AGENT / OTN policy gates. If the policy blocks the very first send
+// the helper returns sent:false without trying further messages.
+// ---------------------------------------------------------------------------
+export interface ProductRecommendationSendInput {
+  admin: AdminClient
+  thread: { id: string; psid: string; last_inbound_at: string | null }
+  pageToken: string
+  /** Facebook page id (NOT the action page id) — required for the deeplink claims. */
+  facebookPageId: string
+  page: { id: string; slug: string; signing_secret: string }
+  product: {
+    id: string
+    slug: string
+    title: string
+    price_label: string
+    cover_image_url: string | null
+  }
+  /** Reranker confidence 0–1, recorded for dashboard observability. */
+  confidence: number
+  /** Caption above the button card. Localized by the caller. */
+  caption?: string
+  kind?: SendKind
+}
+
+export interface ProductRecommendationSendResult {
+  sent: boolean
+  messageIds: string[]
+  imageSent: boolean
+  reason?: string
+  deeplinkUrl: string
+}
+
+const DEEPLINK_TTL_SECONDS = 30 * 24 * 60 * 60
+
+function trimToBytes(s: string, max: number): string {
+  if (s.length <= max) return s
+  return `${s.slice(0, Math.max(0, max - 1))}…`
+}
+
+export async function sendProductRecommendation(
+  args: ProductRecommendationSendInput,
+): Promise<ProductRecommendationSendResult> {
+  const { admin, thread, pageToken, page, product } = args
+  const kind = args.kind ?? 'bot'
+
+  const exp = Math.floor(Date.now() / 1000) + DEEPLINK_TTL_SECONDS
+  const baseUrl = deeplinkActionPageUrl(page.signing_secret, {
+    slug: page.slug,
+    psid: thread.psid,
+    pageId: args.facebookPageId,
+    exp,
+  })
+  const sep = baseUrl.includes('?') ? '&' : '?'
+  const deeplinkUrl = `${baseUrl}${sep}product=${encodeURIComponent(product.slug)}`
+
+  const messageIds: string[] = []
+  let imageSent = false
+
+  if (product.cover_image_url) {
+    const imgResult = await sendOutbound({
+      admin,
+      thread,
+      pageToken,
+      payload: { kind: 'image', imageUrl: product.cover_image_url },
+      kind,
+    })
+    if (!imgResult.sent) {
+      // Policy blocked the very first send — bail out with no follow-up.
+      return {
+        sent: false,
+        messageIds: [],
+        imageSent: false,
+        reason: imgResult.reason,
+        deeplinkUrl,
+      }
+    }
+    messageIds.push(imgResult.messageId)
+    imageSent = true
+  }
+
+  // Messenger Button Template caps `text` at 640 chars; keep it well under that
+  // and let the caption + price line carry context. The CTA label maxes at 20.
+  const caption = args.caption?.trim() || 'Check this out 👇'
+  const cardText = trimToBytes(`${caption}\n\n${product.title} — ${product.price_label}`, 600)
+  const ctaLabel = trimToBytes('View product', 20)
+
+  const buttonResult = await sendOutbound({
+    admin,
+    thread,
+    pageToken,
+    payload: { kind: 'button', text: cardText, url: deeplinkUrl, ctaLabel },
+    kind,
+  })
+
+  if (!buttonResult.sent) {
+    return {
+      sent: messageIds.length > 0,
+      messageIds,
+      imageSent,
+      reason: buttonResult.reason,
+      deeplinkUrl,
+    }
+  }
+  messageIds.push(buttonResult.messageId)
+
+  return { sent: true, messageIds, imageSent, deeplinkUrl }
 }

@@ -12,7 +12,7 @@ const lead: LeadRow = {
   id: 'l1', stage_id: 's1', name: 'Jane, "Q"', email: 'j@x.com',
   phone: null, company: 'Acme\nCorp', job_title: null, source: null,
   estimated_value: 1000, notes: null,
-  custom_fields: { industry: 'SaaS' }, position: 0,
+  custom_fields: { industry: 'SaaS' }, phones: null, emails: null, position: 0,
   created_at: '2026-04-28T00:00:00Z', updated_at: '2026-04-28T00:00:00Z',
   picture_url: null,
   campaign_id: null,

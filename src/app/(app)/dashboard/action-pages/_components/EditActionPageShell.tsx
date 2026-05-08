@@ -12,6 +12,7 @@ import { CopyField } from './CopyField'
 import { KindEditor } from './KindEditor'
 import { PipelineRulesEditor } from './PipelineRulesEditor'
 import { CatalogShell } from '../_kinds/catalog/CatalogShell'
+import { RealestateShell } from '../_kinds/realestate/RealestateShell'
 
 type StepId = 'general' | 'configuration' | 'workflow' | 'share'
 
@@ -48,6 +49,20 @@ export function EditActionPageShell({
   if (page.kind === 'catalog') {
     return (
       <CatalogShell
+        page={page}
+        stages={stages}
+        publicUrl={publicUrl}
+        embedUrl={embedUrl}
+        embedSnippet={embedSnippet}
+        saved={saved}
+        errorBanner={errorBanner}
+      />
+    )
+  }
+
+  if (page.kind === 'realestate') {
+    return (
+      <RealestateShell
         page={page}
         stages={stages}
         publicUrl={publicUrl}

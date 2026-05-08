@@ -25,6 +25,8 @@ export type LeadRow = {
   estimated_value: number | null
   notes: string | null
   custom_fields: Record<string, unknown>
+  phones: string[] | null
+  emails: string[] | null
   position: number
   created_at: string
   updated_at: string

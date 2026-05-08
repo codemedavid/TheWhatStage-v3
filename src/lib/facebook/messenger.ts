@@ -6,6 +6,8 @@ const SUBSCRIBED_FIELDS = [
   'message_deliveries',
   'message_reads',
   'feed',
+  // Required for utility-message template approval/rejection events from Meta.
+  'message_template_status_update',
 ].join(',')
 
 async function postJson<T>(url: string, body: Record<string, unknown>): Promise<T> {
@@ -186,6 +188,76 @@ export async function sendMessengerGenericTemplate(args: {
       },
     },
   })
+}
+
+/**
+ * Send an approved utility-message template via the Send API.
+ *
+ * Outside the standard 24-hour messaging window, plain text and free-form
+ * templates are blocked by Meta. An approved utility template, dispatched
+ * with `messaging_type=MESSAGE_TAG` + `tag=UTILITY_MESSAGE`, is the only way
+ * to reach a recipient who hasn't messaged us in the last 24h (other than
+ * HUMAN_AGENT for operator sends and OTN tokens).
+ *
+ * The template body's `{{1}}, {{2}}, ...` placeholders are filled from
+ * `bodyParameters` in order. Buttons are optional overrides for any
+ * URL-type buttons defined on the approved template — Meta requires the
+ * value to match the template's button shape (URL, QUICK_REPLY, etc.).
+ */
+export async function sendMessengerUtilityTemplate(args: {
+  pageAccessToken: string
+  recipientPsid: string
+  templateName: string
+  language: string
+  bodyParameters: string[]
+  buttonUrlOverrides?: Array<{ index: number; url: string }>
+  // Inside-window callers can pass insideWindow=true to use RESPONSE instead
+  // of MESSAGE_TAG. Defaults to MESSAGE_TAG since the whole point of utility
+  // templates is reaching the user out-of-window.
+  insideWindow?: boolean
+}): Promise<{ message_id: string }> {
+  const url = new URL(`${GRAPH}/me/messages`)
+  url.searchParams.set('access_token', args.pageAccessToken)
+
+  // Body parameters per Meta's template send shape — an array of objects
+  // keyed by `type: 'text'` and the value to substitute, in order.
+  const parameters = args.bodyParameters.map((v) => ({ type: 'text', text: v }))
+
+  // Button overrides: a parallel `components` entry per overridden index.
+  // Each component declares the button index it targets and the dynamic url.
+  const components: Array<Record<string, unknown>> = [
+    { type: 'body', parameters },
+  ]
+  for (const ov of args.buttonUrlOverrides ?? []) {
+    components.push({
+      type: 'button',
+      sub_type: 'url',
+      index: ov.index,
+      parameters: [{ type: 'text', text: ov.url }],
+    })
+  }
+
+  const body: Record<string, unknown> = {
+    recipient: { id: args.recipientPsid },
+    message: {
+      attachment: {
+        type: 'template',
+        payload: {
+          template_type: 'utility',
+          name: args.templateName,
+          language: { code: args.language, policy: 'deterministic' },
+          components,
+        },
+      },
+    },
+  }
+  if (args.insideWindow) {
+    body.messaging_type = 'RESPONSE'
+  } else {
+    body.messaging_type = 'MESSAGE_TAG'
+    body.tag = 'UTILITY_MESSAGE'
+  }
+  return postJson<{ message_id: string }>(url.toString(), body)
 }
 
 export async function sendMessengerImage(args: {

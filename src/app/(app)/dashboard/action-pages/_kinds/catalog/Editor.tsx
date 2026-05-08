@@ -33,6 +33,7 @@ const CHECKOUT_FIELD_TYPES = [
   { value: 'phone', label: 'Phone' },
   { value: 'number', label: 'Number' },
   { value: 'select', label: 'Dropdown' },
+  { value: 'image', label: 'Image upload' },
 ] as const
 
 type CheckoutFieldType = (typeof CHECKOUT_FIELD_TYPES)[number]['value']
@@ -47,11 +48,20 @@ interface CheckoutField {
   options?: string[]
 }
 
+interface CatalogBrand {
+  name: string
+  tagline: string
+  description: string
+  logo_url: string
+}
+
 interface CatalogConfig {
   theme: { accent_color: string }
+  brand: CatalogBrand
   product_ids: string[]
   categories: Collection[]
   checkout_fields: CheckoutField[]
+  payment_method_ids: string[]
 }
 
 const PRESET_SWATCHES = [
@@ -66,6 +76,7 @@ const PRESET_SWATCHES = [
 
 function parseCatalogConfig(raw: Record<string, unknown>): CatalogConfig {
   const theme = (raw.theme ?? {}) as Record<string, unknown>
+  const brandRaw = (raw.brand ?? {}) as Record<string, unknown>
   const fieldsRaw = Array.isArray(raw.checkout_fields)
     ? (raw.checkout_fields as Record<string, unknown>[])
     : []
@@ -96,11 +107,22 @@ function parseCatalogConfig(raw: Record<string, unknown>): CatalogConfig {
       accent_color:
         typeof theme.accent_color === 'string' ? theme.accent_color : '#059669',
     },
+    brand: {
+      name: typeof brandRaw.name === 'string' ? brandRaw.name : '',
+      tagline: typeof brandRaw.tagline === 'string' ? brandRaw.tagline : '',
+      description: typeof brandRaw.description === 'string' ? brandRaw.description : '',
+      logo_url: typeof brandRaw.logo_url === 'string' ? brandRaw.logo_url : '',
+    },
     product_ids: Array.isArray(raw.product_ids) ? (raw.product_ids as string[]) : [],
     categories: Array.isArray(raw.categories)
       ? (raw.categories as Collection[])
       : [],
     checkout_fields: checkoutFields,
+    payment_method_ids: Array.isArray(raw.payment_method_ids)
+      ? (raw.payment_method_ids as unknown[]).filter(
+          (x): x is string => typeof x === 'string',
+        )
+      : [],
   }
 }
 
@@ -312,6 +334,13 @@ export default function CatalogEditor({ page }: KindEditorProps) {
     <div className="space-y-5">
       <input type="hidden" name="config" value={JSON.stringify(config)} />
       <input type="hidden" name="from" value={returnHref} />
+
+      {/* Brand section */}
+      <BrandSection
+        pageId={page.id}
+        brand={config.brand}
+        onChange={(b) => setConfig((c) => ({ ...c, brand: b }))}
+      />
 
       {/* Stat bar */}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
@@ -532,6 +561,289 @@ export default function CatalogEditor({ page }: KindEditorProps) {
         onRemove={removeCheckoutField}
         onMove={moveCheckoutField}
       />
+
+      <PaymentMethodsCard
+        selectedIds={config.payment_method_ids}
+        onChange={(ids) => setConfig((c) => ({ ...c, payment_method_ids: ids }))}
+      />
+    </div>
+  )
+}
+
+/* ---------------- Payment methods ---------------- */
+
+interface DashboardPaymentMethod {
+  id: string
+  kind: 'gcash' | 'bank_transfer' | 'other'
+  name: string
+  enabled: boolean
+  details: { qr_image_url?: string; account_number?: string; bank_name?: string }
+}
+
+function PaymentMethodsCard({
+  selectedIds,
+  onChange,
+}: {
+  selectedIds: string[]
+  onChange: (ids: string[]) => void
+}) {
+  const [methods, setMethods] = useState<DashboardPaymentMethod[]>([])
+  const [loading, setLoading] = useState(true)
+  useEffect(() => {
+    fetch('/api/payment-methods')
+      .then((r) => r.json())
+      .then((data) => {
+        setMethods(
+          Array.isArray(data.payment_methods) ? data.payment_methods : [],
+        )
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [])
+
+  const enabledMethods = useMemo(
+    () => methods.filter((m) => m.enabled),
+    [methods],
+  )
+  const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds])
+
+  function toggle(id: string) {
+    if (selectedSet.has(id)) onChange(selectedIds.filter((x) => x !== id))
+    else onChange([...selectedIds, id])
+  }
+
+  return (
+    <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-[0_1px_0_rgba(17,24,39,0.04)]">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-100 px-4 py-3">
+        <div>
+          <h3 className="text-[13.5px] font-semibold text-zinc-900">
+            Payment methods
+          </h3>
+          <p className="mt-0.5 text-[12px] text-zinc-500">
+            Choose which payment options buyers see at checkout. Manage methods
+            in{' '}
+            <a
+              href="/dashboard/payment-methods"
+              className="font-medium text-emerald-700 hover:underline"
+            >
+              Payment methods
+            </a>
+            .
+          </p>
+        </div>
+      </div>
+      {loading ? (
+        <div className="px-4 py-10 text-center text-[13px] text-zinc-500">
+          Loading methods…
+        </div>
+      ) : enabledMethods.length === 0 ? (
+        <div className="px-4 py-10 text-center text-[13px] text-zinc-500">
+          No enabled payment methods yet.{' '}
+          <a
+            href="/dashboard/payment-methods"
+            className="font-medium text-emerald-700 hover:underline"
+          >
+            Add one
+          </a>
+          .
+        </div>
+      ) : (
+        <ul className="divide-y divide-zinc-100">
+          {enabledMethods.map((m) => {
+            const checked = selectedSet.has(m.id)
+            return (
+              <li key={m.id} className="flex items-center gap-3 px-4 py-2.5">
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={() => toggle(m.id)}
+                  className="size-4 rounded border-zinc-300 text-emerald-600 focus:ring-emerald-500"
+                />
+                <div className="size-9 shrink-0 overflow-hidden rounded-md border border-zinc-200 bg-zinc-50">
+                  {m.details.qr_image_url ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={m.details.qr_image_url}
+                      alt=""
+                      className="size-full object-cover"
+                    />
+                  ) : (
+                    <div className="flex size-full items-center justify-center text-[9px] font-semibold uppercase tracking-wide text-zinc-400">
+                      {m.kind === 'gcash' ? 'GC' : m.kind === 'bank_transfer' ? 'BANK' : '···'}
+                    </div>
+                  )}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="text-[13px] font-medium text-zinc-900">
+                    {m.name}
+                  </div>
+                  <div className="text-[11.5px] text-zinc-500">
+                    {m.kind === 'gcash'
+                      ? 'GCash'
+                      : m.kind === 'bank_transfer'
+                        ? `Bank transfer${m.details.bank_name ? ' · ' + m.details.bank_name : ''}`
+                        : 'Other'}
+                    {m.details.account_number ? ' · ' + m.details.account_number : ''}
+                  </div>
+                </div>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+/* ---------------- Brand section ---------------- */
+
+function BrandSection({
+  pageId,
+  brand,
+  onChange,
+}: {
+  pageId: string
+  brand: CatalogBrand
+  onChange: (b: CatalogBrand) => void
+}) {
+  const initials = brand.name.trim()
+    ? brand.name.trim().slice(0, 2).toUpperCase()
+    : '?'
+  const inputRef = useRef<HTMLInputElement | null>(null)
+  const [uploading, setUploading] = useState(false)
+  const [uploadError, setUploadError] = useState<string | null>(null)
+
+  async function handleFile(file: File) {
+    setUploading(true)
+    setUploadError(null)
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      const res = await fetch(`/api/action-pages/${pageId}/images`, {
+        method: 'POST',
+        body: fd,
+      })
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string }
+        throw new Error(body.error ?? `upload_failed_${res.status}`)
+      }
+      const { url } = (await res.json()) as { url: string }
+      onChange({ ...brand, logo_url: url })
+    } catch (e) {
+      setUploadError(e instanceof Error ? e.message : 'upload failed')
+    } finally {
+      setUploading(false)
+      if (inputRef.current) inputRef.current.value = ''
+    }
+  }
+
+  return (
+    <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-[0_1px_0_rgba(17,24,39,0.04)]">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-100 px-4 py-3">
+        <div>
+          <h3 className="text-[13.5px] font-semibold text-zinc-900">Brand identity</h3>
+          <p className="mt-0.5 text-[12px] text-zinc-500">
+            Business name and description shown on your public storefront.
+          </p>
+        </div>
+      </div>
+
+      <div className="p-4">
+        <div className="flex items-start gap-4">
+          {/* Logo preview + upload */}
+          <div className="shrink-0">
+            <button
+              type="button"
+              onClick={() => inputRef.current?.click()}
+              disabled={uploading}
+              title="Upload logo"
+              className="group relative flex size-14 items-center justify-center overflow-hidden rounded-xl border border-zinc-200 bg-zinc-50 shadow-sm transition hover:border-emerald-400 hover:bg-zinc-100 disabled:opacity-60"
+            >
+              {brand.logo_url ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={brand.logo_url}
+                  alt=""
+                  className="size-full object-cover"
+                />
+              ) : (
+                <span className="text-[18px] font-semibold text-zinc-400">
+                  {initials}
+                </span>
+              )}
+              <span className="absolute inset-0 flex items-center justify-center bg-black/40 text-[10.5px] font-semibold uppercase tracking-wide text-white opacity-0 transition group-hover:opacity-100">
+                {uploading ? '…' : 'Upload'}
+              </span>
+            </button>
+            <input
+              ref={inputRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0]
+                if (f) void handleFile(f)
+              }}
+            />
+            {brand.logo_url && (
+              <button
+                type="button"
+                onClick={() => onChange({ ...brand, logo_url: '' })}
+                className="mt-1.5 block w-full text-center text-[10.5px] font-medium text-zinc-500 hover:text-rose-600"
+              >
+                Remove
+              </button>
+            )}
+          </div>
+
+          <div className="min-w-0 flex-1 space-y-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <FieldInput
+                label="Business name"
+                value={brand.name}
+                onChange={(v) => onChange({ ...brand, name: v })}
+                placeholder="e.g. Northstand"
+              />
+              <FieldInput
+                label="Tagline"
+                value={brand.tagline}
+                onChange={(v) => onChange({ ...brand, tagline: v })}
+                placeholder="e.g. Tools for solo operators"
+              />
+            </div>
+
+            <div>
+              <label className="mb-0.5 block text-[10.5px] font-medium uppercase tracking-wide text-zinc-500">
+                Description
+              </label>
+              <textarea
+                value={brand.description}
+                onChange={(e) => onChange({ ...brand, description: e.target.value })}
+                rows={2}
+                placeholder="A short blurb shown below your business name on the storefront."
+                className="w-full rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-[13px] text-zinc-900 placeholder:text-zinc-400 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+              />
+            </div>
+
+            <div>
+              <FieldInput
+                label="Logo URL"
+                value={brand.logo_url}
+                onChange={(v) => onChange({ ...brand, logo_url: v })}
+                placeholder="https://… or click the logo tile to upload"
+              />
+              <p className="mt-1 text-[11px] text-zinc-500">
+                {uploading
+                  ? 'Uploading…'
+                  : 'JPEG, PNG, or WebP · up to 5 MB. Click the tile to upload.'}
+              </p>
+              {uploadError && (
+                <p className="mt-1 text-[11.5px] text-rose-600">{uploadError}</p>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   )
 }

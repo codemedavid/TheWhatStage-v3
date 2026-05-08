@@ -22,6 +22,9 @@ type IconName =
   | 'chevron-left'
   | 'chevron-right'
   | 'agent'
+  | 'reminders'
+  | 'templates'
+  | 'payments'
 
 const items: { href: string; label: string; icon: IconName }[] = [
   { href: '/dashboard', label: 'Overview', icon: 'overview' },
@@ -30,6 +33,9 @@ const items: { href: string; label: string; icon: IconName }[] = [
   { href: '/dashboard/chatbot', label: 'Chatbot', icon: 'chatbot' },
   { href: '/dashboard/action-pages', label: 'Action Pages', icon: 'actions' },
   { href: '/dashboard/agent', label: 'Agent', icon: 'agent' },
+  { href: '/dashboard/templates', label: 'Templates', icon: 'templates' },
+  { href: '/dashboard/payment-methods', label: 'Payment methods', icon: 'payments' },
+  { href: '/dashboard/reminders', label: 'Reminders', icon: 'reminders' },
   { href: '/dashboard/media', label: 'Media', icon: 'media' },
   { href: '/dashboard/settings', label: 'Settings', icon: 'settings' },
 ]
@@ -137,6 +143,26 @@ function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
         <circle cx="9.5" cy="10.5" r="1" fill="currentColor" stroke="none" />
         <circle cx="14.5" cy="10.5" r="1" fill="currentColor" stroke="none" />
         <path d="M9.5 14.5s.8 1 2.5 1 2.5-1 2.5-1" />
+      </>
+    ),
+    reminders: (
+      <>
+        <path d="M6 9a6 6 0 1112 0c0 5 2 6 2 6H4s2-1 2-6z" />
+        <path d="M10 19a2 2 0 004 0" />
+      </>
+    ),
+    templates: (
+      <>
+        <rect x="4" y="4" width="16" height="16" rx="2" />
+        <path d="M4 9h16" />
+        <path d="M9 9v11" />
+      </>
+    ),
+    payments: (
+      <>
+        <rect x="3" y="6" width="18" height="13" rx="2" />
+        <path d="M3 10h18" />
+        <path d="M7 15h4" />
       </>
     ),
   }

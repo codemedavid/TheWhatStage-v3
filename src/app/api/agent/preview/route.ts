@@ -4,8 +4,19 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { parseIntent } from '@/lib/agent/parseIntent'
 import { resolveAudience } from '@/lib/agent/resolveAudience'
 import { loadContext, DAILY_CAP } from '@/lib/agent/loadContext'
-import { classifyPolicy, policyLabel } from '@/lib/agent/classifyPolicy'
+import {
+  classifyPolicy,
+  policyLabel,
+  classifyTemplatePolicy,
+  templatePolicyLabel,
+} from '@/lib/agent/classifyPolicy'
 import { generateDraft } from '@/lib/agent/generateDraft'
+import {
+  renderTemplateVariables,
+  type VariableMap,
+} from '@/lib/messenger-templates/render'
+import { renderTemplate } from '@/lib/messenger-templates/types'
+import type { ParsedIntent } from '@/lib/agent/types'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -51,15 +62,43 @@ export async function POST(req: NextRequest) {
   let command = ''
   let imageMediaAssetId: string | null = null
   let imageUrl: string | null = null
+  let mode: 'per_lead_ai' | 'shared_template' = 'per_lead_ai'
+  let templateId: string | null = null
+  let templateVariables: VariableMap = {}
+  let attachedActionPageId: string | null = null
+  let attachedButtonIndex = 0
+  let stageNameInput: string | null = null
+  let lastActiveWithinDays: number | null = null
   try {
-    const body = await req.json() as { command?: unknown; imageMediaAssetId?: unknown; imageUrl?: unknown }
+    const body = await req.json() as Record<string, unknown>
     command = typeof body.command === 'string' ? body.command.trim() : ''
     imageMediaAssetId = typeof body.imageMediaAssetId === 'string' ? body.imageMediaAssetId : null
     imageUrl = typeof body.imageUrl === 'string' ? body.imageUrl : null
+    if (body.mode === 'shared_template') mode = 'shared_template'
+    if (typeof body.templateId === 'string') templateId = body.templateId
+    if (body.templateVariables && typeof body.templateVariables === 'object') {
+      templateVariables = body.templateVariables as VariableMap
+    }
+    if (typeof body.attachedActionPageId === 'string') {
+      attachedActionPageId = body.attachedActionPageId
+    }
+    if (typeof body.attachedButtonIndex === 'number') {
+      attachedButtonIndex = body.attachedButtonIndex
+    }
+    if (typeof body.stageName === 'string') stageNameInput = body.stageName
+    if (typeof body.lastActiveWithinDays === 'number') {
+      lastActiveWithinDays = body.lastActiveWithinDays
+    }
   } catch { /* empty body is fine */ }
 
-  if (!command) {
+  if (mode === 'per_lead_ai' && !command) {
     return new Response(JSON.stringify({ error: 'command is required' }), {
+      status: 400,
+      headers: { 'content-type': 'application/json' },
+    })
+  }
+  if (mode === 'shared_template' && !templateId) {
+    return new Response(JSON.stringify({ error: 'templateId is required for shared_template mode' }), {
       status: 400,
       headers: { 'content-type': 'application/json' },
     })
@@ -88,7 +127,24 @@ export async function POST(req: NextRequest) {
         const stages = (stagesData ?? []).map((s) => s.name as string)
 
         // 1. Parse intent
-        const intent = await parseIntent(command, stages)
+        // In shared_template mode the audience is supplied directly via
+        // stageName / lastActiveWithinDays — we skip the LLM intent parse
+        // entirely. We synthesize a ParsedIntent so the rest of the
+        // pipeline (resolveAudience, campaign row) keeps the same shape.
+        let intent: ParsedIntent
+        if (mode === 'shared_template') {
+          intent = {
+            audience: {
+              stage_name: stageNameInput,
+              last_active_within_days: lastActiveWithinDays,
+            },
+            instruction: '',
+            tone: 'professional',
+            ambiguities: [],
+          }
+        } else {
+          intent = await parseIntent(command, stages)
+        }
         send('intent', intent)
 
         if (intent.ambiguities.length > 0) {
@@ -121,6 +177,11 @@ export async function POST(req: NextRequest) {
             image_url: imageUrl,
             status: 'previewing',
             total: audience.length,
+            send_mode: mode,
+            template_id: mode === 'shared_template' ? templateId : null,
+            template_variables: mode === 'shared_template' ? templateVariables : {},
+            attached_action_page_id: mode === 'shared_template' ? attachedActionPageId : null,
+            attached_button_index: attachedButtonIndex,
           })
           .select('id')
           .single()
@@ -134,32 +195,85 @@ export async function POST(req: NextRequest) {
         send('campaign', { campaign_id: campaign.id })
 
         // 5. Fan-out draft generation with bounded concurrency.
-        const limit = createLimiter(DRAFT_CONCURRENCY)
         let capRemaining = DAILY_CAP - ctx.dailyCapUsed
 
-        await Promise.all(
-          audience.map((lead) =>
-            limit(async () => {
-              const policy = classifyPolicy(lead, ctx, capRemaining)
-              const label = policyLabel(policy)
+        if (mode === 'shared_template') {
+          // Load the template once. We render the same body for everyone
+          // (modulo variable substitution for lead_field rules) — no LLM
+          // call per lead, so we don't need bounded concurrency.
+          const { data: tplRow } = await admin
+            .from('messenger_message_templates')
+            .select('id, name, language, body_text, variable_count, buttons, meta_status')
+            .eq('id', templateId!)
+            .eq('user_id', userId!)
+            .maybeSingle<{
+              id: string
+              name: string
+              language: string
+              body_text: string
+              variable_count: number
+              buttons: unknown
+              meta_status: string
+            }>()
+          if (!tplRow) {
+            send('error', { message: 'Template not found' })
+            controller.close()
+            return
+          }
+          if (tplRow.meta_status !== 'approved') {
+            send('error', {
+              message: `Template is "${tplRow.meta_status}" — only approved templates can be sent.`,
+            })
+            controller.close()
+            return
+          }
 
-              let draft = ''
-              if (policy.policy !== 'paused') {
-                draft = await generateDraft(lead, intent, ctx)
-                capRemaining = Math.max(0, capRemaining - 1)
-              }
+          for (const lead of audience) {
+            const policy = classifyTemplatePolicy(lead, ctx, capRemaining)
+            const label = templatePolicyLabel(policy)
+            const included = policy.policy !== 'paused'
+            const params = renderTemplateVariables(
+              templateVariables,
+              tplRow.variable_count,
+              { name: lead.name, custom_fields: lead.custom_fields ?? null },
+            )
+            const rendered = renderTemplate(tplRow.body_text, params)
+            if (included) capRemaining = Math.max(0, capRemaining - 1)
+            send('draft', {
+              lead_id: lead.id,
+              thread_id: lead.thread_id,
+              name: lead.name,
+              draft: rendered,
+              policy: label,
+              user_included: included,
+            })
+          }
+        } else {
+          const limit = createLimiter(DRAFT_CONCURRENCY)
+          await Promise.all(
+            audience.map((lead) =>
+              limit(async () => {
+                const policy = classifyPolicy(lead, ctx, capRemaining)
+                const label = policyLabel(policy)
 
-              send('draft', {
-                lead_id: lead.id,
-                thread_id: lead.thread_id,
-                name: lead.name,
-                draft,
-                policy: label,
-                user_included: policy.policy !== 'paused',
-              })
-            }),
-          ),
-        )
+                let draft = ''
+                if (policy.policy !== 'paused') {
+                  draft = await generateDraft(lead, intent, ctx)
+                  capRemaining = Math.max(0, capRemaining - 1)
+                }
+
+                send('draft', {
+                  lead_id: lead.id,
+                  thread_id: lead.thread_id,
+                  name: lead.name,
+                  draft,
+                  policy: label,
+                  user_included: policy.policy !== 'paused',
+                })
+              }),
+            ),
+          )
+        }
 
         send('done', { campaign_id: campaign.id, daily_cap_used: ctx.dailyCapUsed })
       } catch (err) {

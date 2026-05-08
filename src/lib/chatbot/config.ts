@@ -1,6 +1,22 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { DEFAULT_CHATBOT_PERSONA, type ChatbotPersona } from '@/lib/rag/prompt-builder'
 
+export interface ActionPageRecommendationRules {
+  rules: string
+  requiredSlots: string[]
+  confidenceThreshold: number
+}
+
+export interface RecommendationRulesMap {
+  defaultConfidenceThreshold: number
+  perActionPage: Record<string, ActionPageRecommendationRules>
+}
+
+export const DEFAULT_RECOMMENDATION_RULES: RecommendationRulesMap = {
+  defaultConfidenceThreshold: 0.55,
+  perActionPage: {},
+}
+
 export type ChatbotConfigRow = {
   user_id: string
   name: string
@@ -14,6 +30,7 @@ export type ChatbotConfigRow = {
   auto_classify_enabled: boolean
   active_template_id: string | null
   personality_source: string
+  recommendation_rules: unknown
   created_at: string
   updated_at: string
 }
@@ -24,6 +41,7 @@ export type ChatbotConfig = ChatbotPersona & {
   autoClassifyEnabled: boolean
   activeTemplateId: string | null
   personalitySource: 'custom' | 'template'
+  recommendationRules: RecommendationRulesMap
   updatedAt: string
 }
 
@@ -34,7 +52,50 @@ export const DEFAULT_CHATBOT_CONFIG: ChatbotConfig = {
   autoClassifyEnabled: false,
   activeTemplateId: null,
   personalitySource: 'custom',
+  recommendationRules: DEFAULT_RECOMMENDATION_RULES,
   updatedAt: '',
+}
+
+export function parseRecommendationRules(raw: unknown): RecommendationRulesMap {
+  if (!raw || typeof raw !== 'object') return DEFAULT_RECOMMENDATION_RULES
+  const r = raw as { default_confidence_threshold?: unknown; per_action_page?: unknown }
+  const threshold =
+    typeof r.default_confidence_threshold === 'number' &&
+    r.default_confidence_threshold >= 0 &&
+    r.default_confidence_threshold <= 1
+      ? r.default_confidence_threshold
+      : DEFAULT_RECOMMENDATION_RULES.defaultConfidenceThreshold
+
+  const perPage: Record<string, ActionPageRecommendationRules> = {}
+  const map = r.per_action_page
+  if (map && typeof map === 'object') {
+    for (const [pageId, val] of Object.entries(map)) {
+      if (!val || typeof val !== 'object') continue
+      const v = val as { rules?: unknown; required_slots?: unknown; confidence_threshold?: unknown }
+      const rules = typeof v.rules === 'string' ? v.rules.trim() : ''
+      const requiredSlots = Array.isArray(v.required_slots)
+        ? v.required_slots
+            .map((s) => (typeof s === 'string' ? s.trim() : ''))
+            .filter((s): s is string => !!s)
+        : []
+      const conf =
+        typeof v.confidence_threshold === 'number' &&
+        v.confidence_threshold >= 0 &&
+        v.confidence_threshold <= 1
+          ? v.confidence_threshold
+          : threshold
+      if (rules) perPage[pageId] = { rules, requiredSlots, confidenceThreshold: conf }
+    }
+  }
+  return { defaultConfidenceThreshold: threshold, perActionPage: perPage }
+}
+
+export function getActionPageRecommendationRules(
+  config: ChatbotConfig,
+  actionPageId: string | null | undefined,
+): ActionPageRecommendationRules | null {
+  if (!actionPageId) return null
+  return config.recommendationRules.perActionPage[actionPageId] ?? null
 }
 
 export function rowToConfig(row: ChatbotConfigRow): ChatbotConfig {
@@ -50,6 +111,7 @@ export function rowToConfig(row: ChatbotConfigRow): ChatbotConfig {
     autoClassifyEnabled: row.auto_classify_enabled ?? DEFAULT_CHATBOT_CONFIG.autoClassifyEnabled,
     activeTemplateId: row.active_template_id ?? null,
     personalitySource: (row.personality_source as ChatbotConfig['personalitySource']) ?? 'custom',
+    recommendationRules: parseRecommendationRules(row.recommendation_rules),
     updatedAt: row.updated_at ?? '',
   }
 }

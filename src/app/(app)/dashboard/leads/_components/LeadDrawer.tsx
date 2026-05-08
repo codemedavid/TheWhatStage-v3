@@ -11,6 +11,7 @@ import { ConversationPanel } from './ConversationPanel'
 import { CommentsPanel } from './CommentsPanel'
 import { SubmissionsPanel } from './SubmissionsPanel'
 import { OrdersPanel } from './OrdersPanel'
+import { StageJourney } from './StageJourney'
 
 type Tab =
   | 'details'
@@ -318,6 +319,31 @@ export function LeadDrawer({
               <Field label="Phone">
                 <Input value={form.phone ?? ''} onChange={(v) => set('phone', v)} />
               </Field>
+              {mode === 'edit' && (() => {
+                const detectedEmails = (lead?.emails ?? []).filter(
+                  (e) => e && e !== form.email,
+                )
+                const detectedPhones = (lead?.phones ?? []).filter(
+                  (p) => p && p !== form.phone,
+                )
+                if (!detectedEmails.length && !detectedPhones.length) return null
+                return (
+                  <div className="col-span-2 space-y-2">
+                    <DetectedRow
+                      label="Detected emails"
+                      values={detectedEmails}
+                      onPick={(v) => set('email', v)}
+                      activeLabel="Use as primary"
+                    />
+                    <DetectedRow
+                      label="Detected phones"
+                      values={detectedPhones}
+                      onPick={(v) => set('phone', v)}
+                      activeLabel="Use as primary"
+                    />
+                  </div>
+                )
+              })()}
               <Field label="Company">
                 <Input value={form.company ?? ''} onChange={(v) => set('company', v)} />
               </Field>
@@ -337,6 +363,12 @@ export function LeadDrawer({
               </Field>
             </div>
           </Section>
+
+          {mode === 'edit' && form.id && (
+            <Section label="Stage journey">
+              <StageJourney leadId={form.id} stageId={form.stage_id} />
+            </Section>
+          )}
 
           <Section label="Notes">
             <textarea
@@ -536,6 +568,48 @@ function SegmentedStages({
           </button>
         )
       })}
+    </div>
+  )
+}
+
+function DetectedRow({
+  label, values, onPick, activeLabel,
+}: {
+  label: string
+  values: string[]
+  onPick: (v: string) => void
+  activeLabel: string
+}) {
+  if (!values.length) return null
+  return (
+    <div>
+      <div
+        className="mb-1 text-[11px] font-medium uppercase tracking-wider"
+        style={{ color: 'var(--lead-muted)' }}
+      >
+        {label}
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {values.map((v) => (
+          <button
+            key={v}
+            type="button"
+            onClick={() => onPick(v)}
+            title={activeLabel}
+            className="lead-focus inline-flex h-7 items-center gap-1 rounded-full px-2.5 text-[12px] transition-colors"
+            style={{
+              background: 'var(--lead-surface-2)',
+              border: '1px solid var(--lead-line)',
+              color: 'var(--lead-body)',
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--lead-accent-ring)')}
+            onMouseLeave={(e) => (e.currentTarget.style.background = 'var(--lead-surface-2)')}
+          >
+            <span className="font-mono tabular-nums">{v}</span>
+            <span style={{ color: 'var(--lead-faint)' }}>↑</span>
+          </button>
+        ))}
+      </div>
     </div>
   )
 }

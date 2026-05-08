@@ -103,7 +103,7 @@ export async function enqueuePendingSources(
     client
       .from('business_items')
       .select('id, user_id, version')
-      .eq('kind', 'product')
+      .in('kind', ['product', 'property', 'service'])
       .eq('status', 'published')
       .eq('rag_enabled', true)
       .in('embedding_status', ['pending', 'stale'])

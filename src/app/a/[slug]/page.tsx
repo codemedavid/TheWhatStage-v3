@@ -18,8 +18,10 @@ export default async function PublicActionPage({
   const submitted = sp.submitted === '1'
   const isBooking = result.page.kind === 'booking' && !submitted
   const isCatalog = result.page.kind === 'catalog' && !submitted
+  const isRealestate = result.page.kind === 'realestate' && !submitted
+  const isSales = result.page.kind === 'sales' && !submitted
 
-  if (isBooking || isCatalog) {
+  if (isBooking || isCatalog || isRealestate || isSales) {
     return (
       <ActionPageRenderer
         page={result.page}
@@ -27,6 +29,8 @@ export default async function PublicActionPage({
         rawToken={rawToken}
         variant="standalone"
         products={result.products ?? []}
+        paymentMethods={result.paymentMethods ?? []}
+        searchParams={sp}
       />
     )
   }
@@ -49,6 +53,7 @@ export default async function PublicActionPage({
             rawToken={rawToken}
             variant="standalone"
             products={result.products ?? []}
+            paymentMethods={result.paymentMethods ?? []}
           />
         )}
       </div>

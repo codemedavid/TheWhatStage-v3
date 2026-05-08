@@ -12,6 +12,14 @@ interface Props {
   slug: string
   config: QualificationConfig
   deeplink: { p: string; g: string; e: string; t: string } | null
+  sourceContext?: {
+    source_property_action_page_id?: string
+    source_property_title?: string
+    source_property_unit_id?: string
+    source_property_unit_title?: string
+    source_sales_page_id?: string
+    source_sales_page_title?: string
+  } | null
 }
 
 /**
@@ -19,7 +27,7 @@ interface Props {
  * no-JS fallback is the noscript form below — it renders every question on
  * one screen so submission still works without JS (acceptable degradation).
  */
-export function QualificationClient({ slug, config, deeplink }: Props) {
+export function QualificationClient({ slug, config, deeplink, sourceContext }: Props) {
   const [answers, setAnswers] = useState<QualificationAnswers>({})
   const [index, setIndex] = useState(0)
   const formRef = useRef<HTMLFormElement | null>(null)
@@ -172,6 +180,48 @@ export function QualificationClient({ slug, config, deeplink }: Props) {
             <input type="hidden" name="t" value={deeplink.t} />
           </>
         )}
+        {sourceContext?.source_property_action_page_id && (
+          <>
+            <input
+              type="hidden"
+              name="source_property_action_page_id"
+              value={sourceContext.source_property_action_page_id}
+            />
+            <input
+              type="hidden"
+              name="source_property_title"
+              value={sourceContext.source_property_title ?? ''}
+            />
+            {sourceContext.source_property_unit_id && (
+              <>
+                <input
+                  type="hidden"
+                  name="source_property_unit_id"
+                  value={sourceContext.source_property_unit_id}
+                />
+                <input
+                  type="hidden"
+                  name="source_property_unit_title"
+                  value={sourceContext.source_property_unit_title ?? ''}
+                />
+              </>
+            )}
+          </>
+        )}
+        {sourceContext?.source_sales_page_id && (
+          <>
+            <input
+              type="hidden"
+              name="source_sales_page_id"
+              value={sourceContext.source_sales_page_id}
+            />
+            <input
+              type="hidden"
+              name="source_sales_page_title"
+              value={sourceContext.source_sales_page_title ?? ''}
+            />
+          </>
+        )}
       </form>
 
       {/* No-JS fallback: render every question on one page. */}
@@ -188,6 +238,34 @@ export function QualificationClient({ slug, config, deeplink }: Props) {
               <input type="hidden" name="g" value={deeplink.g} />
               <input type="hidden" name="e" value={deeplink.e} />
               <input type="hidden" name="t" value={deeplink.t} />
+            </>
+          )}
+          {sourceContext?.source_property_action_page_id && (
+            <>
+              <input
+                type="hidden"
+                name="source_property_action_page_id"
+                value={sourceContext.source_property_action_page_id}
+              />
+              <input
+                type="hidden"
+                name="source_property_title"
+                value={sourceContext.source_property_title ?? ''}
+              />
+            </>
+          )}
+          {sourceContext?.source_sales_page_id && (
+            <>
+              <input
+                type="hidden"
+                name="source_sales_page_id"
+                value={sourceContext.source_sales_page_id}
+              />
+              <input
+                type="hidden"
+                name="source_sales_page_title"
+                value={sourceContext.source_sales_page_title ?? ''}
+              />
             </>
           )}
           {/*

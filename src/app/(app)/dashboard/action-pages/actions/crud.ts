@@ -11,6 +11,9 @@ import {
   UpdateActionPageInput,
 } from '../_lib/schemas'
 import { slugifyTitle } from '../_lib/slug'
+import { parseRealestateConfig } from '@/app/a/[slug]/_kinds/realestate/schema'
+import { parseSalesConfig } from '@/app/a/[slug]/_kinds/sales/schema'
+import { syncRealestateToBusinessItems, syncSalesToBusinessItems } from '@/lib/action-pages/rag/sync'
 
 async function requireUser() {
   const supabase = await createClient()
@@ -123,10 +126,10 @@ export async function updateActionPage(formData: FormData): Promise<void> {
 
   const { data: existing } = await supabase
     .from('action_pages')
-    .select('slug')
+    .select('slug, kind')
     .eq('id', parsed.data.id)
     .eq('user_id', userId)
-    .maybeSingle<{ slug: string }>()
+    .maybeSingle<{ slug: string; kind: string }>()
 
   const update: Record<string, unknown> = {
     title: parsed.data.title,
@@ -149,6 +152,22 @@ export async function updateActionPage(formData: FormData): Promise<void> {
     redirect(
       `/dashboard/action-pages/${parsed.data.id}?error=update_failed&detail=${encodeURIComponent(error.message)}`,
     )
+  }
+
+  // Sync properties/products into business_items for RAG
+  if (parsed.data.config !== undefined && existing) {
+    const kind = existing.kind
+    if (kind === 'realestate') {
+      const realestateConfig = parseRealestateConfig(parsed.data.config)
+      syncRealestateToBusinessItems(supabase, userId, parsed.data.id, realestateConfig).catch((err) => {
+        console.error('[rag.sync] realestate sync failed', err)
+      })
+    } else if (kind === 'sales') {
+      const salesConfig = parseSalesConfig(parsed.data.config)
+      syncSalesToBusinessItems(supabase, userId, parsed.data.id, parsed.data.slug, salesConfig).catch((err) => {
+        console.error('[rag.sync] sales sync failed', err)
+      })
+    }
   }
 
   revalidatePath('/dashboard/action-pages')

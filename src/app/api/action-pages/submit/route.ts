@@ -36,7 +36,20 @@ function hashIp(ip: string | null): string | null {
 function nestedFromForm(fd: FormData): Record<string, unknown> {
   const out: Record<string, unknown> = {}
   for (const [key, value] of fd.entries()) {
-    if (key === 'slug' || key === 'p' || key === 'g' || key === 'e' || key === 't') continue
+    if (
+      key === 'slug' ||
+      key === 'p' ||
+      key === 'g' ||
+      key === 'e' ||
+      key === 't' ||
+      key === 'source_property_action_page_id' ||
+      key === 'source_property_title' ||
+      key === 'source_property_unit_id' ||
+      key === 'source_property_unit_title' ||
+      key === 'source_sales_page_id' ||
+      key === 'source_sales_page_title'
+    )
+      continue
     if (typeof value !== 'string') continue
     if (key.startsWith('data.')) {
       out[key.slice(5)] = value
@@ -52,6 +65,12 @@ export async function POST(req: NextRequest) {
   let slug = ''
   let payload: Record<string, unknown> = {}
   let signed: { p?: string; g?: string; e?: string; t?: string } = {}
+  let sourcePropertyActionPageId: string | null = null
+  let sourcePropertyTitle: string | null = null
+  let sourcePropertyUnitId: string | null = null
+  let sourcePropertyUnitTitle: string | null = null
+  let sourceSalesPageId: string | null = null
+  let sourceSalesPageTitle: string | null = null
 
   if (ct.includes('application/json')) {
     const body = (await req.json().catch(() => null)) as Record<string, unknown> | null
@@ -64,6 +83,30 @@ export async function POST(req: NextRequest) {
       e: body.e as string | undefined,
       t: body.t as string | undefined,
     }
+    sourcePropertyActionPageId =
+      typeof body.source_property_action_page_id === 'string'
+        ? body.source_property_action_page_id
+        : null
+    sourcePropertyTitle =
+      typeof body.source_property_title === 'string'
+        ? body.source_property_title
+        : null
+    sourcePropertyUnitId =
+      typeof body.source_property_unit_id === 'string'
+        ? body.source_property_unit_id
+        : null
+    sourcePropertyUnitTitle =
+      typeof body.source_property_unit_title === 'string'
+        ? body.source_property_unit_title
+        : null
+    sourceSalesPageId =
+      typeof body.source_sales_page_id === 'string'
+        ? body.source_sales_page_id
+        : null
+    sourceSalesPageTitle =
+      typeof body.source_sales_page_title === 'string'
+        ? body.source_sales_page_title
+        : null
   } else {
     const fd = await req.formData()
     slug = String(fd.get('slug') ?? '')
@@ -74,6 +117,18 @@ export async function POST(req: NextRequest) {
       t: (fd.get('t') as string) || undefined,
     }
     payload = nestedFromForm(fd)
+    const sp = fd.get('source_property_action_page_id')
+    if (typeof sp === 'string' && sp) sourcePropertyActionPageId = sp
+    const spt = fd.get('source_property_title')
+    if (typeof spt === 'string' && spt) sourcePropertyTitle = spt
+    const spuId = fd.get('source_property_unit_id')
+    if (typeof spuId === 'string' && spuId) sourcePropertyUnitId = spuId
+    const spuTitle = fd.get('source_property_unit_title')
+    if (typeof spuTitle === 'string' && spuTitle) sourcePropertyUnitTitle = spuTitle
+    const ss = fd.get('source_sales_page_id')
+    if (typeof ss === 'string' && ss) sourceSalesPageId = ss
+    const sst = fd.get('source_sales_page_title')
+    if (typeof sst === 'string' && sst) sourceSalesPageTitle = sst
   }
 
   if (!slug) return NextResponse.json({ error: 'missing_slug' }, { status: 400 })
@@ -194,6 +249,85 @@ export async function POST(req: NextRequest) {
   const marketingOptin = payload.marketing_optin === true || payload.marketing_optin === 'true'
   const reminderOptin  = payload.reminder_optin  === true || payload.reminder_optin  === 'true'
 
+  // Validate the source property reference: must be a published realestate
+  // page owned by the same user as the page being submitted. Silently drop on
+  // mismatch — never 400 on a soft attribution field.
+  let validatedSourceProperty: { id: string; title: string | null } | null = null
+  if (sourcePropertyActionPageId) {
+    const { data: prop } = await admin
+      .from('action_pages')
+      .select('id, title, kind, status, user_id')
+      .eq('id', sourcePropertyActionPageId)
+      .maybeSingle<{
+        id: string
+        title: string | null
+        kind: string
+        status: string
+        user_id: string
+      }>()
+    if (
+      prop &&
+      prop.kind === 'realestate' &&
+      prop.status === 'published' &&
+      prop.user_id === page.user_id
+    ) {
+      validatedSourceProperty = {
+        id: prop.id,
+        title: sourcePropertyTitle || prop.title,
+      }
+    }
+  }
+
+  // Validate the source sales reference: must be a published sales page owned
+  // by the same user. Silently drop on mismatch — never 400 on a soft
+  // attribution field.
+  let validatedSourceSales: { id: string; title: string | null } | null = null
+  if (sourceSalesPageId) {
+    const { data: sp } = await admin
+      .from('action_pages')
+      .select('id, title, kind, status, user_id')
+      .eq('id', sourceSalesPageId)
+      .maybeSingle<{
+        id: string
+        title: string | null
+        kind: string
+        status: string
+        user_id: string
+      }>()
+    if (
+      sp &&
+      sp.kind === 'sales' &&
+      sp.status === 'published' &&
+      sp.user_id === page.user_id
+    ) {
+      validatedSourceSales = {
+        id: sp.id,
+        title: sourceSalesPageTitle || sp.title,
+      }
+    }
+  }
+
+  const submissionMeta: Record<string, unknown> = {}
+  if (businessOrderId) submissionMeta.business_order_id = businessOrderId
+  if (validatedSourceProperty) {
+    submissionMeta.source_property_action_page_id = validatedSourceProperty.id
+    if (validatedSourceProperty.title) {
+      submissionMeta.source_property_title = validatedSourceProperty.title
+    }
+    if (sourcePropertyUnitId) {
+      submissionMeta.source_property_unit_id = sourcePropertyUnitId
+      if (sourcePropertyUnitTitle) {
+        submissionMeta.source_property_unit_title = sourcePropertyUnitTitle
+      }
+    }
+  }
+  if (validatedSourceSales) {
+    submissionMeta.source_sales_page_id = validatedSourceSales.id
+    if (validatedSourceSales.title) {
+      submissionMeta.source_sales_page_title = validatedSourceSales.title
+    }
+  }
+
   const { data: subInsert, error: subErr } = await admin
     .from('action_page_submissions')
     .insert({
@@ -206,7 +340,7 @@ export async function POST(req: NextRequest) {
       data: parsed.data,
       ip_hash: hashIp(ip),
       user_agent: ua,
-      meta: businessOrderId ? { business_order_id: businessOrderId } : null,
+      meta: Object.keys(submissionMeta).length > 0 ? submissionMeta : null,
       marketing_optin: marketingOptin,
       reminder_optin:  reminderOptin,
     })
@@ -535,12 +669,54 @@ async function createBusinessOrderFromCatalog(args: {
     .map((f) => {
       const key = typeof f.key === 'string' ? f.key : ''
       const label = typeof f.label === 'string' ? f.label : key
+      const type = typeof f.type === 'string' ? f.type : 'short_text'
       const value = key && customFields[key] ? customFields[key] : ''
-      return { key, label, value }
+      return { key, label, value, type }
     })
     .filter((f) => f.key && f.value)
+  const hasImageUpload = labeledCustomFields.some((f) => f.type === 'image')
   const meta: Record<string, unknown> = {}
   if (labeledCustomFields.length > 0) meta.custom_fields = labeledCustomFields
+
+  // Validate the chosen payment method: must belong to this user, be enabled,
+  // and be one of the page's attached methods. Soft-drop on mismatch — never
+  // 400 on a payment selection so the order still captures.
+  let validatedPaymentMethodId: string | null = null
+  let validatedPaymentMethodName: string | null = null
+  const rawPaymentMethodId = args.parsedData.payment_method_id
+  if (typeof rawPaymentMethodId === 'string' && rawPaymentMethodId) {
+    const allowedIds = Array.isArray(
+      (args.page.config as Record<string, unknown>).payment_method_ids,
+    )
+      ? ((args.page.config as Record<string, unknown>).payment_method_ids as unknown[]).filter(
+          (x): x is string => typeof x === 'string',
+        )
+      : []
+    if (allowedIds.includes(rawPaymentMethodId)) {
+      const { data: pm } = await args.admin
+        .from('payment_methods')
+        .select('id, name, enabled, user_id')
+        .eq('id', rawPaymentMethodId)
+        .eq('user_id', args.page.user_id)
+        .maybeSingle<{ id: string; name: string; enabled: boolean; user_id: string }>()
+      if (pm && pm.enabled) {
+        validatedPaymentMethodId = pm.id
+        validatedPaymentMethodName = pm.name
+      }
+    }
+  }
+
+  if (validatedPaymentMethodId) {
+    meta.payment_method_id = validatedPaymentMethodId
+    if (validatedPaymentMethodName) meta.payment_method_name = validatedPaymentMethodName
+  }
+  if (hasImageUpload) meta.payment_proof_uploaded = true
+
+  // If the buyer either picked a payment method or uploaded a proof image,
+  // mark the order as awaiting verification so it surfaces in the dashboard
+  // as something to confirm.
+  const paymentStatus =
+    validatedPaymentMethodId || hasImageUpload ? 'pending' : 'unpaid'
 
   const { data: orderId, error: orderErr } = await args.admin.rpc('create_catalog_order', {
     p_order: {
@@ -550,7 +726,7 @@ async function createBusinessOrderFromCatalog(args: {
       psid: args.psid,
       page_id: args.fbPageId,
       status: 'new',
-      payment_status: 'unpaid',
+      payment_status: paymentStatus,
       currency,
       subtotal_amount: subtotal,
       customer_name: customer.name ?? null,

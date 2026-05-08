@@ -6,6 +6,7 @@ export default function QualificationRenderer({
   page,
   claims,
   rawToken,
+  sourceContext,
 }: KindRendererProps) {
   const config = parseQualificationConfig(page.config ?? {})
   const deeplink =
@@ -28,6 +29,7 @@ export default function QualificationRenderer({
         slug={page.slug}
         config={config}
         deeplink={deeplink}
+        sourceContext={sourceContext ?? null}
       />
     </div>
   )

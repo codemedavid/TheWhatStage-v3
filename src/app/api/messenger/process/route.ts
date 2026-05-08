@@ -8,8 +8,12 @@ import {
   sendMessengerReaction,
   sendMessengerSenderAction,
 } from '@/lib/facebook/messenger'
-import { sendOutbound } from '@/lib/messenger/outbound'
+import { sendOutbound, sendProductRecommendation } from '@/lib/messenger/outbound'
+import { recommendProduct } from '@/lib/chatbot/recommend'
 import { handleCampaignSend } from '@/lib/messenger/campaignSend'
+import { handleReminderFire } from '@/lib/reminders/fire'
+import { extractReminder } from '@/lib/reminders/extract'
+import { resolveTopics, type PendingReminder } from '@/lib/reminders/resolve'
 import { deeplinkActionPageUrl } from '@/lib/action-pages/urls'
 import { fetchPublicCatalogProducts, type PublicProductCard } from '@/lib/business/public-dto'
 import type { MessengerGenericElement } from '@/lib/facebook/messenger'
@@ -23,6 +27,7 @@ import {
   type ActionPageBrief,
   type StageBrief,
 } from '@/lib/chatbot/classify'
+import { loadLeadContext } from '@/lib/chatbot/leadContext'
 import { interruptWorkflowRun } from '@/lib/workflow/trigger'
 
 export const runtime = 'nodejs'
@@ -147,6 +152,32 @@ async function claimJobs(admin: AdminClient, limit: number): Promise<JobRow[]> {
 
 async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
   // Branch on job kind before any inbound-specific logic.
+  if (job.kind === 'reminder_fire') {
+    try {
+      await handleReminderFire(admin, {
+        id: job.id,
+        payload: job.payload as { reminder_id: string } | null,
+      })
+    } catch (err) {
+      const attempts = job.attempts + 1
+      const failed = attempts >= MAX_ATTEMPTS
+      const msg = err instanceof Error ? err.message : String(err)
+      console.error('[messenger.worker] reminder job error', job.id, msg)
+      await admin
+        .from('messenger_jobs')
+        .update({
+          status: failed ? 'failed' : 'queued',
+          attempts,
+          last_error: msg.slice(0, 1000),
+          scheduled_at: new Date(Date.now() + Math.min(60_000 * attempts, 300_000)).toISOString(),
+          finished_at: failed ? new Date().toISOString() : null,
+          started_at: null,
+        })
+        .eq('id', job.id)
+    }
+    return
+  }
+
   if (job.kind === 'agent_campaign_send') {
     try {
       await handleCampaignSend(admin, {
@@ -221,10 +252,12 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
       return
     }
 
+    const inboundAt = new Date().toISOString()
     await admin
       .from('messenger_threads')
-      .update({ last_inbound_at: new Date().toISOString() })
+      .update({ last_inbound_at: inboundAt })
       .eq('id', thread.id)
+    thread.last_inbound_at = inboundAt
 
     // Auto-detect phone numbers and emails shared by the lead in their message.
     if (thread.lead_id) {
@@ -276,6 +309,22 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
           activeFunnel?.action_page_id ?? campaign?.goal_action_page_id ?? null,
         )
       : []
+
+    // Pre-rendered closed-world snapshot of the lead's bookings, orders,
+    // qualification, and form submissions. Empty string when nothing on file
+    // (or no lead yet) — appended to the LLM system prompt so the bot can
+    // answer "when is my booking?" without inventing details.
+    const leadContextBlock =
+      thread.auto_reply_enabled && thread.lead_id
+        ? await loadLeadContext(admin, thread.lead_id)
+            .then((s) => s.block)
+            .catch((e) => {
+              console.warn('[messenger.worker] loadLeadContext failed', {
+                err: e instanceof Error ? e.message : String(e),
+              })
+              return ''
+            })
+        : ''
 
     // Resolve !actionpage:slug mentions embedded in the chatbot instructions.
     // Referenced pages are added to sendablePages so the bot can send them,
@@ -392,7 +441,11 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
       let reply = ''
       let stageChange: Awaited<ReturnType<typeof answerWithClassification>>['stageChange'] = null
       let actionPageChoice: Awaited<ReturnType<typeof answerWithClassification>>['actionPage'] = null
+      let productRecommendation: Awaited<
+        ReturnType<typeof answerWithClassification>
+      >['productRecommendation'] = null
       let selectedMedia: SelectedMediaAsset[] = []
+      const activeCatalogPageId = sendablePages.find((p) => p.kind === 'catalog')?.id ?? null
       const conversationSummary = thread.conversation_summary ?? undefined
       const effectivePersona = resolvedInstructions !== undefined
         ? { ...(campaignPersona ?? {}), instructions: resolvedInstructions }
@@ -406,11 +459,19 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
             history,
             stages,
             currentStageId,
-            { rpcName: 'match_knowledge_hybrid_service', actionPages, campaignPersona: effectivePersona, conversationSummary },
+            {
+              rpcName: 'match_knowledge_hybrid_service',
+              actionPages,
+              campaignPersona: effectivePersona,
+              conversationSummary,
+              activeCatalogPageId,
+              leadContextBlock,
+            },
           )
           reply = r.text.trim()
           stageChange = r.stageChange
           actionPageChoice = r.actionPage
+          productRecommendation = r.productRecommendation
           selectedMedia = r.media
         } catch (e) {
           console.error('[messenger.worker] combined call failed, falling back', e)
@@ -421,6 +482,7 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
           rpcName: 'match_knowledge_hybrid_service',
           campaignPersona: effectivePersona,
           conversationSummary,
+          leadContextBlock,
         })
         reply = r.text.trim()
         selectedMedia = r.media
@@ -488,6 +550,23 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
         })
         .eq('id', thread.id)
 
+      // Fire-and-forget: detect customer follow-up requests in this inbound
+      // message AND auto-resolve any pending reminders that this message
+      // addresses. Runs after the bot reply so it never blocks the conversation.
+      if (thread.lead_id) {
+        const leadId = thread.lead_id
+        const inboundMsgId = job.inbound_msg_id
+        const userId = thread.user_id
+        const threadId = thread.id
+        void processReminderHooks(admin, {
+          userId,
+          leadId,
+          threadId,
+          inboundText: message,
+          inboundMsgId,
+        }).catch((e) => console.warn('[messenger.worker] reminder hooks failed', e))
+      }
+
       // When history is at the limit, older turns exist beyond the window.
       // Fire-and-forget a summary update so future replies retain that context.
       if (history.length >= HISTORY_LIMIT) {
@@ -505,8 +584,109 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
 
       await sendSelectedMedia(admin, { job, thread, pageToken, selectedMedia })
 
+      // Product recommendation — fired when the LLM picked recommend_product
+      // (customer explicitly asked OR operator rules triggered). Sends the
+      // matched product's image + a single-product button card. When it
+      // succeeds we skip the catalog carousel below to avoid double-sending.
+      let recommendationSent = false
+      if (productRecommendation && activeCatalogPageId) {
+        const catalogPage = sendablePages.find((p) => p.id === activeCatalogPageId)
+        if (catalogPage) {
+          try {
+            const match = await recommendProduct(
+              { client: admin },
+              {
+                userId: thread.user_id,
+                actionPageId: catalogPage.id,
+                query: productRecommendation.query,
+                filters: {
+                  priceMin: productRecommendation.filters.priceMin,
+                  priceMax: productRecommendation.filters.priceMax,
+                  tags: productRecommendation.filters.tags,
+                },
+                confidenceThreshold: productRecommendation.confidenceThreshold,
+              },
+            )
+            if (match.ok) {
+              const sendResult = await sendProductRecommendation({
+                admin,
+                thread: {
+                  id: thread.id,
+                  psid: thread.psid,
+                  last_inbound_at: thread.last_inbound_at,
+                },
+                pageToken,
+                facebookPageId: thread.page_id,
+                page: {
+                  id: catalogPage.id,
+                  slug: catalogPage.slug,
+                  signing_secret: catalogPage.signing_secret,
+                },
+                product: {
+                  id: match.product.id,
+                  slug: match.product.slug,
+                  title: match.product.title,
+                  price_label: match.product.price_label,
+                  cover_image_url: match.product.cover_image_url,
+                },
+                confidence: match.confidence,
+              })
+              if (sendResult.sent) {
+                recommendationSent = true
+                if (sendResult.messageIds.length > 0) {
+                  await admin
+                    .from('messenger_jobs')
+                    .update({ outbound_button_fb_id: sendResult.messageIds.at(-1) ?? null })
+                    .eq('id', job.id)
+                }
+                const persistedBody =
+                  `Recommended: ${match.product.title} — ${match.product.price_label}\n` +
+                  `View → ${sendResult.deeplinkUrl}`
+                const previewText = `Recommended · ${match.product.title}`
+                await admin.from('messenger_messages').insert({
+                  thread_id: thread.id,
+                  user_id: thread.user_id,
+                  direction: 'outbound',
+                  sender: 'bot',
+                  fb_message_id: sendResult.messageIds.at(-1) ?? null,
+                  body: persistedBody,
+                  attachments: {
+                    kind: 'product_recommendation',
+                    product_id: match.product.id,
+                    action_page_id: catalogPage.id,
+                    confidence: match.confidence,
+                    image_sent: sendResult.imageSent,
+                    deeplink_url: sendResult.deeplinkUrl,
+                  },
+                })
+                await admin
+                  .from('messenger_threads')
+                  .update({
+                    last_message_at: new Date().toISOString(),
+                    last_message_preview: previewText.slice(0, 200),
+                  })
+                  .eq('id', thread.id)
+              } else {
+                console.warn('[messenger.worker] product recommendation send blocked', {
+                  threadId: thread.id,
+                  reason: sendResult.reason,
+                })
+              }
+            } else {
+              console.log('[messenger.worker] recommendProduct declined', {
+                threadId: thread.id,
+                reason: match.reason,
+                bestConfidence: 'bestConfidence' in match ? match.bestConfidence : undefined,
+              })
+            }
+          } catch (e) {
+            console.error('[messenger.worker] product recommendation flow failed', e)
+          }
+        }
+      }
+
       // Send action page as a separate button message after the text reply.
-      if (actionPageChoice) {
+      if (actionPageChoice && !recommendationSent) {
         const chosen = sendablePages.find((p) => p.id === actionPageChoice.action_page_id)
         if (chosen) {
           try {
@@ -1190,4 +1370,55 @@ async function sendSelectedMedia(
       })
     }
   }
+}
+
+async function processReminderHooks(
+  admin: AdminClient,
+  args: {
+    userId: string
+    leadId: string
+    threadId: string
+    inboundText: string
+    inboundMsgId: string | null
+  },
+): Promise<void> {
+  const { userId, leadId, threadId, inboundText, inboundMsgId } = args
+
+  // 1. Resolve any pending reminders this message addresses.
+  const { data: pending } = await admin
+    .from('lead_reminders')
+    .select('id, topic')
+    .eq('lead_id', leadId)
+    .eq('status', 'pending')
+    .limit(20)
+
+  const pendingList = (pending ?? []) as PendingReminder[]
+  if (pendingList.length > 0) {
+    const resolvedIds = await resolveTopics(inboundText, pendingList)
+    if (resolvedIds.length > 0) {
+      await admin
+        .from('lead_reminders')
+        .update({
+          status: 'resolved',
+          resolved_at: new Date().toISOString(),
+          resolved_reason: 'topic_addressed',
+        })
+        .in('id', resolvedIds)
+    }
+  }
+
+  // 2. Detect a new follow-up request in this inbound message.
+  const extracted = await extractReminder(inboundText)
+  if (!extracted) return
+
+  await admin.from('lead_reminders').insert({
+    user_id: userId,
+    lead_id: leadId,
+    thread_id: threadId,
+    scheduled_at: extracted.scheduled_at,
+    topic: extracted.topic,
+    source_message_id: inboundMsgId,
+    auto_send: false,
+    status: 'pending',
+  })
 }

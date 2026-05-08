@@ -1,6 +1,9 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState, useTransition } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react'
+import type { TemplateButton } from '@/lib/messenger-templates/types'
+import { renderTemplate } from '@/lib/messenger-templates/types'
+import type { VariableMap, VariableRule } from '@/lib/messenger-templates/render'
 
 /* ── design tokens (matches the rest of the dashboard) ── */
 const S = {
@@ -35,8 +38,27 @@ interface DraftRow {
   user_edited?: boolean
 }
 
+interface ApprovedTemplate {
+  id: string
+  display_name: string
+  name: string
+  language: string
+  body_text: string
+  variable_count: number
+  buttons: TemplateButton[]
+}
+
+interface ActionPageOption {
+  id: string
+  title: string
+  slug: string
+  kind: string
+}
+
 interface AgentClientProps {
   stages: Stage[]
+  templates: ApprovedTemplate[]
+  actionPages: ActionPageOption[]
 }
 
 interface Campaign {
@@ -110,9 +132,22 @@ function fmtDate(iso: string) {
 }
 
 /* ── main component ── */
-export function AgentClient({ stages }: AgentClientProps) {
+export function AgentClient({ stages, templates, actionPages }: AgentClientProps) {
   const [tab, setTab] = useState<'new' | 'history'>('new')
   const [, startTransition] = useTransition()
+
+  // ── send mode ──
+  const [sendMode, setSendMode] = useState<'per_lead_ai' | 'shared_template'>('shared_template')
+  const [templateId, setTemplateId] = useState<string>(templates[0]?.id ?? '')
+  const [variableRules, setVariableRules] = useState<VariableMap>({})
+  const [stageName, setStageName] = useState<string>('')
+  const [lastActiveDays, setLastActiveDays] = useState<string>('')
+  const [actionPageId, setActionPageId] = useState<string>('')
+
+  const selectedTemplate = useMemo(
+    () => templates.find((t) => t.id === templateId) ?? null,
+    [templates, templateId],
+  )
 
   // ── new campaign state ──
   const [command, setCommand]         = useState('')
@@ -176,7 +211,9 @@ export function AgentClient({ stages }: AgentClientProps) {
 
   /* ── start preview ── */
   const startPreview = useCallback(() => {
-    if (!command.trim() || phase === 'loading') return
+    if (phase === 'loading') return
+    if (sendMode === 'per_lead_ai' && !command.trim()) return
+    if (sendMode === 'shared_template' && !templateId) return
     esRef.current?.close()
 
     setPhase('loading')
@@ -190,10 +227,27 @@ export function AgentClient({ stages }: AgentClientProps) {
     const ctrl = new AbortController()
     abortRef.current = ctrl
 
+    const previewBody: Record<string, unknown> =
+      sendMode === 'shared_template'
+        ? {
+            mode: 'shared_template',
+            templateId,
+            templateVariables: variableRules,
+            attachedActionPageId: actionPageId || null,
+            stageName: stageName.trim() || null,
+            lastActiveWithinDays: lastActiveDays ? Number(lastActiveDays) : null,
+            // command_text is still persisted on the campaign row for history;
+            // synthesize a human-readable label from the chosen template.
+            command: selectedTemplate
+              ? `[Template] ${selectedTemplate.display_name}`
+              : '[Template]',
+          }
+        : { command }
+
     fetch('/api/agent/preview', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ command }),
+      body: JSON.stringify(previewBody),
       signal: ctrl.signal,
     }).then(async (res) => {
       if (!res.ok || !res.body) {
@@ -276,7 +330,17 @@ export function AgentClient({ stages }: AgentClientProps) {
         setPhase('idle')
       }
     })
-  }, [command, phase])
+  }, [
+    command,
+    phase,
+    sendMode,
+    templateId,
+    variableRules,
+    actionPageId,
+    stageName,
+    lastActiveDays,
+    selectedTemplate,
+  ])
 
   /* ── send campaign ── */
   const sendCampaign = useCallback(async () => {
@@ -394,6 +458,169 @@ export function AgentClient({ stages }: AgentClientProps) {
 
         {tab === 'new' && (<>
 
+        {/* ── Send-mode toggle ── */}
+        <div style={{ display:'flex', gap:4, padding:3, background:S.surface2, borderRadius:10, border:`1px solid ${S.border}`, alignSelf:'flex-start' }}>
+          {([
+            ['shared_template', 'Shared template'],
+            ['per_lead_ai', 'AI per lead'],
+          ] as const).map(([m, label]) => (
+            <button
+              key={m}
+              onClick={() => setSendMode(m)}
+              style={{
+                padding:'6px 14px', borderRadius:7, border:'none', fontSize:13,
+                fontWeight: sendMode === m ? 500 : 400,
+                background: sendMode === m ? S.surface : 'transparent',
+                color: sendMode === m ? S.ink : S.ink3,
+                cursor:'pointer',
+                boxShadow: sendMode === m ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {/* ── Shared-template configurator ── */}
+        {sendMode === 'shared_template' && (
+          <div style={{ display:'flex', flexDirection:'column', gap:14, padding:'16px 18px', background:S.surface, border:`1px solid ${S.border}`, borderRadius:12 }}>
+            {templates.length === 0 ? (
+              <p style={{ fontSize:13, color:S.ink3, margin:0 }}>
+                No approved templates yet. Submit one for review at <a href="/dashboard/templates" style={{ color: S.accent }}>Templates</a>.
+              </p>
+            ) : (
+              <>
+                <label style={{ display:'flex', flexDirection:'column', gap:6 }}>
+                  <span style={{ fontSize:12, fontWeight:500, color:S.ink2 }}>Template</span>
+                  <select
+                    value={templateId}
+                    onChange={(e) => {
+                      setTemplateId(e.target.value)
+                      setVariableRules({})
+                    }}
+                    style={{ padding:'8px 10px', borderRadius:6, border:`1px solid ${S.border}`, fontSize:13, background:S.surface, color:S.ink }}
+                  >
+                    {templates.map((t) => (
+                      <option key={t.id} value={t.id}>{t.display_name}</option>
+                    ))}
+                  </select>
+                </label>
+
+                {selectedTemplate && selectedTemplate.variable_count > 0 && (
+                  <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+                    <span style={{ fontSize:12, fontWeight:500, color:S.ink2 }}>Variables</span>
+                    {Array.from({ length: selectedTemplate.variable_count }).map((_, i) => {
+                      const idx = String(i + 1)
+                      const rule: VariableRule = variableRules[idx] ?? { kind: 'static', text: '' }
+                      return (
+                        <div key={idx} style={{ display:'flex', gap:6, alignItems:'center' }}>
+                          <span style={{ fontFamily:S.mono, fontSize:12, color:S.ink3, width:36 }}>{`{{${idx}}}`}</span>
+                          <select
+                            value={rule.kind}
+                            onChange={(e) => {
+                              const kind = e.target.value as VariableRule['kind']
+                              setVariableRules({
+                                ...variableRules,
+                                [idx]: kind === 'static'
+                                  ? { kind: 'static', text: '' }
+                                  : { kind: 'lead_field', field: 'name' },
+                              })
+                            }}
+                            style={{ padding:'6px 8px', borderRadius:6, border:`1px solid ${S.border}`, fontSize:12, background:S.surface, color:S.ink }}
+                          >
+                            <option value="static">Same text</option>
+                            <option value="lead_field">Lead field</option>
+                          </select>
+                          {rule.kind === 'static' ? (
+                            <input
+                              type="text"
+                              value={rule.text}
+                              onChange={(e) => setVariableRules({
+                                ...variableRules,
+                                [idx]: { kind: 'static', text: e.target.value },
+                              })}
+                              placeholder={`Value for {{${idx}}}`}
+                              style={{ flex:1, padding:'6px 10px', borderRadius:6, border:`1px solid ${S.border}`, fontSize:13, background:S.surface, color:S.ink }}
+                            />
+                          ) : (
+                            <select
+                              value={rule.field}
+                              onChange={(e) => setVariableRules({
+                                ...variableRules,
+                                [idx]: { kind: 'lead_field', field: e.target.value },
+                              })}
+                              style={{ flex:1, padding:'6px 10px', borderRadius:6, border:`1px solid ${S.border}`, fontSize:13, background:S.surface, color:S.ink }}
+                            >
+                              <option value="name">name</option>
+                            </select>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+
+                {selectedTemplate && (
+                  <div style={{ background:S.surface2, padding:'10px 12px', borderRadius:8, border:`1px solid ${S.border}`, fontSize:13, color:S.ink2, lineHeight:1.5, whiteSpace:'pre-wrap' }}>
+                    {renderTemplate(
+                      selectedTemplate.body_text,
+                      Array.from({ length: selectedTemplate.variable_count }).map((_, i) => {
+                        const r = variableRules[String(i + 1)]
+                        if (!r) return `{{${i + 1}}}`
+                        if (r.kind === 'static') return r.text || `{{${i + 1}}}`
+                        return `[lead.${r.field}]`
+                      }),
+                    )}
+                  </div>
+                )}
+
+                {selectedTemplate && selectedTemplate.buttons.some((b) => b.type === 'url') && actionPages.length > 0 && (
+                  <label style={{ display:'flex', flexDirection:'column', gap:6 }}>
+                    <span style={{ fontSize:12, fontWeight:500, color:S.ink2 }}>Attach action page (overrides URL button)</span>
+                    <select
+                      value={actionPageId}
+                      onChange={(e) => setActionPageId(e.target.value)}
+                      style={{ padding:'8px 10px', borderRadius:6, border:`1px solid ${S.border}`, fontSize:13, background:S.surface, color:S.ink }}
+                    >
+                      <option value="">— none —</option>
+                      {actionPages.map((p) => (
+                        <option key={p.id} value={p.id}>{p.title}</option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+
+                <div style={{ display:'flex', gap:10 }}>
+                  <label style={{ display:'flex', flexDirection:'column', gap:6, flex:1 }}>
+                    <span style={{ fontSize:12, fontWeight:500, color:S.ink2 }}>Audience: stage</span>
+                    <select
+                      value={stageName}
+                      onChange={(e) => setStageName(e.target.value)}
+                      style={{ padding:'8px 10px', borderRadius:6, border:`1px solid ${S.border}`, fontSize:13, background:S.surface, color:S.ink }}
+                    >
+                      <option value="">— any stage —</option>
+                      {stages.map((s) => (
+                        <option key={s.id} value={s.name}>{s.name}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label style={{ display:'flex', flexDirection:'column', gap:6, flex:1 }}>
+                    <span style={{ fontSize:12, fontWeight:500, color:S.ink2 }}>Active within (days)</span>
+                    <input
+                      type="number"
+                      min={1}
+                      value={lastActiveDays}
+                      onChange={(e) => setLastActiveDays(e.target.value)}
+                      placeholder="any"
+                      style={{ padding:'8px 10px', borderRadius:6, border:`1px solid ${S.border}`, fontSize:13, background:S.surface, color:S.ink }}
+                    />
+                  </label>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
         {/* ── Stage chips ── */}
         {stages.length > 0 && (
           <div style={{ display:'flex', flexWrap:'wrap', gap:6 }}>
@@ -411,23 +638,25 @@ export function AgentClient({ stages }: AgentClientProps) {
 
         {/* ── Command Bar ── */}
         <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
-          <textarea
-            value={command}
-            onChange={(e) => setCommand(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) startPreview() }}
-            placeholder='e.g. "Follow up with all my Interested leads — remind them about our limited-time offer"'
-            rows={3}
-            style={{
-              width:'100%', padding:'12px 14px', borderRadius:12,
-              border:`1px solid ${S.border}`, fontFamily:'inherit', fontSize:14,
-              color:S.ink, background:S.surface, resize:'vertical', outline:'none',
-              lineHeight:1.5, boxSizing:'border-box',
-            }}
-            disabled={phase === 'sending'}
-          />
+          {sendMode === 'per_lead_ai' && (
+            <textarea
+              value={command}
+              onChange={(e) => setCommand(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) startPreview() }}
+              placeholder='e.g. "Follow up with all my Interested leads — remind them about our limited-time offer"'
+              rows={3}
+              style={{
+                width:'100%', padding:'12px 14px', borderRadius:12,
+                border:`1px solid ${S.border}`, fontFamily:'inherit', fontSize:14,
+                color:S.ink, background:S.surface, resize:'vertical', outline:'none',
+                lineHeight:1.5, boxSizing:'border-box',
+              }}
+              disabled={phase === 'sending'}
+            />
+          )}
           <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:12, flexWrap:'wrap' }}>
             <span style={{ fontSize:12, color:S.ink4 }}>
-              Cmd+Enter to preview · Up to 200 leads
+              {sendMode === 'per_lead_ai' ? 'Cmd+Enter to preview · ' : ''}Up to 200 leads
             </span>
             <div style={{ display:'flex', gap:8 }}>
               {phase !== 'idle' && phase !== 'done' && (
@@ -440,12 +669,25 @@ export function AgentClient({ stages }: AgentClientProps) {
               )}
               <button
                 onClick={startPreview}
-                disabled={!command.trim() || phase === 'loading' || phase === 'sending'}
+                disabled={
+                  (sendMode === 'per_lead_ai' && !command.trim())
+                  || (sendMode === 'shared_template' && !templateId)
+                  || phase === 'loading' || phase === 'sending'
+                }
                 style={{
                   padding:'8px 18px', borderRadius:8, border:'none',
-                  background: (!command.trim() || phase === 'loading') ? S.surface2 : S.accent,
-                  color: (!command.trim() || phase === 'loading') ? S.ink4 : 'white',
-                  fontSize:13, fontWeight:500, cursor: !command.trim() ? 'default' : 'pointer',
+                  background: (
+                    (sendMode === 'per_lead_ai' ? !command.trim() : !templateId)
+                    || phase === 'loading'
+                  ) ? S.surface2 : S.accent,
+                  color: (
+                    (sendMode === 'per_lead_ai' ? !command.trim() : !templateId)
+                    || phase === 'loading'
+                  ) ? S.ink4 : 'white',
+                  fontSize:13, fontWeight:500,
+                  cursor:
+                    (sendMode === 'per_lead_ai' ? !command.trim() : !templateId)
+                      ? 'default' : 'pointer',
                 }}
               >
                 {phase === 'loading' ? 'Generating…' : 'Preview'}

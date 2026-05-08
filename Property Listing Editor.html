@@ -1,0 +1,579 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>WhatStage — Property Listing Editor</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Instrument+Serif&family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap');
+:root {
+  --bg:#FAFAF7; --surface:#FFFFFF; --surface-2:#F6F5F1; --surface-3:#EFEEE8;
+  --border:#E8E6DE; --border-strong:#D9D6CC;
+  --ink:#1A1915; --ink-2:#3F3D36; --ink-3:#6B6960; --ink-4:#9C9A90;
+  --accent:#1F7A4D; --accent-2:#166040; --accent-soft:#E8F2EC; --accent-softer:#F2F8F4; --accent-ink:#0F4A30;
+  --danger:#B23A2B; --danger-soft:#FBEBE7;
+  --font-sans:'Geist',-apple-system,BlinkMacSystemFont,sans-serif;
+  --font-mono:'Geist Mono',ui-monospace,monospace;
+  --font-serif:'Instrument Serif',serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);font-family:var(--font-sans);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
+button{font-family:inherit;font-size:inherit;cursor:pointer}
+input,textarea,select{font-family:inherit}
+/* === Property Listing Editor === */
+.ple { background: var(--bg); min-height: 100vh; }
+.ple-topbar {
+  position: sticky; top: 0; z-index: 30;
+  background: rgba(250,250,247,0.92);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border);
+  padding: 14px 28px;
+  display: grid; grid-template-columns: auto 1fr auto; gap: 18px; align-items: center;
+}
+.ple-back { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--ink-3); text-decoration: none; padding: 6px 10px; border-radius: 8px; }
+.ple-back:hover { color: var(--ink); background: var(--surface-2); }
+.ple-crumbs { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.ple-crumbs a { color: var(--ink-3); text-decoration: none; }
+.ple-crumbs span { color: var(--ink-4); }
+.ple-crumbs strong { color: var(--ink); font-weight: 600; }
+.ple-pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.06em;
+  background: var(--accent-soft); color: var(--accent-ink);
+  padding: 4px 10px; border-radius: 999px; text-transform: uppercase;
+}
+.ple-pill.draft { background: var(--surface-3); color: var(--ink-3); }
+.ple-pill .dot { width: 6px; height: 6px; border-radius: 999px; background: currentColor; }
+.ple-tools { display: flex; gap: 8px; align-items: center; }
+.ple-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--surface); border: 1px solid var(--border);
+  color: var(--ink-2);
+  padding: 7px 12px; border-radius: 8px;
+  font-size: 12.5px; font-weight: 500; cursor: pointer;
+}
+.ple-btn:hover { border-color: var(--border-strong); color: var(--ink); }
+.ple-btn-primary { background: var(--ink); border-color: var(--ink); color: var(--bg); }
+.ple-btn-primary:hover { background: #000; }
+
+/* HERO — title + url + status */
+.ple-hero {
+  max-width: 1240px; margin: 0 auto;
+  padding: 28px 28px 0;
+  display: grid; grid-template-columns: 1fr auto; gap: 24px; align-items: end;
+}
+.ple-hero-eye { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-4); margin-bottom: 8px; }
+.ple-hero-title-input {
+  font-family: var(--font-serif);
+  font-size: 48px; font-weight: 400;
+  letter-spacing: -0.02em;
+  border: none; background: transparent;
+  width: 100%; padding: 0; outline: none;
+  color: var(--ink);
+}
+.ple-hero-title-input::placeholder { color: var(--ink-4); font-style: italic; }
+.ple-hero-sub { font-size: 14px; color: var(--ink-3); margin-top: 6px; max-width: 600px; }
+
+.ple-url-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex; gap: 10px; align-items: center;
+  font-family: var(--font-mono); font-size: 12px;
+  color: var(--ink-3);
+}
+.ple-url-card a { color: var(--accent-ink); text-decoration: none; display: inline-flex; align-items: center; gap: 4px; }
+
+/* MAIN GRID */
+.ple-grid {
+  max-width: 1240px; margin: 0 auto;
+  padding: 28px 28px 64px;
+  display: grid; grid-template-columns: 1fr 340px;
+  gap: 24px;
+  align-items: start;
+}
+
+/* SECTIONS */
+.ple-section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  margin-bottom: 16px;
+  overflow: hidden;
+}
+.ple-sec-head {
+  display: grid; grid-template-columns: 36px 1fr auto;
+  gap: 14px; align-items: center;
+  padding: 18px 22px;
+  border-bottom: 1px solid var(--border);
+}
+.ple-sec-icon {
+  width: 36px; height: 36px; border-radius: 10px;
+  background: var(--surface-2); border: 1px solid var(--border);
+  display: grid; place-items: center;
+  font-family: var(--font-serif); font-size: 18px;
+  color: var(--accent-ink);
+}
+.ple-sec-meta h3 { margin: 0; font-size: 15px; font-weight: 600; color: var(--ink); }
+.ple-sec-meta p { margin: 2px 0 0; font-size: 12.5px; color: var(--ink-3); }
+.ple-sec-num { font-family: var(--font-mono); font-size: 11px; color: var(--ink-4); letter-spacing: 0.08em; }
+.ple-sec-body { padding: 22px; }
+
+/* FIELD GRID */
+.ple-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px; }
+.ple-row.cols-3 { grid-template-columns: 1fr 1fr 1fr; }
+.ple-row:last-child { margin-bottom: 0; }
+.ple-field { display: flex; flex-direction: column; gap: 6px; }
+.ple-field-full { grid-column: 1 / -1; }
+.ple-label { font-size: 12.5px; font-weight: 500; color: var(--ink-2); }
+.ple-help { font-size: 11.5px; color: var(--ink-4); margin-top: -2px; }
+.ple-input, .ple-select, .ple-textarea {
+  height: 38px;
+  padding: 0 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-family: inherit; font-size: 13.5px;
+  color: var(--ink);
+  width: 100%; box-sizing: border-box;
+}
+.ple-textarea { height: 132px; padding: 10px 12px; resize: vertical; line-height: 1.5; font-family: inherit; }
+.ple-input:focus, .ple-select:focus, .ple-textarea:focus {
+  outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-softer);
+}
+.ple-input-with-suffix { display: flex; align-items: stretch; }
+.ple-input-with-suffix .ple-input { border-top-right-radius: 0; border-bottom-right-radius: 0; border-right: none; }
+.ple-suffix {
+  display: flex; align-items: center; padding: 0 12px;
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: 0 8px 8px 0;
+  font-family: var(--font-mono); font-size: 12px; color: var(--ink-3);
+}
+
+/* GALLERY UPLOADER */
+.ple-gallery-row { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 12px; }
+.ple-gallery-tile {
+  aspect-ratio: 1;
+  border-radius: 10px;
+  border: 1px dashed var(--border-strong);
+  background: var(--surface-2);
+  display: grid; place-items: center;
+  color: var(--ink-3);
+  position: relative; overflow: hidden;
+  cursor: pointer; transition: all 160ms;
+}
+.ple-gallery-tile:hover { border-color: var(--accent); background: var(--accent-softer); color: var(--accent-ink); }
+.ple-gallery-tile.has-img { background: linear-gradient(135deg, #1B3A8A, #2563EB); border-style: solid; }
+.ple-gallery-tile.cover { border: 2px solid var(--accent); background: linear-gradient(135deg, #C68A2C, #E5A654); }
+.ple-gallery-tile .glyph { font-family: var(--font-serif); font-size: 36px; color: rgba(255,255,255,0.92); }
+.ple-gallery-tile .ple-gal-cover-tag {
+  position: absolute; top: 8px; left: 8px;
+  font-family: var(--font-mono); font-size: 9.5px; letter-spacing: 0.08em;
+  background: rgba(0,0,0,0.5); color: white; padding: 3px 6px; border-radius: 4px;
+}
+.ple-gallery-tile.add { display: flex; flex-direction: column; gap: 6px; font-size: 12px; font-weight: 500; }
+.ple-gallery-tile.add .plus { font-size: 24px; line-height: 1; }
+.ple-gallery-foot {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-top: 10px;
+  font-size: 12px; color: var(--ink-4);
+}
+.ple-gallery-foot strong { color: var(--ink-2); }
+
+/* AMENITIES PILLS */
+.ple-amen { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.ple-amen-pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--accent-soft); color: var(--accent-ink);
+  padding: 5px 10px; border-radius: 999px;
+  font-size: 12px; font-weight: 500;
+}
+.ple-amen-pill .x { color: var(--accent-ink); cursor: pointer; opacity: 0.6; }
+.ple-amen-pill .x:hover { opacity: 1; }
+
+/* CUSTOM FIELD ROWS */
+.ple-cf {
+  display: grid; grid-template-columns: 1fr 1fr 32px;
+  gap: 8px; align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+.ple-cf:last-child { border-bottom: none; }
+.ple-cf-x {
+  width: 28px; height: 28px; border: none;
+  background: transparent; color: var(--ink-4);
+  border-radius: 6px; cursor: pointer;
+}
+.ple-cf-x:hover { background: var(--danger-soft); color: var(--danger); }
+
+/* FINANCING ROWS */
+.ple-fin-row {
+  display: grid; grid-template-columns: 1fr 1fr 1fr 32px;
+  gap: 8px; align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+.ple-fin-row:last-child { border-bottom: none; }
+
+/* ADD BUTTON */
+.ple-add {
+  margin-top: 12px;
+  display: inline-flex; align-items: center; gap: 6px;
+  background: transparent; border: 1px dashed var(--border-strong);
+  color: var(--ink-2);
+  padding: 8px 14px; border-radius: 8px;
+  font-size: 12.5px; font-weight: 500; cursor: pointer;
+}
+.ple-add:hover { border-color: var(--accent); color: var(--accent-ink); background: var(--accent-softer); }
+
+/* SIDEBAR */
+.ple-side { position: sticky; top: 80px; display: flex; flex-direction: column; gap: 16px; }
+.ple-side-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 18px 20px;
+}
+.ple-side-card h4 {
+  font-size: 12px; font-weight: 600; margin: 0 0 10px;
+  color: var(--ink-3); letter-spacing: 0.04em; text-transform: uppercase;
+  font-family: var(--font-mono);
+}
+.ple-progress { height: 6px; background: var(--surface-3); border-radius: 999px; overflow: hidden; margin-bottom: 8px; }
+.ple-progress-bar { height: 100%; background: linear-gradient(90deg, var(--accent), #2EA86A); border-radius: 999px; }
+.ple-progress-meta { display: flex; justify-content: space-between; font-size: 12px; color: var(--ink-3); }
+
+.ple-checklist { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }
+.ple-checklist li { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; color: var(--ink-2); }
+.ple-checklist .ok { color: var(--accent-ink); }
+.ple-checklist .pending { color: var(--ink-4); }
+
+.ple-preview {
+  border-radius: 12px;
+  background: linear-gradient(135deg, #1B3A8A, #E5A654);
+  padding: 16px;
+  color: white;
+  position: relative;
+  overflow: hidden;
+}
+.ple-preview-tag { font-family: var(--font-mono); font-size: 9.5px; letter-spacing: 0.08em; background: rgba(0,0,0,0.4); padding: 3px 7px; border-radius: 4px; display: inline-block; margin-bottom: 8px; }
+.ple-preview-title { font-family: var(--font-serif); font-size: 22px; line-height: 1.1; margin-bottom: 4px; }
+.ple-preview-meta { font-size: 12px; opacity: 0.85; }
+.ple-preview-price { font-family: var(--font-serif); font-size: 28px; margin-top: 14px; }
+.ple-preview-price small { font-size: 12px; opacity: 0.8; font-family: var(--font-sans); }
+
+.ple-danger {
+  background: var(--danger-soft);
+  border: 1px solid color-mix(in oklab, var(--danger) 30%, transparent);
+  border-radius: 12px;
+  padding: 16px 18px;
+}
+.ple-danger h4 { color: var(--danger); margin: 0 0 4px; font-family: inherit; font-size: 13px; text-transform: none; letter-spacing: 0; }
+.ple-danger p { margin: 0 0 12px; font-size: 12.5px; color: var(--ink-2); }
+.ple-danger button {
+  background: white; border: 1px solid var(--danger); color: var(--danger);
+  padding: 7px 14px; border-radius: 8px; font-size: 12.5px; font-weight: 600; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.ple-danger button:hover { background: var(--danger); color: white; }
+
+@media (max-width: 1020px) {
+  .ple-grid { grid-template-columns: 1fr; }
+  .ple-side { position: static; }
+  .ple-hero { grid-template-columns: 1fr; }
+  .ple-row, .ple-row.cols-3 { grid-template-columns: 1fr; }
+  .ple-gallery-row { grid-template-columns: 1fr 1fr; }
+}
+</style>
+</head>
+<body class="ple">
+
+<header class="ple-topbar">
+  <a href="Action Pages.html" class="ple-back">← Back</a>
+  <div class="ple-crumbs">
+    <a href="Action Pages.html">Action Pages</a>
+    <span>/</span>
+    <a href="#">Property listings</a>
+    <span>/</span>
+    <strong>Edit property</strong>
+  </div>
+  <div class="ple-tools">
+    <span class="ple-pill draft"><span class="dot"></span> Draft</span>
+    <button class="ple-btn">↗ View</button>
+    <button class="ple-btn">⌕ Submissions</button>
+    <button class="ple-btn">⚙ Settings</button>
+    <button class="ple-btn ple-btn-primary">✓ Save</button>
+  </div>
+</header>
+
+<section class="ple-hero">
+  <div>
+    <div class="ple-hero-eye">Property · For sale</div>
+    <input class="ple-hero-title-input" placeholder="3-BR Townhouse in Quezon City" value="3-BR Townhouse in Quezon City" />
+    <p class="ple-hero-sub">Add photos, set the price, and describe what makes this place special — buyers see this layout on the public listing page.</p>
+  </div>
+  <div class="ple-url-card">
+    <span>whatstage.com</span>
+    <a href="#">/a/property-listings-uo9qvp ↗</a>
+  </div>
+</section>
+
+<div class="ple-grid">
+  <main>
+
+    <!-- GALLERY (moved up: hero of the form) -->
+    <div class="ple-section">
+      <div class="ple-sec-head">
+        <div class="ple-sec-icon">▤</div>
+        <div class="ple-sec-meta">
+          <h3>Photos</h3>
+          <p>Drag the primary image to use it as the cover. JPEG, PNG, or WebP up to 5 MB.</p>
+        </div>
+        <div class="ple-sec-num">01 / 06</div>
+      </div>
+      <div class="ple-sec-body">
+        <div class="ple-gallery-row">
+          <div class="ple-gallery-tile cover"><span class="glyph">⌂</span><span class="ple-gal-cover-tag">COVER</span></div>
+          <div class="ple-gallery-tile has-img"><span class="glyph">▦</span></div>
+          <div class="ple-gallery-tile has-img" style="background: linear-gradient(135deg, #1F7A4D, #2EA86A)"><span class="glyph">◧</span></div>
+          <div class="ple-gallery-tile add"><span class="plus">+</span><span>Upload images</span></div>
+        </div>
+        <div class="ple-gallery-foot">
+          <span><strong>3</strong> photos · drag to reorder</span>
+          <span>5 MB max each</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- STATUS & PRICE -->
+    <div class="ple-section">
+      <div class="ple-sec-head">
+        <div class="ple-sec-icon">$</div>
+        <div class="ple-sec-meta">
+          <h3>Status &amp; price</h3>
+          <p>Shown on the property card and detail page.</p>
+        </div>
+        <div class="ple-sec-num">02 / 06</div>
+      </div>
+      <div class="ple-sec-body">
+        <div class="ple-row cols-3">
+          <div class="ple-field">
+            <label class="ple-label">Status</label>
+            <select class="ple-select"><option>For sale</option><option>For rent</option><option>Sold</option><option>Reserved</option></select>
+          </div>
+          <div class="ple-field">
+            <label class="ple-label">Price period</label>
+            <select class="ple-select"><option>One-time</option><option>Monthly</option><option>Yearly</option></select>
+          </div>
+          <div class="ple-field">
+            <label class="ple-label">Currency</label>
+            <select class="ple-select"><option>PHP ₱</option><option>USD $</option><option>EUR €</option></select>
+          </div>
+        </div>
+        <div class="ple-row">
+          <div class="ple-field">
+            <label class="ple-label">Price amount</label>
+            <div class="ple-input-with-suffix">
+              <input class="ple-input" placeholder="0" value="6,800,000" />
+              <span class="ple-suffix">PHP</span>
+            </div>
+            <span class="ple-help">Numbers only. Formatting added automatically.</span>
+          </div>
+          <div class="ple-field">
+            <label class="ple-label">Display label</label>
+            <input class="ple-input" placeholder="₱6.8M or “Price upon request”" value="₱6.8M" />
+            <span class="ple-help">What buyers actually see — leave blank to use the formatted amount.</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- LOCATION -->
+    <div class="ple-section">
+      <div class="ple-sec-head">
+        <div class="ple-sec-icon">◎</div>
+        <div class="ple-sec-meta">
+          <h3>Location &amp; description</h3>
+          <p>Address powers the map embed. Description appears on the detail page.</p>
+        </div>
+        <div class="ple-sec-num">03 / 06</div>
+      </div>
+      <div class="ple-sec-body">
+        <div class="ple-row">
+          <div class="ple-field"><label class="ple-label">Address line 1</label><input class="ple-input" placeholder="123 Mabuhay St." /></div>
+          <div class="ple-field"><label class="ple-label">Address line 2</label><input class="ple-input" placeholder="Subdivision / unit" /></div>
+        </div>
+        <div class="ple-row cols-3">
+          <div class="ple-field"><label class="ple-label">City</label><input class="ple-input" /></div>
+          <div class="ple-field"><label class="ple-label">Region / state</label><input class="ple-input" /></div>
+          <div class="ple-field"><label class="ple-label">Postal code</label><input class="ple-input" /></div>
+        </div>
+        <div class="ple-row">
+          <div class="ple-field"><label class="ple-label">Country</label><select class="ple-select"><option>Philippines</option><option>United States</option><option>Singapore</option></select></div>
+          <div class="ple-field"><label class="ple-label">Map preview</label><div style="height:38px; border:1px solid var(--border); border-radius:8px; background:var(--surface-2); display:flex; align-items:center; padding:0 12px; font-size:12px; color:var(--ink-4); font-family:var(--font-mono);">Fill address to preview</div></div>
+        </div>
+        <div class="ple-row">
+          <div class="ple-field ple-field-full">
+            <label class="ple-label">Description</label>
+            <textarea class="ple-textarea" placeholder="Tell buyers what makes this property special — neighborhood, layout, finishes, what's nearby."></textarea>
+            <span class="ple-help">0 / 8,000 · line breaks preserved</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SPECS -->
+    <div class="ple-section">
+      <div class="ple-sec-head">
+        <div class="ple-sec-icon">◫</div>
+        <div class="ple-sec-meta">
+          <h3>Specs &amp; amenities</h3>
+          <p>Common attributes buyers compare, plus your custom fields.</p>
+        </div>
+        <div class="ple-sec-num">04 / 06</div>
+      </div>
+      <div class="ple-sec-body">
+        <div class="ple-row cols-3">
+          <div class="ple-field"><label class="ple-label">Property type</label><select class="ple-select"><option>Townhouse</option><option>Condo</option><option>Single family</option><option>Lot only</option></select></div>
+          <div class="ple-field"><label class="ple-label">Bedrooms</label><input class="ple-input" placeholder="3" /></div>
+          <div class="ple-field"><label class="ple-label">Bathrooms</label><input class="ple-input" placeholder="2.5" /></div>
+        </div>
+        <div class="ple-row cols-3">
+          <div class="ple-field"><label class="ple-label">Year built</label><input class="ple-input" placeholder="2018" /></div>
+          <div class="ple-field"><label class="ple-label">Parking spots</label><input class="ple-input" placeholder="2" /></div>
+          <div class="ple-field"><label class="ple-label">Floor area</label><div class="ple-input-with-suffix"><input class="ple-input" placeholder="0" /><span class="ple-suffix">sqm</span></div></div>
+        </div>
+
+        <div style="margin: 22px 0 8px; font-size: 13px; font-weight: 600; color: var(--ink);">Custom fields</div>
+        <div class="ple-help" style="margin-bottom:6px">e.g. "HOA dues" or "Title status"</div>
+        <div class="ple-cf">
+          <input class="ple-input" placeholder="Field name" value="HOA dues" />
+          <input class="ple-input" placeholder="Value" value="₱2,400 / month" />
+          <button class="ple-cf-x">×</button>
+        </div>
+        <div class="ple-cf">
+          <input class="ple-input" placeholder="Field name" value="Title status" />
+          <input class="ple-input" placeholder="Value" value="Clean · TCT" />
+          <button class="ple-cf-x">×</button>
+        </div>
+        <button class="ple-add">＋ Add custom field</button>
+
+        <div style="margin: 22px 0 8px; font-size: 13px; font-weight: 600; color: var(--ink);">Amenities</div>
+        <div class="ple-help" style="margin-bottom:6px">Pills shown on the public page (e.g. Pool, Gated, Furnished).</div>
+        <div style="display:grid; grid-template-columns: 1fr auto; gap:8px;">
+          <input class="ple-input" placeholder="Add amenity (press Enter)" />
+          <button class="ple-btn ple-btn-primary" style="padding:0 18px">Add</button>
+        </div>
+        <div class="ple-amen">
+          <span class="ple-amen-pill">Pool <span class="x">×</span></span>
+          <span class="ple-amen-pill">Gated community <span class="x">×</span></span>
+          <span class="ple-amen-pill">Furnished <span class="x">×</span></span>
+          <span class="ple-amen-pill">Pet-friendly <span class="x">×</span></span>
+          <span class="ple-amen-pill">Backup power <span class="x">×</span></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- FINANCING -->
+    <div class="ple-section">
+      <div class="ple-sec-head">
+        <div class="ple-sec-icon">⌘</div>
+        <div class="ple-sec-meta">
+          <h3>Financing</h3>
+          <p>Comparable rows for buyers (e.g. cash, bank, in-house).</p>
+        </div>
+        <div class="ple-sec-num">05 / 06</div>
+      </div>
+      <div class="ple-sec-body">
+        <div class="ple-fin-row" style="border-bottom:1px solid var(--border); padding-bottom: 8px;">
+          <span class="ple-label">Method</span>
+          <span class="ple-label">Down / terms</span>
+          <span class="ple-label">Monthly est.</span>
+          <span></span>
+        </div>
+        <div class="ple-fin-row">
+          <input class="ple-input" value="Cash" />
+          <input class="ple-input" value="Full payment · 5% discount" />
+          <input class="ple-input" value="—" />
+          <button class="ple-cf-x">×</button>
+        </div>
+        <div class="ple-fin-row">
+          <input class="ple-input" value="Bank financing" />
+          <input class="ple-input" value="20% down · 20-yr · BPI / BDO" />
+          <input class="ple-input" value="₱42,500" />
+          <button class="ple-cf-x">×</button>
+        </div>
+        <button class="ple-add">＋ Add financing option</button>
+
+        <div class="ple-row" style="margin-top: 16px;">
+          <div class="ple-field ple-field-full">
+            <label class="ple-label">Financing notes</label>
+            <textarea class="ple-textarea" style="height:90px" placeholder="Free-form caveats, disclaimers, lender contact info…"></textarea>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- DANGER -->
+    <div class="ple-section" style="border-color: color-mix(in oklab, var(--danger) 25%, var(--border));">
+      <div class="ple-sec-head" style="border-bottom-color: color-mix(in oklab, var(--danger) 20%, var(--border));">
+        <div class="ple-sec-icon" style="color: var(--danger); background: var(--danger-soft); border-color: color-mix(in oklab, var(--danger) 25%, var(--border));">!</div>
+        <div class="ple-sec-meta">
+          <h3>Danger zone</h3>
+          <p>Removing this property is permanent for this listing page.</p>
+        </div>
+        <div class="ple-sec-num">06 / 06</div>
+      </div>
+      <div class="ple-sec-body">
+        <div class="ple-danger">
+          <h4>Remove property</h4>
+          <p>This deletes the property, its photos, and any submissions linked to it. Cannot be undone.</p>
+          <button>🗑 Remove property</button>
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- SIDEBAR -->
+  <aside class="ple-side">
+    <div class="ple-side-card">
+      <h4>Card preview</h4>
+      <div class="ple-preview">
+        <span class="ple-preview-tag">FOR SALE</span>
+        <div class="ple-preview-title">3-BR Townhouse in Quezon City</div>
+        <div class="ple-preview-meta">3 bd · 2.5 ba · 142 sqm</div>
+        <div class="ple-preview-price">₱6.8M<small></small></div>
+      </div>
+    </div>
+
+    <div class="ple-side-card">
+      <h4>Listing readiness</h4>
+      <div class="ple-progress"><div class="ple-progress-bar" style="width: 62%"></div></div>
+      <div class="ple-progress-meta"><span><strong style="color:var(--ink)">62%</strong> complete</span><span>5 of 8 fields</span></div>
+      <ul class="ple-checklist" style="margin-top: 14px;">
+        <li><span class="ok">✓</span> Title &amp; status</li>
+        <li><span class="ok">✓</span> Price set</li>
+        <li><span class="ok">✓</span> Cover photo</li>
+        <li><span class="pending">○</span> Address (for map)</li>
+        <li><span class="pending">○</span> Description</li>
+        <li><span class="pending">○</span> Floor area</li>
+      </ul>
+    </div>
+
+    <div class="ple-side-card">
+      <h4>Activity</h4>
+      <ul class="ple-checklist">
+        <li><span style="color:var(--ink-4); font-family:var(--font-mono); font-size:10.5px;">2 MIN AGO</span></li>
+        <li style="margin-top:-4px">You edited price</li>
+        <li><span style="color:var(--ink-4); font-family:var(--font-mono); font-size:10.5px;">2H AGO</span></li>
+        <li style="margin-top:-4px">You added 3 photos</li>
+        <li><span style="color:var(--ink-4); font-family:var(--font-mono); font-size:10.5px;">YESTERDAY</span></li>
+        <li style="margin-top:-4px">Created from blank</li>
+      </ul>
+    </div>
+  </aside>
+</div>
+
+</body>
+</html>

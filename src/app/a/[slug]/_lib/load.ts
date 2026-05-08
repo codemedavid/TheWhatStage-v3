@@ -5,6 +5,10 @@ import {
   fetchPublicCatalogProducts,
   type PublicProductCard,
 } from '@/lib/business/public-dto'
+import {
+  loadPublicPaymentMethods,
+  type PublicPaymentMethod,
+} from '@/lib/payment-methods/public'
 import type { ActionPageRow } from '@/app/(app)/dashboard/action-pages/_lib/queries'
 
 type LoadedActionPage = ActionPageRow & { user_id: string }
@@ -14,6 +18,7 @@ export interface PublicLoadResult {
   claims: DeeplinkClaims | null
   attribution_error: 'missing' | 'expired' | 'bad_signature' | null
   products?: PublicProductCard[]
+  paymentMethods?: PublicPaymentMethod[]
 }
 
 export function actionPageSlugTag(slug: string) {
@@ -99,7 +104,16 @@ export async function loadPublicActionPage(
       userId,
       publicPage.config as Parameters<typeof fetchPublicCatalogProducts>[2],
     )
-    return { page: publicPage, claims, attribution_error, products }
+    const paymentMethodIds = Array.isArray(
+      (publicPage.config as Record<string, unknown>).payment_method_ids,
+    )
+      ? ((publicPage.config as Record<string, unknown>).payment_method_ids as unknown[])
+          .filter((x): x is string => typeof x === 'string')
+      : []
+    const paymentMethods = paymentMethodIds.length
+      ? await loadPublicPaymentMethods(userId, paymentMethodIds)
+      : []
+    return { page: publicPage, claims, attribution_error, products, paymentMethods }
   }
 
   return { page: publicPage, claims, attribution_error }
