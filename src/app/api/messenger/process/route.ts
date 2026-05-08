@@ -10,7 +10,10 @@ import {
 } from '@/lib/facebook/messenger'
 import { sendOutbound, sendProductRecommendation } from '@/lib/messenger/outbound'
 import { recommendProduct } from '@/lib/chatbot/recommend'
-import { sendPropertyRecommendation } from '@/lib/messenger/property-outbound'
+import {
+  sendPropertyRecommendation,
+  buildRealestateCarouselElements,
+} from '@/lib/messenger/property-outbound'
 import { recommendProperty } from '@/lib/chatbot/recommend-property'
 import { handleCampaignSend } from '@/lib/messenger/campaignSend'
 import { handleReminderFire } from '@/lib/reminders/fire'
@@ -19,6 +22,7 @@ import { resolveTopics, type PendingReminder } from '@/lib/reminders/resolve'
 import { deeplinkActionPageUrl } from '@/lib/action-pages/urls'
 import { fetchPublicCatalogProducts, type PublicProductCard } from '@/lib/business/public-dto'
 import type { MessengerGenericElement } from '@/lib/facebook/messenger'
+import { parseRealestateConfig } from '@/app/a/[slug]/_kinds/realestate/schema'
 import { appendLeadContacts, extractEmails, extractPhones } from '@/lib/leads/contact-append'
 import { answer, summarizeConversation, type AnswerHistory } from '@/lib/chatbot/answer'
 import { type SelectedMediaAsset } from '@/lib/media/selector'
@@ -829,6 +833,23 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
               }
             }
 
+            // For realestate pages, send a carousel of active properties
+            // (for_sale / for_rent only; cap 10; config order). Falls through
+            // to the single button if there are no active properties.
+            let realestateElements: MessengerGenericElement[] = []
+            if (chosen.kind === 'realestate') {
+              try {
+                const reConfig = parseRealestateConfig(chosen.config)
+                realestateElements = buildRealestateCarouselElements(
+                  reConfig.properties,
+                  targetUrl,
+                  chosen.cta_label || 'View all',
+                )
+              } catch (e) {
+                console.warn('[messenger.worker] realestate config parse failed', e)
+              }
+            }
+
             // Idempotent on retry — see text-reply block above for rationale.
             let buttonFbId = job.outbound_button_fb_id
             let carouselSent = false
@@ -874,6 +895,30 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
                 })
               }
             }
+            if (!buttonFbId && realestateElements.length > 0) {
+              const carouselResult = await sendOutbound({
+                admin,
+                thread: { id: thread.id, psid: thread.psid, last_inbound_at: thread.last_inbound_at },
+                pageToken,
+                payload: { kind: 'generic_template', elements: realestateElements },
+                kind: 'bot',
+              })
+              if (carouselResult.sent) {
+                buttonFbId = carouselResult.messageId ?? null
+                carouselSent = true
+                if (buttonFbId) {
+                  await admin
+                    .from('messenger_jobs')
+                    .update({ outbound_button_fb_id: buttonFbId })
+                    .eq('id', job.id)
+                }
+              } else {
+                console.warn('[messenger.worker] realestate carousel policy_blocked', {
+                  threadId: thread.id,
+                  reason: (carouselResult as { sent: false; reason: string }).reason,
+                })
+              }
+            }
             if (!buttonFbId) {
               const btnResult = await sendOutbound({
                 admin,
@@ -898,15 +943,23 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
               }
             }
             const persistedBody = carouselSent
-              ? `${chosen.title} — ${carouselProducts.length} product${carouselProducts.length === 1 ? '' : 's'}\n` +
-                carouselProducts
-                  .slice(0, 10)
-                  .map((p) => `• ${p.title} (${p.price_label})`)
-                  .join('\n') +
-                `\nView all → ${targetUrl}`
+              ? chosen.kind === 'realestate'
+                ? `${chosen.title} — ${realestateElements.length} listing${realestateElements.length === 1 ? '' : 's'}\n` +
+                  realestateElements
+                    .map((e) => `• ${e.title}${e.subtitle ? ` (${e.subtitle})` : ''}`)
+                    .join('\n') +
+                  `\nView all → ${targetUrl}`
+                : `${chosen.title} — ${carouselProducts.length} product${carouselProducts.length === 1 ? '' : 's'}\n` +
+                  carouselProducts
+                    .slice(0, 10)
+                    .map((p) => `• ${p.title} (${p.price_label})`)
+                    .join('\n') +
+                  `\nView all → ${targetUrl}`
               : `${btnText}\n${chosen.cta_label} → ${targetUrl}`
             const previewText = carouselSent
-              ? `${chosen.title} · ${carouselProducts.length} products`
+              ? chosen.kind === 'realestate'
+                ? `${chosen.title} · ${realestateElements.length} listings`
+                : `${chosen.title} · ${carouselProducts.length} products`
               : `${chosen.cta_label} · ${chosen.title}`
             const { error: btnInsertErr } = await admin
               .from('messenger_messages')
