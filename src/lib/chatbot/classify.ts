@@ -57,10 +57,13 @@ export interface ProductRecommendationRequest {
   confidenceThreshold: number
 }
 
+export type PropertyRecommendationRequest = ProductRecommendationRequest
+
 export interface AnswerWithClassificationResult extends AnswerResult {
   stageChange: StageChange | null
   actionPage: ActionPageChoice | null
   productRecommendation: ProductRecommendationRequest | null
+  propertyRecommendation: PropertyRecommendationRequest | null
 }
 
 /**
@@ -80,6 +83,8 @@ export async function answerWithClassification(
     /** When the lead is on a catalog action page, pass its id so we can attach
      *  the matching recommendation rules from chatbot_configs.recommendation_rules. */
     activeCatalogPageId?: string | null
+    /** Same idea, but for a realestate action page — gates `recommend_property`. */
+    activeRealestatePageId?: string | null
   } = {},
 ): Promise<AnswerWithClassificationResult> {
   const baseConfig = await getChatbotConfig(supabase, userId)
@@ -120,7 +125,17 @@ export async function answerWithClassification(
 
   const actionPages = options.actionPages ?? []
   const recommendRules = getActionPageRecommendationRules(config, options.activeCatalogPageId)
-  const stageSystem = stageInstruction(stages, currentStageId, actionPages, recommendRules)
+  const recommendPropertyRules = getActionPageRecommendationRules(
+    config,
+    options.activeRealestatePageId,
+  )
+  const stageSystem = stageInstruction(
+    stages,
+    currentStageId,
+    actionPages,
+    recommendRules,
+    recommendPropertyRules,
+  )
   const leadContext = options.leadContextBlock?.trim()
   const system = [built.system, stageSystem, leadContext].filter(Boolean).join('\n\n')
 
@@ -159,12 +174,14 @@ export async function answerWithClassification(
   let stageChange: StageChange | null = null
   let actionPage: ActionPageChoice | null = null
   let productRecommendation: ProductRecommendationRequest | null = null
+  let propertyRecommendation: PropertyRecommendationRequest | null = null
   if (parsed && typeof parsed === 'object') {
     const r = parsed as {
       reply?: unknown
       stage_change?: unknown
       action_page?: unknown
       recommend_product?: unknown
+      recommend_property?: unknown
     }
     if (typeof r.reply === 'string') text = r.reply.trim()
     stageChange = coerceStageChange(r.stage_change, stages, currentStageId)
@@ -174,6 +191,13 @@ export async function answerWithClassification(
         r.recommend_product,
         options.activeCatalogPageId,
         recommendRules.confidenceThreshold,
+      )
+    }
+    if (recommendPropertyRules && options.activeRealestatePageId) {
+      propertyRecommendation = coerceRecommendation(
+        r.recommend_property,
+        options.activeRealestatePageId,
+        recommendPropertyRules.confidenceThreshold,
       )
     }
   }
@@ -196,13 +220,14 @@ export async function answerWithClassification(
     stageChange = null
     actionPage = null
     productRecommendation = null
+    propertyRecommendation = null
   }
 
   const [sourceTitles, media] = await Promise.all([
     resolveSourceTitles(supabase, userId, built.contextChunkIds),
     mediaPromise,
   ])
-  return { text, sourceTitles, media, stageChange, actionPage, productRecommendation }
+  return { text, sourceTitles, media, stageChange, actionPage, productRecommendation, propertyRecommendation }
 }
 
 /**
@@ -303,9 +328,11 @@ function stageInstruction(
   currentStageId: string | null,
   actionPages: ActionPageBrief[],
   recommendRules: ActionPageRecommendationRules | null,
+  recommendPropertyRules: ActionPageRecommendationRules | null,
 ): string {
   const hasActionPages = actionPages.length > 0
   const hasRecommend = !!recommendRules
+  const hasRecommendProperty = !!recommendPropertyRules
   const schemaParts = [
     '"reply": string',
     '"stage_change": {"to_stage_id": string, "confidence": "low"|"medium"|"high", "reason": string} | null',
@@ -318,6 +345,11 @@ function stageInstruction(
   if (hasRecommend) {
     schemaParts.push(
       '"recommend_product": {"query": string, "filters": {"price_min": number|null, "price_max": number|null, "tags": string[]}} | null',
+    )
+  }
+  if (hasRecommendProperty) {
+    schemaParts.push(
+      '"recommend_property": {"query": string, "filters": {"price_min": number|null, "price_max": number|null, "tags": string[]}} | null',
     )
   }
   const schema = `{${schemaParts.join(', ')}}`
@@ -342,11 +374,15 @@ function stageInstruction(
       '- NEVER use the action page title (e.g. "Lead Gen", "Booking") as the button_text.\n\n' +
       actionPageList(actionPages)
     : ''
-  const recommendSection = hasRecommend ? recommendInstruction(recommendRules!) : ''
+  const recommendSection = hasRecommend ? recommendInstruction(recommendRules!, 'product') : ''
+  const recommendPropertySection = hasRecommendProperty
+    ? recommendInstruction(recommendPropertyRules!, 'property')
+    : ''
   return (
     'You are also responsible for classifying the lead\'s pipeline stage' +
     (hasActionPages ? ' and deciding whether to attach an action page button to your reply' : '') +
     (hasRecommend ? ' and deciding whether to recommend a specific product' : '') +
+    (hasRecommendProperty ? ' and deciding whether to recommend a specific property listing' : '') +
     '. Output a single JSON object with this exact shape and NOTHING ELSE:\n' +
     schema +
     '\n`reply` is what the customer sees — write it in the same persona/rules above. ' +
@@ -354,32 +390,39 @@ function stageInstruction(
     'Only use stage_ids from the list. Pick the stage whose description best matches the customer\'s intent in the latest message + conversation.\n\n' +
     stageList(stages, currentStageId) +
     apSection +
-    recommendSection
+    recommendSection +
+    recommendPropertySection
   )
 }
 
-function recommendInstruction(rules: ActionPageRecommendationRules): string {
+function recommendInstruction(
+  rules: ActionPageRecommendationRules,
+  kind: 'product' | 'property',
+): string {
   const slotsLine =
     rules.requiredSlots.length > 0
       ? `Required info you must collect FIRST before recommending: ${rules.requiredSlots.join(', ')}.`
       : 'No required slots — you may recommend as soon as the customer\'s need is clear.'
+  const fieldName = kind === 'product' ? 'recommend_product' : 'recommend_property'
+  const heading = kind === 'product' ? 'PRODUCT RECOMMENDATION' : 'PROPERTY RECOMMENDATION'
+  const noun = kind === 'product' ? 'product' : 'property listing'
   return (
     '\n\n' +
-    'PRODUCT RECOMMENDATION — INTERNAL ROUTING ONLY:\n' +
-    'Set `recommend_product` ONLY when ONE of these is true:\n' +
-    '  (a) The customer EXPLICITLY asks for a recommendation, suggestion, or "what do you have for…".\n' +
+    `${heading} — INTERNAL ROUTING ONLY:\n` +
+    `Set \`${fieldName}\` ONLY when ONE of these is true:\n` +
+    `  (a) The customer EXPLICITLY asks for a recommendation, suggestion, or "what do you have for…".\n` +
     '  (b) The operator rules below tell you to recommend at this point.\n' +
-    'Otherwise, set `recommend_product` to null and keep chatting normally.\n\n' +
+    `Otherwise, set \`${fieldName}\` to null and keep chatting normally.\n\n` +
     `Operator rules: ${rules.rules}\n` +
     slotsLine +
     '\n\n' +
     'When you DO recommend:\n' +
-    '- `query` is a 1-sentence summary of what the customer is looking for, distilled from the conversation. Used for search — write it in clear English even if the customer wrote Tagalog.\n' +
+    `- \`query\` is a 1-sentence summary of what the customer is looking for, distilled from the conversation. Used for search — write it in clear English even if the customer wrote Tagalog.\n` +
     '- `filters.price_min` / `filters.price_max` are extracted from any budget the customer mentioned (in PHP, numbers only). null when not mentioned.\n' +
     '- `filters.tags` are short keywords (1–3 words each) the customer cares about. Empty array when none.\n' +
-    '- The system will pick the actual product, send the image and a button card AUTOMATICALLY in a SEPARATE message. Do NOT name a specific product, price, or link in `reply`.\n' +
-    '- `reply` should be a short, warm acknowledgement like "Got it — let me share the best fit 👇" in the customer\'s language. Do NOT describe the product itself.\n' +
-    '- If the required slots are not yet filled, set `recommend_product` to null and ask for the missing info in `reply` instead.'
+    `- The system will pick the actual ${noun}, send the image and a card AUTOMATICALLY in a SEPARATE message. Do NOT name a specific ${noun}, price, or link in \`reply\`.\n` +
+    '- `reply` should be a short, warm acknowledgement like "Got it — let me share the best fit 👇" in the customer\'s language. Do NOT describe the result itself.\n' +
+    `- If the required slots are not yet filled, set \`${fieldName}\` to null and ask for the missing info in \`reply\` instead.`
   )
 }
 
