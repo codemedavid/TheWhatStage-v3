@@ -76,6 +76,7 @@ export async function handlePostback(
     .from('business_items')
     .select('id, title')
     .eq('user_id', userId)
+    .eq('kind', 'property')
     .eq('slug', arg)
     .maybeSingle<{ id: string; title: string }>()
   if (propErr || !property) {
