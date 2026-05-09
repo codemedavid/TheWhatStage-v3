@@ -48,6 +48,12 @@ export function FollowupTouchpointsEditor({ pageId }: { pageId: string }) {
   const [touchpoints, setTouchpoints] = useState<FollowupTouchpoint[]>([])
   const [templates, setTemplates] = useState<ApprovedTemplateOption[]>([])
   const [manuallyEdited, setManuallyEdited] = useState(false)
+  const [categoryFilter, setCategoryFilter] = useState<string>('booking')
+
+  const visibleTemplates = useMemo(() => {
+    if (categoryFilter === 'all') return templates
+    return templates.filter((t) => t.categories.some((c) => c.slug === categoryFilter))
+  }, [templates, categoryFilter])
 
   useEffect(() => {
     let mounted = true
@@ -164,6 +170,21 @@ export function FollowupTouchpointsEditor({ pageId }: { pageId: string }) {
         </p>
       )}
 
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, fontSize: 12 }}>
+        <span style={{ color: '#6B6960' }}>Filter:</span>
+        <select
+          value={categoryFilter}
+          onChange={(e) => setCategoryFilter(e.target.value)}
+          style={{ padding: '2px 6px', fontSize: 12 }}
+        >
+          <option value="booking">Booking (default)</option>
+          <option value="reminders">Reminders</option>
+          <option value="notifications">Notifications</option>
+          <option value="general">General</option>
+          <option value="all">All categories</option>
+        </select>
+      </div>
+
       <div className="space-y-3">
         {touchpoints.map((tp, idx) => {
           const tpl = templateById.get(tp.template_id)
@@ -192,7 +213,7 @@ export function FollowupTouchpointsEditor({ pageId }: { pageId: string }) {
                   className="rounded-md border border-[#D1D5DB] bg-white px-2 py-1 text-[13px]"
                 >
                   <option value="">— pick template —</option>
-                  {templates.map((t) => (
+                  {visibleTemplates.map((t) => (
                     <option key={t.id} value={t.id}>
                       {t.display_name}
                     </option>

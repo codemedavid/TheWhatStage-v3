@@ -43,6 +43,7 @@ export interface ApprovedTemplateOption {
   body_text: string
   variable_count: number
   buttons: Array<{ type: string; index?: number; url?: string; text?: string }>
+  categories: { id: string; slug: string; label: string }[]
 }
 
 export async function loadFollowupsForPage(pageId: string): Promise<{
@@ -56,7 +57,7 @@ export async function loadFollowupsForPage(pageId: string): Promise<{
 
   const { data: tpls } = await admin
     .from('messenger_message_templates')
-    .select('id, name, display_name, language, body_text, variable_count, buttons, meta_status')
+    .select('id, name, display_name, language, body_text, variable_count, buttons, meta_status, messenger_template_categories(category:template_categories(id, slug, label))')
     .eq('user_id', userId)
     .eq('meta_status', 'approved')
     .order('display_name', { ascending: true })
@@ -69,6 +70,9 @@ export async function loadFollowupsForPage(pageId: string): Promise<{
     body_text: t.body_text as string,
     variable_count: t.variable_count as number,
     buttons: (t.buttons ?? []) as ApprovedTemplateOption['buttons'],
+    categories: ((t as unknown as { messenger_template_categories?: Array<{ category: { id: string; slug: string; label: string } | null } | null> }).messenger_template_categories ?? [])
+      .map((j) => j?.category)
+      .filter((c): c is { id: string; slug: string; label: string } => !!c),
   }))
 
   return { managed, approvedTemplates }
