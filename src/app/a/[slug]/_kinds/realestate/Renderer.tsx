@@ -460,7 +460,7 @@ async function PropertyDetail({
         </div>
 
         {linkedPages.length > 0 && (
-          <section className="mt-10 space-y-6">
+          <section data-next-steps="" className="mt-10 space-y-6">
             <header>
               <h2 className="text-[20px] font-semibold text-[#0F172A]">
                 Next steps
