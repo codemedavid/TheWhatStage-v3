@@ -504,6 +504,10 @@ async function PropertyDetail({
           }))}
           accent={config.theme.accent_color}
         >
+          {/* TODO: form field IDs (e.g. f-starter-name) are static strings shared with the
+              inline "Next Steps" renderers above. When the modal is open, duplicate IDs exist
+              in the DOM for the active page. Fix by threading a unique idPrefix prop through
+              FormRenderer/BookingRenderer/QualificationRenderer when addressing accessibility. */}
           {linkedPages.map((linked) => (
             <LinkedRenderer
               key={linked.id}
