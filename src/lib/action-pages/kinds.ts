@@ -20,6 +20,11 @@ export interface KindMeta {
   defaultCtaLabel: string
   /** Default `notification_template.text` — Messenger echo sent back after a successful submission. */
   defaultNotificationText: string
+  /**
+   * When true, the action-page editor renders the booking follow-up
+   * touchpoints section. Currently only booking; realestate joins in Phase 4.
+   */
+  supportsFollowups?: boolean
 }
 
 export const KIND_REGISTRY: Record<ActionPageKind, KindMeta> = {
@@ -109,6 +114,7 @@ export const KIND_REGISTRY: Record<ActionPageKind, KindMeta> = {
     },
     defaultPipelineRules: [{ outcome: 'booked', reason: 'Appointment booked' }],
     defaultCtaLabel: 'Book a slot',
+    supportsFollowups: true,
     defaultNotificationText:
       "You're booked! We'll send a reminder before your appointment.",
   },
