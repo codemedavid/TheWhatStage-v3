@@ -16,6 +16,7 @@ import GalleryClient from './Gallery.client'
 import FormRenderer from '../form/Renderer'
 import BookingRenderer from '../booking/Renderer'
 import QualificationRenderer from '../qualification/Renderer'
+import CTAFab from './CTAFab.client'
 
 const STATUS_LABELS: Record<PropertyStatus, string> = {
   for_sale: 'For sale',
@@ -492,6 +493,28 @@ async function PropertyDetail({
           </section>
         )}
       </div>
+
+      {linkedPages.length > 0 && (
+        <CTAFab
+          pages={linkedPages.map((p) => ({
+            id: p.id,
+            kind: p.kind,
+            title: p.title,
+            cta_label: p.cta_label,
+          }))}
+          accent={config.theme.accent_color}
+        >
+          {linkedPages.map((linked) => (
+            <LinkedRenderer
+              key={linked.id}
+              page={linked}
+              claims={claims}
+              rawToken={rawToken}
+              sourceContext={sourceContext}
+            />
+          ))}
+        </CTAFab>
+      )}
     </main>
   )
 }
