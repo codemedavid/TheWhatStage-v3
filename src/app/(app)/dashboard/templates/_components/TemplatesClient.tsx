@@ -13,6 +13,7 @@ import {
   createTemplate,
   deleteTemplate,
   duplicateTemplate,
+  refreshTemplateStatus,
   submitTemplateForReview,
   updateTemplate,
 } from '../actions'
@@ -271,13 +272,23 @@ export function TemplatesClient({ initialTemplates }: Props) {
     startTransition(async () => {
       try {
         await submitTemplateForReview(draft.id!)
-        setTemplates((prev) =>
-          prev.map((t) =>
-            t.id === draft.id
-              ? { ...t, meta_status: 'pending', submitted_at: new Date().toISOString() }
-              : t,
-          ),
-        )
+        // Reload to pick up the canonical status returned by Meta — utility
+        // templates often come back as 'approved' immediately, so we can't
+        // optimistically assume 'pending' here.
+        window.location.reload()
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e))
+      }
+    })
+  }
+
+  function handleRefreshStatus() {
+    if (!draft.id) return
+    setError(null)
+    startTransition(async () => {
+      try {
+        await refreshTemplateStatus(draft.id!)
+        window.location.reload()
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e))
       }
@@ -576,9 +587,14 @@ export function TemplatesClient({ initialTemplates }: Props) {
                 </button>
               )}
               {selected?.meta_status === 'pending' && (
-                <span style={{ fontSize: 12, color: S.ink3 }}>
-                  Submitted {selected.submitted_at ? new Date(selected.submitted_at).toLocaleString() : ''} — awaiting Meta review.
-                </span>
+                <>
+                  <button onClick={handleRefreshStatus} disabled={pending} style={btnSecondary}>
+                    {pending ? 'Refreshing…' : 'Refresh status'}
+                  </button>
+                  <span style={{ fontSize: 12, color: S.ink3 }}>
+                    Submitted {selected.submitted_at ? new Date(selected.submitted_at).toLocaleString() : ''} — awaiting Meta review.
+                  </span>
+                </>
               )}
             </footer>
           </>

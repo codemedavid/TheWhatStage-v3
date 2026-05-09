@@ -5,7 +5,10 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { decryptToken } from '@/lib/facebook/crypto'
-import { createMessengerTemplate } from '@/lib/facebook/messenger-templates'
+import {
+  createMessengerTemplate,
+  fetchMessengerTemplateStatus,
+} from '@/lib/facebook/messenger-templates'
 import {
   countVariables,
   isValidTemplateName,
@@ -252,6 +255,7 @@ export async function submitTemplateForReview(id: string): Promise<void> {
   const pageToken = decryptToken(pageRow.page_access_token)
 
   let metaTemplateId: string
+  let metaStatusRaw: string | undefined
   try {
     const result = await createMessengerTemplate({
       fbPageId: pageRow.fb_page_id,
@@ -264,6 +268,7 @@ export async function submitTemplateForReview(id: string): Promise<void> {
       footer: tpl.footer,
     })
     metaTemplateId = result.id
+    metaStatusRaw = result.status
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     // Persist the rejection reason so it shows up in the UI without the user
@@ -280,18 +285,79 @@ export async function submitTemplateForReview(id: string): Promise<void> {
     throw new Error(`Meta rejected the submission: ${msg}`)
   }
 
+  // Meta returns the approval state synchronously in the create response. For
+  // utility templates with simple bodies and no risky buttons, the status is
+  // commonly 'APPROVED' immediately. Honor it so we don't sit in a fake
+  // pending state — the page-level webhook for `message_template_status_update`
+  // is unreliable on Messenger and may never arrive.
+  const localStatus = mapMetaStatus(metaStatusRaw)
+  const now = new Date().toISOString()
   await admin
     .from('messenger_message_templates')
     .update({
-      meta_status: 'pending',
+      meta_status: localStatus,
       meta_template_id: metaTemplateId,
-      // Pin the page that was used so future webhook events can be matched
-      // back even if the user later edits the template's page_id.
       page_id: pageRow.id,
-      submitted_at: new Date().toISOString(),
+      submitted_at: now,
+      approved_at: localStatus === 'approved' ? now : null,
       meta_rejection_reason: null,
     })
     .eq('id', id)
+  revalidatePath('/dashboard/templates')
+}
+
+function mapMetaStatus(raw: string | undefined): 'approved' | 'pending' | 'rejected' | 'disabled' {
+  switch ((raw ?? '').toUpperCase()) {
+    case 'APPROVED': return 'approved'
+    case 'REJECTED': return 'rejected'
+    case 'DISABLED': return 'disabled'
+    default: return 'pending'
+  }
+}
+
+/**
+ * Manually re-poll Meta for the current status of a submitted template.
+ * The `message_template_status_update` webhook isn't reliably delivered to
+ * Messenger pages, so the user can use this to flip pending → approved
+ * without waiting on Meta to push us anything.
+ */
+export async function refreshTemplateStatus(id: string): Promise<void> {
+  const { supabase, userId } = await requireUser()
+  const { data: tpl } = await supabase
+    .from('messenger_message_templates')
+    .select('id, name, language, page_id, meta_status, meta_template_id')
+    .eq('id', id)
+    .eq('user_id', userId)
+    .maybeSingle<MessengerMessageTemplate>()
+  if (!tpl) throw new Error('Template not found.')
+  if (tpl.meta_status === 'draft') {
+    throw new Error('This template has not been submitted yet.')
+  }
+
+  const admin = createAdminClient()
+  const pageRow = await resolveTargetPage(admin, userId, tpl.page_id)
+  if (!pageRow) throw new Error('No connected Facebook page found.')
+
+  const pageToken = decryptToken(pageRow.page_access_token)
+  const result = await fetchMessengerTemplateStatus({
+    fbPageId: pageRow.fb_page_id,
+    pageAccessToken: pageToken,
+    name: tpl.name,
+    language: tpl.language,
+  })
+  if (!result) {
+    throw new Error('Meta has no record of this template under that name + language.')
+  }
+
+  const localStatus = mapMetaStatus(result.status)
+  const update: Record<string, unknown> = {
+    meta_status: localStatus,
+    meta_rejection_reason: localStatus === 'rejected' ? result.rejected_reason : null,
+  }
+  if (!tpl.meta_template_id) update.meta_template_id = result.id
+  if (localStatus === 'approved') update.approved_at = new Date().toISOString()
+
+  await admin.from('messenger_message_templates').update(update).eq('id', id)
   revalidatePath('/dashboard/templates')
 }
 

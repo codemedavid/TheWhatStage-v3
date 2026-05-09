@@ -110,6 +110,49 @@ export async function createMessengerTemplate(
 }
 
 /**
+ * Fetch the current status of a template by name. Used as a fallback when the
+ * `message_template_status_update` webhook isn't reliably delivered for
+ * Messenger pages — we can poll this on demand to flip pending → approved.
+ *
+ * Returns null when no template with that name/language is found on the page.
+ */
+export async function fetchMessengerTemplateStatus(args: {
+  fbPageId: string
+  pageAccessToken: string
+  name: string
+  language: string
+}): Promise<{ id: string; status: string; rejected_reason?: string | null } | null> {
+  const url = new URL(`${GRAPH}/${args.fbPageId}/message_templates`)
+  url.searchParams.set('access_token', args.pageAccessToken)
+  url.searchParams.set('name', args.name)
+  url.searchParams.set('fields', 'id,name,language,status,rejected_reason')
+  const res = await fetch(url.toString(), { method: 'GET' })
+  const text = await res.text()
+  if (!res.ok) {
+    let metaMsg = text
+    try {
+      const parsed = JSON.parse(text) as MetaError
+      metaMsg = parsed.error?.message ?? text
+    } catch {
+      // keep raw
+    }
+    throw new Error(`Meta template fetch ${res.status}: ${metaMsg}`)
+  }
+  const parsed = JSON.parse(text) as {
+    data?: Array<{ id: string; name: string; language: string; status: string; rejected_reason?: string }>
+  }
+  const match = parsed.data?.find(
+    (t) => t.name === args.name && t.language === args.language,
+  )
+  if (!match) return null
+  return {
+    id: match.id,
+    status: match.status,
+    rejected_reason: match.rejected_reason ?? null,
+  }
+}
+
+/**
  * Delete a template by name. Idempotent — Meta returns 200 with `success:true`
  * even when no matching template exists.
  */
