@@ -399,7 +399,9 @@ export function generateFollowupGraph(
         conditions: [
           {
             kind: 'custom_field_eq',
-            params: { field: 'state.variables.offset', value: tp.offset },
+            // executor.ts custom_field_eq reads ctx.run.state.variables[field]
+            // directly — pass the bare key 'offset', NOT a dotted path.
+            params: { field: 'offset', value: tp.offset },
           },
         ],
         logic: 'AND',
@@ -1408,5 +1410,5 @@ git commit -m "feat(action-pages): mount FollowupTouchpointsEditor on booking pa
   - `FollowupTouchpoint.variables` uses `VariableMap` from `render.ts`, matching the executor's expected payload shape.
   - The generator emits `if`-node configs that match `IfNodeConfig` (existing type from `types.ts`); the `custom_field_eq` condition kind is already in the allowed-set.
   - `parseTouchpointsFromWorkflow` mirrors the generator's node-id convention (`if_<tpId>` / `send_<tpId>`); changes to one must update the other.
-- **Risk: `if` node with `custom_field_eq` reading `state.variables.offset`.** Confirm the executor's `if`-handler resolves dotted paths against `run.state.variables`. If it does not (i.e. `custom_field_eq` only checks `lead.custom_fields[k]`), Phase 2 must either extend the if-handler or use a different routing approach. **Implementer for Task 3 should grep `custom_field_eq` in `src/lib/workflow/executor.ts` first; if state-variable comparison isn't supported, escalate to the controller before writing the generator** — we may switch to writing one workflow per offset (managed as a set) instead of a single chained-if workflow.
+- **Confirmed: `custom_field_eq` reads `ctx.run.state.variables[field]` directly** (`src/lib/workflow/executor.ts:448-456`). The generator passes `params: { field: 'offset', value: tp.offset }` (bare key, not a dotted path). The router works because the dispatcher seeds `state.variables.offset` into every booking-offset run.
 - **Risk: Workflow API validator.** `src/app/api/workflows/[id]/route.ts` validates trigger kinds and node types — new `utility_template` payload kind on send nodes might fail strict payload validation. Implementer should grep that file once during Task 3 to confirm no extra validation blocks our shape; if it does, Task 3 fix the validator alongside the generator (separate commit).
