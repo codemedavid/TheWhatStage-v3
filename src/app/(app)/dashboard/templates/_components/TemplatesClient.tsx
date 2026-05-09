@@ -4,16 +4,21 @@ import { useMemo, useState, useTransition } from 'react'
 import {
   countVariables,
   renderTemplate,
-  type MessengerMessageTemplate,
   type TemplateButton,
   type TemplateFormInput,
   type TemplateMetaStatus,
+  type TemplateCategory,
+  type MessengerMessageTemplateWithCategories,
 } from '@/lib/messenger-templates/types'
 import {
+  createCategory,
   createTemplate,
+  deleteCategory,
   deleteTemplate,
   duplicateTemplate,
+  listCategories,
   refreshTemplateStatus,
+  setTemplateCategories,
   submitTemplateForReview,
   updateTemplate,
 } from '../actions'
@@ -35,7 +40,8 @@ const S = {
 }
 
 interface Props {
-  initialTemplates: MessengerMessageTemplate[]
+  initialTemplates: MessengerMessageTemplateWithCategories[]
+  initialCategories: TemplateCategory[]
 }
 
 interface DraftState {
@@ -62,7 +68,7 @@ function emptyDraft(): DraftState {
   }
 }
 
-function fromTemplate(t: MessengerMessageTemplate): DraftState {
+function fromTemplate(t: MessengerMessageTemplateWithCategories): DraftState {
   return {
     id: t.id,
     name: t.name,
@@ -90,8 +96,26 @@ function statusBadge(status: TemplateMetaStatus) {
   }
 }
 
-export function TemplatesClient({ initialTemplates }: Props) {
-  const [templates, setTemplates] = useState(initialTemplates)
+type StatusFilter = 'approved' | 'all' | 'pending' | 'rejected' | 'draft'
+
+export function TemplatesClient({ initialTemplates, initialCategories }: Props) {
+  const [templates, setTemplates] = useState<MessengerMessageTemplateWithCategories[]>(initialTemplates)
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('approved')
+
+  const [categories, setCategories] = useState<TemplateCategory[]>(initialCategories)
+  const [selectedCategoryIds, setSelectedCategoryIds] = useState<string[]>([])
+  const [draftCategoryIds, setDraftCategoryIds] = useState<string[]>([])
+  const [newCategoryLabel, setNewCategoryLabel] = useState('')
+  const [showNewCategory, setShowNewCategory] = useState(false)
+
+  const visibleTemplates = useMemo(() => {
+    return templates.filter((t) => {
+      if (statusFilter !== 'all' && t.meta_status !== statusFilter) return false
+      if (selectedCategoryIds.length === 0) return true
+      return t.categories.some((c) => selectedCategoryIds.includes(c.id))
+    })
+  }, [templates, statusFilter, selectedCategoryIds])
+
   const [selectedId, setSelectedId] = useState<string | null>(
     initialTemplates[0]?.id ?? null,
   )
@@ -110,10 +134,11 @@ export function TemplatesClient({ initialTemplates }: Props) {
   const variableCount = countVariables(draft.body_text)
   const preview = renderTemplate(draft.body_text, draft.sample_values)
 
-  function selectTemplate(t: MessengerMessageTemplate) {
+  function selectTemplate(t: MessengerMessageTemplateWithCategories) {
     setIsCreating(false)
     setSelectedId(t.id)
     setDraft(fromTemplate(t))
+    setDraftCategoryIds(t.categories.map((c) => c.id))
     setError(null)
   }
 
@@ -121,6 +146,7 @@ export function TemplatesClient({ initialTemplates }: Props) {
     setIsCreating(true)
     setSelectedId(null)
     setDraft(emptyDraft())
+    setDraftCategoryIds([])
     setError(null)
   }
 
@@ -165,6 +191,8 @@ export function TemplatesClient({ initialTemplates }: Props) {
     // local state in handlers below.
   }
 
+  void refresh
+
   function handleSave() {
     setError(null)
     const input: TemplateFormInput = {
@@ -178,54 +206,18 @@ export function TemplatesClient({ initialTemplates }: Props) {
     }
     startTransition(async () => {
       try {
+        let id: string
         if (draft.id) {
           await updateTemplate(draft.id, input)
-          setTemplates((prev) =>
-            prev.map((t) =>
-              t.id === draft.id
-                ? {
-                    ...t,
-                    name: draft.name.toLowerCase(),
-                    display_name: draft.display_name,
-                    language: draft.language,
-                    body_text: draft.body_text,
-                    sample_values: draft.sample_values,
-                    buttons: draft.buttons,
-                    footer: draft.footer || null,
-                    variable_count: variableCount,
-                    // status may have been reset server-side; user can refresh
-                  }
-                : t,
-            ),
-          )
+          id = draft.id
         } else {
-          const newId = await createTemplate(input)
-          const newRow: MessengerMessageTemplate = {
-            id: newId,
-            user_id: '',
-            page_id: null,
-            name: draft.name.toLowerCase(),
-            display_name: draft.display_name,
-            category: 'utility',
-            language: draft.language,
-            body_text: draft.body_text,
-            variable_count: variableCount,
-            sample_values: draft.sample_values,
-            buttons: draft.buttons,
-            header: null,
-            footer: draft.footer || null,
-            meta_template_id: null,
-            meta_status: 'draft',
-            meta_rejection_reason: null,
-            submitted_at: null,
-            approved_at: null,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          }
-          setTemplates((prev) => [...prev, newRow])
-          setSelectedId(newId)
-          setDraft({ ...draft, id: newId, name: draft.name.toLowerCase() })
-          setIsCreating(false)
+          id = await createTemplate(input)
+        }
+        await setTemplateCategories(id, draftCategoryIds)
+        if (draft.id) {
+          window.location.reload()
+        } else {
+          window.location.href = `/dashboard/templates?selected=${id}`
         }
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e))
@@ -299,7 +291,7 @@ export function TemplatesClient({ initialTemplates }: Props) {
     selected?.meta_status === 'pending' || selected?.meta_status === 'approved'
 
   return (
-    <div style={{ display: 'flex', minHeight: '100vh', background: S.surface2, color: S.ink }}>
+    <div style={{ display: 'flex', height: '100vh', background: S.surface2, color: S.ink }}>
       {/* ── List column ── */}
       <aside
         style={{
@@ -307,6 +299,7 @@ export function TemplatesClient({ initialTemplates }: Props) {
           borderRight: `1px solid ${S.border}`,
           background: S.surface,
           padding: '24px 16px',
+          height: '100vh',
           overflowY: 'auto',
         }}
       >
@@ -327,12 +320,125 @@ export function TemplatesClient({ initialTemplates }: Props) {
             + New
           </button>
         </div>
-        <p style={{ fontSize: 12, color: S.ink3, margin: '0 0 16px' }}>
+        <p style={{ fontSize: 12, color: S.ink3, margin: '0 0 12px' }}>
           Utility messages must be pre-registered with Meta before they can be sent
           outside the 24-hour window.
         </p>
+
+        {/* ── Category filter chips ── */}
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ fontSize: 11, color: S.ink3, marginBottom: 6 }}>Categories</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {categories.map((c) => {
+              const active = selectedCategoryIds.includes(c.id)
+              return (
+                <span key={c.id} style={{ display: 'inline-flex', alignItems: 'center' }}>
+                  <button
+                    onClick={() =>
+                      setSelectedCategoryIds((prev) =>
+                        prev.includes(c.id) ? prev.filter((x) => x !== c.id) : [...prev, c.id],
+                      )
+                    }
+                    style={{
+                      border: `1px solid ${active ? S.accent : S.border}`,
+                      background: active ? S.accentSoft : S.surface,
+                      color: active ? S.accent : S.ink2,
+                      padding: '4px 8px',
+                      borderRadius: 999,
+                      fontSize: 11,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {c.label}
+                  </button>
+                  {!c.is_system && (
+                    <button
+                      title="Delete category"
+                      onClick={async () => {
+                        if (!confirm(`Delete category "${c.label}"? Templates tagged with it will be untagged.`)) return
+                        try {
+                          await deleteCategory(c.id)
+                          setCategories((prev) => prev.filter((x) => x.id !== c.id))
+                          setSelectedCategoryIds((prev) => prev.filter((x) => x !== c.id))
+                          setDraftCategoryIds((prev) => prev.filter((x) => x !== c.id))
+                          setTemplates((prev) =>
+                            prev.map((t) => ({ ...t, categories: t.categories.filter((x) => x.id !== c.id) })),
+                          )
+                        } catch (e) {
+                          setError(e instanceof Error ? e.message : String(e))
+                        }
+                      }}
+                      style={{
+                        border: 'none', background: 'transparent', color: S.ink4,
+                        fontSize: 12, cursor: 'pointer', padding: '0 2px 0 4px',
+                      }}
+                    >
+                      ×
+                    </button>
+                  )}
+                </span>
+              )
+            })}
+            {showNewCategory ? (
+              <span style={{ display: 'inline-flex', gap: 4 }}>
+                <input
+                  autoFocus
+                  value={newCategoryLabel}
+                  onChange={(e) => setNewCategoryLabel(e.target.value)}
+                  onKeyDown={async (e) => {
+                    if (e.key === 'Escape') { setShowNewCategory(false); setNewCategoryLabel('') }
+                    if (e.key === 'Enter') {
+                      try {
+                        const id = await createCategory(newCategoryLabel)
+                        const next = await listCategories()
+                        setCategories(next)
+                        setShowNewCategory(false)
+                        setNewCategoryLabel('')
+                        setSelectedCategoryIds((prev) => [...prev, id])
+                      } catch (err) {
+                        setError(err instanceof Error ? err.message : String(err))
+                      }
+                    }
+                  }}
+                  placeholder="New category"
+                  style={{ ...inputStyle, padding: '2px 6px', fontSize: 11, width: 110 }}
+                />
+              </span>
+            ) : (
+              <button
+                onClick={() => setShowNewCategory(true)}
+                style={{
+                  border: `1px dashed ${S.border}`, background: 'transparent', color: S.ink3,
+                  padding: '4px 8px', borderRadius: 999, fontSize: 11, cursor: 'pointer',
+                }}
+              >
+                + New
+              </button>
+            )}
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 14 }}>
+          <span style={{ fontSize: 11, color: S.ink3 }}>Show</span>
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
+            style={{ ...inputStyle, padding: '4px 6px', fontSize: 12, width: 'auto' }}
+          >
+            <option value="approved">Approved ({templates.filter((t) => t.meta_status === 'approved').length})</option>
+            <option value="pending">Pending ({templates.filter((t) => t.meta_status === 'pending').length})</option>
+            <option value="rejected">Rejected ({templates.filter((t) => t.meta_status === 'rejected').length})</option>
+            <option value="draft">Draft ({templates.filter((t) => t.meta_status === 'draft').length})</option>
+            <option value="all">All ({templates.length})</option>
+          </select>
+        </div>
         <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-          {templates.map((t) => {
+          {visibleTemplates.length === 0 && (
+            <li style={{ fontSize: 12, color: S.ink3, padding: '8px 4px' }}>
+              No templates in this view.
+            </li>
+          )}
+          {visibleTemplates.map((t) => {
             const sel = selectedId === t.id
             const badge = statusBadge(t.meta_status)
             return (
@@ -374,7 +480,7 @@ export function TemplatesClient({ initialTemplates }: Props) {
       </aside>
 
       {/* ── Editor column ── */}
-      <main style={{ flex: 1, padding: 32, maxWidth: 820 }}>
+      <main style={{ flex: 1, padding: 32, maxWidth: 820, height: '100vh', overflowY: 'auto' }}>
         {!isCreating && !selected && (
           <p style={{ color: S.ink3 }}>Select a template or create a new one.</p>
         )}
@@ -417,6 +523,37 @@ export function TemplatesClient({ initialTemplates }: Props) {
                   style={inputStyle}
                 />
               </Field>
+
+              <Field label="Categories" hint="Tag this template so it appears under those filters across the app.">
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {categories.map((c) => {
+                    const on = draftCategoryIds.includes(c.id)
+                    return (
+                      <button
+                        key={c.id}
+                        type="button"
+                        onClick={() =>
+                          setDraftCategoryIds((prev) =>
+                            prev.includes(c.id) ? prev.filter((x) => x !== c.id) : [...prev, c.id],
+                          )
+                        }
+                        style={{
+                          border: `1px solid ${on ? S.accent : S.border}`,
+                          background: on ? S.accentSoft : S.surface,
+                          color: on ? S.accent : S.ink2,
+                          padding: '4px 10px',
+                          borderRadius: 999,
+                          fontSize: 12,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        {c.label}
+                      </button>
+                    )
+                  })}
+                </div>
+              </Field>
+
               <Field label="Internal name (lowercase, digits, underscores)">
                 <input
                   type="text"
