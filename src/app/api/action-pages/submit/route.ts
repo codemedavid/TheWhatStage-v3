@@ -435,6 +435,7 @@ export async function POST(req: NextRequest) {
             leadId: leadId ?? null,
             threadId: messengerThreadId ?? null,
             eventAt: new Date(slotIso).toISOString(),
+            actionPageId: page.id,
           })
         }
       })().catch((e) => console.error('[action-pages.submit] booking_events chain threw', e))
