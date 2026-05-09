@@ -3,6 +3,8 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { decryptToken } from '@/lib/facebook/crypto'
 import { sendOutbound } from '@/lib/messenger/outbound'
 import { applyStageChange, answerWithClassification, type StageBrief } from '@/lib/chatbot/classify'
+import { renderTemplateVariables, type LeadForRender } from '@/lib/messenger-templates/render'
+import { loadFollowupContext } from './followup-context'
 import type {
   WorkflowGraph,
   WorkflowNode,
@@ -44,8 +46,10 @@ interface WorkflowRow {
 
 interface LeadRow {
   id: string
+  name: string | null
   stage_id: string | null
   version: number
+  custom_fields: Record<string, unknown> | null
 }
 
 interface ThreadRow {
@@ -147,7 +151,7 @@ async function loadContext(admin: AdminClient, runId: string): Promise<RunContex
   if (run.lead_id) {
     const { data } = await admin
       .from('leads')
-      .select('id, stage_id, version')
+      .select('id, name, stage_id, version, custom_fields')
       .eq('id', run.lead_id)
       .maybeSingle<LeadRow>()
     lead = data ?? null
@@ -201,6 +205,18 @@ async function handleSend(
     }
   }
 
+  let outboundPayload: SendNodeConfig['payload'] = config.payload
+  let outboundKind: SendNodeConfig['kind'] = config.kind ?? 'workflow_human_agent'
+
+  if (config.payload.kind === 'utility_template') {
+    const rewritten = await rewriteUtilityTemplatePayload(admin, ctx, config.payload)
+    if (rewritten.skip) {
+      return { edge: 'policy_blocked', payload: { reason: rewritten.reason }, error: null }
+    }
+    outboundPayload = rewritten.payload as unknown as SendNodeConfig['payload']
+    outboundKind = 'workflow_human_agent'
+  }
+
   try {
     const result = await sendOutbound({
       admin,
@@ -210,10 +226,8 @@ async function handleSend(
         last_inbound_at: ctx.thread.last_inbound_at,
       },
       pageToken: ctx.pageToken,
-      // Task 5 will resolve utility_template config → OutboundPayload at runtime.
-      // Until then, cast so the type-only Task 2 change does not break the build.
-      payload: config.payload as import('@/lib/messenger/outbound').OutboundPayload,
-      kind: config.kind ?? 'workflow_human_agent',
+      payload: outboundPayload as import('@/lib/messenger/outbound').OutboundPayload,
+      kind: outboundKind ?? 'workflow_human_agent',
     })
 
     if (!result.sent) {
@@ -234,6 +248,92 @@ async function handleSend(
     return { edge: 'error', payload: {}, error: msg }
   }
 }
+
+interface TemplateRow {
+  id: string
+  meta_status: 'draft' | 'pending' | 'approved' | 'rejected' | 'disabled'
+  template_name: string
+  language: string
+  variable_count: number
+  buttons: Array<{ type: string; index?: number; url?: string }> | null
+}
+
+type UtilityTemplatePayload = Extract<SendNodeConfig['payload'], { kind: 'utility_template' }>
+
+interface OutboundUtilityTemplate {
+  kind: 'utility_template'
+  templateName: string
+  language: string
+  bodyParameters: string[]
+  buttonUrlOverrides?: Array<{ index: number; url: string }>
+}
+
+async function rewriteUtilityTemplatePayload(
+  admin: AdminClient,
+  ctx: RunContext,
+  payload: UtilityTemplatePayload,
+): Promise<{ skip: true; reason: string } | { skip: false; payload: OutboundUtilityTemplate }> {
+  const { data: tpl } = await admin
+    .from('messenger_message_templates')
+    .select('id, meta_status, template_name, language, variable_count, buttons')
+    .eq('id', payload.template_id)
+    .maybeSingle<TemplateRow>()
+
+  if (!tpl) return { skip: true, reason: 'template_not_found' }
+  if (tpl.meta_status !== 'approved') return { skip: true, reason: 'template_not_approved' }
+
+  const variables = (ctx.run.state as { variables?: Record<string, unknown> }).variables ?? {}
+  const followup = await loadFollowupContext(admin, {
+    booking_event_id:
+      typeof variables.booking_event_id === 'string' ? variables.booking_event_id : undefined,
+    source_property_action_page_id:
+      typeof variables.source_property_action_page_id === 'string'
+        ? variables.source_property_action_page_id
+        : undefined,
+  })
+
+  const lead: LeadForRender = {
+    name: ctx.lead?.name ?? null,
+    custom_fields: ctx.lead?.custom_fields ?? null,
+    booking: followup.booking,
+    property: followup.property,
+  }
+
+  const bodyParameters = renderTemplateVariables(payload.variables, tpl.variable_count, lead)
+
+  let buttonUrlOverrides: Array<{ index: number; url: string }> | undefined
+  if (payload.button_url_override) {
+    const buttons = tpl.buttons ?? []
+    let idx = payload.button_index ?? -1
+    if (idx < 0) idx = buttons.findIndex((b) => b.type === 'url')
+    if (idx >= 0) buttonUrlOverrides = [{ index: idx, url: payload.button_url_override }]
+  }
+
+  return {
+    skip: false,
+    payload: {
+      kind: 'utility_template',
+      templateName: tpl.template_name,
+      language: tpl.language,
+      bodyParameters,
+      ...(buttonUrlOverrides ? { buttonUrlOverrides } : {}),
+    },
+  }
+}
+
+// Test-only export. Bridges a partial RunContext shape from tests so the
+// production path stays type-safe. Production callers must use the full
+// loadRunContext-built RunContext via the executor's main entry point.
+export const handleSendForTest = handleSend as unknown as (
+  admin: AdminClient,
+  ctx: {
+    thread: { id: string; psid: string; last_inbound_at: string | null } | null
+    pageToken: string | null
+    lead: { name: string | null; custom_fields?: Record<string, unknown> | null } | null
+    run: { id: string; state: WorkflowRunState }
+  },
+  node: WorkflowNode,
+) => ReturnType<typeof handleSend>
 
 async function handleSetStage(
   admin: AdminClient,
