@@ -37,6 +37,26 @@ export interface SendNodeConfig {
   payload:
     | { kind: 'text'; text: string }
     | { kind: 'button'; text: string; url: string; ctaLabel: string }
+    | {
+        kind: 'utility_template'
+        /** messenger_message_templates.id */
+        template_id: string
+        /**
+         * 1-based variable map keyed by '1', '2', ... matching the
+         * {{1}}, {{2}}, ... placeholders in the template body.
+         */
+        variables: Record<
+          string,
+          | { kind: 'static'; text: string }
+          | { kind: 'lead_field'; field: string }
+          | { kind: 'booking_field'; field: 'event_at' | 'event_at_relative' | 'title' }
+          | { kind: 'property_field'; field: 'title' | 'address' | 'price' | 'deeplink_url' }
+        >
+        /** Optional override for the template's URL button. Defaults to action page deeplink. */
+        button_url_override?: string | null
+        /** Index of the button to override; null = first URL button. */
+        button_index?: number | null
+      }
   /**
    * Channel hint forwarded to sendOutbound.
    * - 'bot'                  — only sends inside the 24h window; pauses otherwise.

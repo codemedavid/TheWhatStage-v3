@@ -210,7 +210,9 @@ async function handleSend(
         last_inbound_at: ctx.thread.last_inbound_at,
       },
       pageToken: ctx.pageToken,
-      payload: config.payload,
+      // Task 5 will resolve utility_template config → OutboundPayload at runtime.
+      // Until then, cast so the type-only Task 2 change does not break the build.
+      payload: config.payload as import('@/lib/messenger/outbound').OutboundPayload,
       kind: config.kind ?? 'workflow_human_agent',
     })
 
