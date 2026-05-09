@@ -22,10 +22,9 @@ export function parseOffset(s: string): number | null {
   if (!unit) return null
 
   let ms: number
-  if (unit === 'm') ms = n * MS_PER_MIN
+  if (unit === 'd') ms = n * MS_PER_DAY
   else if (unit === 'h') ms = n * MS_PER_HOUR
-  else if (unit === 'd') ms = n * MS_PER_DAY
-  else return null
+  else ms = n * MS_PER_MIN // unit === 'm' (regex guarantees)
 
   if (sign === '-') ms = -ms
   if (Math.abs(ms) > MAX_ABS_MS) return null

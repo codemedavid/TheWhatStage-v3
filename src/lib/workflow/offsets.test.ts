@@ -19,6 +19,9 @@ describe('parseOffset', () => {
     expect(parseOffset('0')).toBe(0)
     expect(parseOffset('+0')).toBe(0)
     expect(parseOffset('-0')).toBe(0)
+    expect(parseOffset('0m')).toBe(0)
+    expect(parseOffset('0h')).toBe(0)
+    expect(parseOffset('0d')).toBe(0)
   })
   it('treats unsigned values as positive', () => {
     expect(parseOffset('30m')).toBe(30 * 60 * 1000)
@@ -33,6 +36,8 @@ describe('parseOffset', () => {
     expect(parseOffset('-3y')).toBeNull()
     expect(parseOffset('1.5h')).toBeNull()
     expect(parseOffset('--5m')).toBeNull()
+    expect(parseOffset('5')).toBeNull()
+    expect(parseOffset('-3')).toBeNull()
   })
 })
 
@@ -45,6 +50,7 @@ describe('formatOffset', () => {
   it('formats positive', () => {
     expect(formatOffset(60 * 60 * 1000)).toBe('+1h')
     expect(formatOffset(0)).toBe('0')
+    expect(formatOffset(5 * 60 * 1000)).toBe('+5m')
   })
   it('round-trips parseOffset for canonical inputs', () => {
     for (const s of ['-3d', '-2h', '-10m', '+1h', '+1d', '0']) {
