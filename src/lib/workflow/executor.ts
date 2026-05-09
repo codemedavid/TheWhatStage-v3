@@ -252,7 +252,7 @@ async function handleSend(
 interface TemplateRow {
   id: string
   meta_status: 'draft' | 'pending' | 'approved' | 'rejected' | 'disabled'
-  template_name: string
+  name: string
   language: string
   variable_count: number
   buttons: Array<{ type: string; index?: number; url?: string }> | null
@@ -275,7 +275,7 @@ async function rewriteUtilityTemplatePayload(
 ): Promise<{ skip: true; reason: string } | { skip: false; payload: OutboundUtilityTemplate }> {
   const { data: tpl } = await admin
     .from('messenger_message_templates')
-    .select('id, meta_status, template_name, language, variable_count, buttons')
+    .select('id, meta_status, name, language, variable_count, buttons')
     .eq('id', payload.template_id)
     .maybeSingle<TemplateRow>()
 
@@ -313,7 +313,7 @@ async function rewriteUtilityTemplatePayload(
     skip: false,
     payload: {
       kind: 'utility_template',
-      templateName: tpl.template_name,
+      templateName: tpl.name,
       language: tpl.language,
       bodyParameters,
       ...(buttonUrlOverrides ? { buttonUrlOverrides } : {}),

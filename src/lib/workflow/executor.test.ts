@@ -72,7 +72,7 @@ describe('executor handleSend — utility_template', () => {
     const admin = makeAdmin({
       id: 'tpl_1',
       meta_status: 'pending',
-      template_name: 'booking_24h',
+      name: 'booking_24h',
       language: 'en_US',
       variable_count: 1,
       buttons: [],
@@ -101,7 +101,7 @@ describe('executor handleSend — utility_template', () => {
     const admin = makeAdmin({
       id: 'tpl_1',
       meta_status: 'approved',
-      template_name: 'booking_24h',
+      name: 'booking_24h',
       language: 'en_US',
       variable_count: 2,
       buttons: [],
