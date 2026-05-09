@@ -17,6 +17,7 @@ import {
   type TemplateFormInput,
   type TemplateButton,
 } from '@/lib/messenger-templates/types'
+import type { TemplateCategory, MessengerMessageTemplateWithCategories } from '@/lib/messenger-templates/types'
 
 async function requireUser() {
   const supabase = await createClient()
@@ -25,12 +26,9 @@ async function requireUser() {
   return { supabase, userId: user.id }
 }
 
-export async function loadTemplates(): Promise<MessengerMessageTemplate[]> {
+export async function loadTemplates(): Promise<MessengerMessageTemplateWithCategories[]> {
   const { supabase, userId } = await requireUser()
 
-  // First-visit seeding: if the user has no templates yet, populate the
-  // 28 defaults via the SECURITY DEFINER seeder. Idempotent — the function
-  // ON CONFLICT DO NOTHINGs.
   const { count } = await supabase
     .from('messenger_message_templates')
     .select('id', { count: 'exact', head: true })
@@ -41,11 +39,27 @@ export async function loadTemplates(): Promise<MessengerMessageTemplate[]> {
 
   const { data, error } = await supabase
     .from('messenger_message_templates')
-    .select('*')
+    .select('*, messenger_template_categories(category:template_categories(id, slug, label, is_system, sort_order))')
     .eq('user_id', userId)
     .order('created_at', { ascending: true })
   if (error) throw new Error(`loadTemplates: ${error.message}`)
-  return (data ?? []) as MessengerMessageTemplate[]
+
+  return (data ?? []).map((row: Record<string, unknown>) => {
+    const joins = (row.messenger_template_categories as Array<{ category: TemplateCategory }> | null) ?? []
+    const { messenger_template_categories: _drop, ...rest } = row as Record<string, unknown>
+    void _drop
+    return {
+      ...(rest as unknown as MessengerMessageTemplate),
+      categories: joins
+        .map((j) => j.category)
+        .filter(Boolean)
+        .sort((a, b) =>
+          a.is_system === b.is_system
+            ? (a.is_system ? a.sort_order - b.sort_order : a.label.localeCompare(b.label))
+            : (a.is_system ? -1 : 1),
+        ),
+    }
+  })
 }
 
 function normalizeInput(input: TemplateFormInput) {
@@ -96,6 +110,14 @@ export async function createTemplate(input: TemplateFormInput): Promise<string> 
       throw new Error(`A template named "${row.name}" already exists.`)
     }
     throw new Error(`createTemplate: ${error.message}`)
+  }
+  // Auto-submit to Meta. Failures are persisted as 'rejected' inside
+  // submitTemplateForReview — we swallow them here so the create itself
+  // still succeeds and the user can see the rejection reason in the UI.
+  try {
+    await submitTemplateForReview(data.id)
+  } catch {
+    // already persisted as rejected with reason
   }
   revalidatePath('/dashboard/templates')
   return data.id
@@ -150,6 +172,15 @@ export async function updateTemplate(
       throw new Error(`A template named "${row.name}" already exists.`)
     }
     throw new Error(`updateTemplate: ${error.message}`)
+  }
+  // If the edit reset the status to draft, auto-resubmit so the template
+  // returns to the approved/pending state without a manual click.
+  if (resetStatus) {
+    try {
+      await submitTemplateForReview(id)
+    } catch {
+      // persisted as rejected
+    }
   }
   revalidatePath('/dashboard/templates')
 }
@@ -361,6 +392,58 @@ export async function refreshTemplateStatus(id: string): Promise<void> {
   revalidatePath('/dashboard/templates')
 }
 
+/**
+ * Bulk-submit every draft / rejected template owned by `userId`. Used after a
+ * page connect so the user's whole registry enters Meta review immediately —
+ * "auto-approve" from the user's perspective: utility templates with simple
+ * bodies usually come back APPROVED on the create response.
+ *
+ * Templates that fail validation (no body, missing samples, etc.) are skipped
+ * silently and reported in the returned counts. Meta rejections are persisted
+ * on the row (status='rejected', reason in `meta_rejection_reason`) so the
+ * dashboard can show them.
+ *
+ * Safe to call repeatedly: only rows currently in 'draft' or 'rejected' are
+ * touched. Already-approved/pending rows are left alone.
+ */
+export async function submitAllPendingTemplates(
+  userId: string,
+): Promise<{ submitted: number; failed: number; skipped: number }> {
+  const admin = createAdminClient()
+
+  // Make sure the 28 default templates exist before we try to submit them —
+  // a brand-new user who connected FB before visiting /dashboard/templates
+  // wouldn't have any rows yet.
+  await admin.rpc('seed_default_message_templates', { p_user_id: userId })
+
+  const { data: rows } = await admin
+    .from('messenger_message_templates')
+    .select('id, meta_status, body_text, variable_count, sample_values')
+    .eq('user_id', userId)
+    .in('meta_status', ['draft', 'rejected'])
+  if (!rows || rows.length === 0) return { submitted: 0, failed: 0, skipped: 0 }
+
+  let submitted = 0
+  let failed = 0
+  let skipped = 0
+  for (const r of rows as Array<Pick<MessengerMessageTemplate,
+    'id' | 'meta_status' | 'body_text' | 'variable_count' | 'sample_values'>>) {
+    if (!r.body_text?.trim()) { skipped++; continue }
+    if (r.variable_count > 0 && (r.sample_values?.length ?? 0) < r.variable_count) {
+      skipped++; continue
+    }
+    try {
+      await submitTemplateForReview(r.id)
+      submitted++
+    } catch (e) {
+      failed++
+      console.error('[submitAllPendingTemplates] submit failed', r.id, e)
+    }
+  }
+  revalidatePath('/dashboard/templates')
+  return { submitted, failed, skipped }
+}
+
 interface ResolvedPage {
   id: string
   fb_page_id: string
@@ -390,4 +473,93 @@ async function resolveTargetPage(
     .maybeSingle<ResolvedPage & { facebook_connections: unknown }>()
   if (!data) return null
   return { id: data.id, fb_page_id: data.fb_page_id, page_access_token: data.page_access_token }
+}
+
+/* ── categories ── */
+
+export async function listCategories(): Promise<TemplateCategory[]> {
+  const { supabase } = await requireUser()
+  const { data, error } = await supabase
+    .from('template_categories')
+    .select('id, slug, label, is_system, sort_order')
+    .order('is_system', { ascending: false })
+    .order('sort_order', { ascending: true })
+    .order('label', { ascending: true })
+  if (error) throw new Error(`listCategories: ${error.message}`)
+  return (data ?? []) as TemplateCategory[]
+}
+
+function slugify(label: string): string {
+  return label.toLowerCase().trim().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 48)
+}
+
+export async function createCategory(label: string): Promise<string> {
+  const { supabase, userId } = await requireUser()
+  const trimmed = label.trim()
+  if (!trimmed) throw new Error('Category label is required.')
+  const slug = slugify(trimmed)
+  if (!slug) throw new Error('Category label must contain at least one letter or digit.')
+  const { data, error } = await supabase
+    .from('template_categories')
+    .insert({ user_id: userId, slug, label: trimmed, is_system: false })
+    .select('id')
+    .single<{ id: string }>()
+  if (error) {
+    if ((error as { code?: string }).code === '23505') {
+      throw new Error(`A category named "${trimmed}" already exists.`)
+    }
+    throw new Error(`createCategory: ${error.message}`)
+  }
+  revalidatePath('/dashboard/templates')
+  return data.id
+}
+
+export async function deleteCategory(id: string): Promise<void> {
+  const { supabase } = await requireUser()
+  // RLS rejects attempts to delete system rows; we surface a clearer error.
+  const { data: row } = await supabase
+    .from('template_categories')
+    .select('is_system')
+    .eq('id', id)
+    .maybeSingle<{ is_system: boolean }>()
+  if (!row) throw new Error('Category not found.')
+  if (row.is_system) throw new Error('System categories cannot be deleted.')
+  const { error } = await supabase.from('template_categories').delete().eq('id', id)
+  if (error) throw new Error(`deleteCategory: ${error.message}`)
+  revalidatePath('/dashboard/templates')
+}
+
+export async function setTemplateCategories(
+  templateId: string,
+  categoryIds: string[],
+): Promise<void> {
+  const { supabase, userId } = await requireUser()
+  // Make sure the caller owns the template — RLS on the join table enforces
+  // this too, but a clean error message beats a constraint violation.
+  const { data: tpl } = await supabase
+    .from('messenger_message_templates')
+    .select('id')
+    .eq('id', templateId)
+    .eq('user_id', userId)
+    .maybeSingle()
+  if (!tpl) throw new Error('Template not found.')
+
+  const { error: delErr } = await supabase
+    .from('messenger_template_categories')
+    .delete()
+    .eq('template_id', templateId)
+  if (delErr) throw new Error(`setTemplateCategories (clear): ${delErr.message}`)
+
+  const unique = Array.from(new Set(categoryIds))
+  if (unique.length === 0) {
+    revalidatePath('/dashboard/templates')
+    return
+  }
+
+  const rows = unique.map((category_id) => ({ template_id: templateId, category_id }))
+  const { error: insErr } = await supabase
+    .from('messenger_template_categories')
+    .insert(rows)
+  if (insErr) throw new Error(`setTemplateCategories (insert): ${insErr.message}`)
+  revalidatePath('/dashboard/templates')
 }
