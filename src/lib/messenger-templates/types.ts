@@ -101,3 +101,15 @@ export function validateButtons(buttons: TemplateButton[]): string | null {
   }
   return null
 }
+
+export interface TemplateCategory {
+  id: string
+  slug: string
+  label: string
+  is_system: boolean
+  sort_order: number
+}
+
+export interface MessengerMessageTemplateWithCategories extends MessengerMessageTemplate {
+  categories: TemplateCategory[]
+}
