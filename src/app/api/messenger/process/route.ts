@@ -843,7 +843,7 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
                 realestateElements = buildRealestateCarouselElements(
                   reConfig.properties,
                   targetUrl,
-                  chosen.cta_label || 'View all',
+                  chosen.cta_label || 'View all listings',
                 )
               } catch (e) {
                 console.warn('[messenger.worker] realestate config parse failed', e)

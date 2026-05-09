@@ -166,6 +166,24 @@ describe('buildRealestateCarouselElements', () => {
     expect(out[0].defaultActionUrl).toBe('https://example.com/a/page?sig=abc&property=p-abc-123')
   })
 
+  it('falls back to "View all listings" when ctaLabel collides with "View property"', () => {
+    const out = buildRealestateCarouselElements(
+      [prop({ id: 'abc', title: 'Home' })],
+      'https://example.com/a/page?sig=abc',
+      'view property',
+    )
+    expect(out[0].buttons.map((b) => b.title)).toEqual(['View property', 'View all listings'])
+  })
+
+  it('falls back to "View all listings" when ctaLabel is empty/whitespace', () => {
+    const out = buildRealestateCarouselElements(
+      [prop({ id: 'abc', title: 'Home' })],
+      'https://example.com/a/page?sig=abc',
+      '   ',
+    )
+    expect(out[0].buttons[1].title).toBe('View all listings')
+  })
+
   it('uses ? when the base URL has no query string', () => {
     const out = buildRealestateCarouselElements(
       [prop({ id: 'abc', title: 'Home' })],

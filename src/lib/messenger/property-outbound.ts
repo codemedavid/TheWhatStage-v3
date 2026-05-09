@@ -45,6 +45,12 @@ export function buildRealestateCarouselElements(
   const active = properties.filter(
     (p) => ACTIVE_STATUSES.has(p.status) && p.title.trim().length > 0,
   )
+  const primaryTitle = 'View property'
+  const trimmedCta = ctaLabel.trim()
+  const secondaryTitle =
+    trimmedCta && trimmedCta.toLowerCase() !== primaryTitle.toLowerCase()
+      ? trimmedCta
+      : 'View all listings'
   return active.slice(0, 10).map((p) => {
     const slug = propertySlug(p.id)
     const productUrl = appendQuery(pageDeeplink, 'property', slug)
@@ -55,8 +61,8 @@ export function buildRealestateCarouselElements(
       imageUrl: pickImageUrl(p.gallery),
       defaultActionUrl: productUrl,
       buttons: [
-        { title: 'View property', url: productUrl },
-        { title: ctaLabel || 'View all', url: pageDeeplink },
+        { title: primaryTitle, url: productUrl },
+        { title: secondaryTitle, url: pageDeeplink },
       ],
     }
   })
