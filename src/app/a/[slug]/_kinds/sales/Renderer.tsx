@@ -1,5 +1,6 @@
 import type { CSSProperties } from 'react'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { signDeeplink } from '@/lib/action-pages/signing'
 import type { ActionPageRow } from '@/app/(app)/dashboard/action-pages/_lib/queries'
 import type { KindRendererProps, SourceContext } from '../types'
 import { parseSalesConfig, type SalesConfig } from './schema'
@@ -645,7 +646,17 @@ function LinkedConversions({
 }) {
   return (
     <div className="space-y-4">
-      {linked.map(({ page, kind }) => (
+      {linked.map(({ page, kind }) => {
+        const linkedToken = claims
+          ? signDeeplink(page.signing_secret, {
+              slug: page.slug,
+              psid: claims.psid,
+              pageId: claims.pageId,
+              exp: claims.exp,
+            })
+          : null
+        const linkedClaims = claims ? { ...claims, slug: page.slug } : null
+        return (
         <details
           key={page.id}
           open={linked.length === 1}
@@ -666,8 +677,8 @@ function LinkedConversions({
             {kind === 'form' && (
               <FormRenderer
                 page={page}
-                claims={claims}
-                rawToken={rawToken}
+                claims={linkedClaims}
+                rawToken={linkedToken}
                 variant="embed"
                 sourceContext={sourceContext}
               />
@@ -675,8 +686,8 @@ function LinkedConversions({
             {kind === 'booking' && (
               <BookingRenderer
                 page={page}
-                claims={claims}
-                rawToken={rawToken}
+                claims={linkedClaims}
+                rawToken={linkedToken}
                 variant="embed"
                 sourceContext={sourceContext}
               />
@@ -684,15 +695,16 @@ function LinkedConversions({
             {kind === 'qualification' && (
               <QualificationRenderer
                 page={page}
-                claims={claims}
-                rawToken={rawToken}
+                claims={linkedClaims}
+                rawToken={linkedToken}
                 variant="embed"
                 sourceContext={sourceContext}
               />
             )}
           </div>
         </details>
-      ))}
+        )
+      })}
     </div>
   )
 }

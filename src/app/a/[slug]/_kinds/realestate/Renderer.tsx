@@ -3,6 +3,7 @@ import Link from 'next/link'
 import type { KindRendererProps } from '../types'
 import type { ActionPageRow } from '@/app/(app)/dashboard/action-pages/_lib/queries'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { signDeeplink } from '@/lib/action-pages/signing'
 import { buildMapEmbedUrl, joinAddress } from '@/lib/action-pages/maps'
 import {
   parseRealestateConfig,
@@ -508,10 +509,18 @@ function LinkedRenderer({
   rawToken: KindRendererProps['rawToken']
   sourceContext: KindRendererProps['sourceContext']
 }) {
+  const reSignedToken = claims
+    ? signDeeplink(page.signing_secret, {
+        slug: page.slug,
+        psid: claims.psid,
+        pageId: claims.pageId,
+        exp: claims.exp,
+      })
+    : null
   const baseProps: KindRendererProps = {
     page,
-    claims,
-    rawToken,
+    claims: claims ? { ...claims, slug: page.slug } : null,
+    rawToken: reSignedToken,
     variant: 'embed',
     sourceContext,
   }

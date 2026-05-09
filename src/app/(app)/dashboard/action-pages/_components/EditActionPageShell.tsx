@@ -13,6 +13,7 @@ import { KindEditor } from './KindEditor'
 import { PipelineRulesEditor } from './PipelineRulesEditor'
 import { CatalogShell } from '../_kinds/catalog/CatalogShell'
 import { RealestateShell } from '../_kinds/realestate/RealestateShell'
+import { TriggerGuard } from './TriggerGuard'
 
 type StepId = 'general' | 'configuration' | 'workflow' | 'share'
 
@@ -155,11 +156,24 @@ function EditActionPageShellInner({
     <div data-actions-root>
       <div className="ap-page">
         <div className="ap-topbar">
-          <Link href="/dashboard/action-pages" className="ap-back">
+          <TriggerGuard
+            pageId={page.id}
+            initialTrigger={page.bot_send_instructions}
+            backHref="/dashboard/action-pages"
+            className="ap-back"
+            onJumpToTrigger={() => setStep(2)}
+          >
             <Chevron dir="left" /> Back
-          </Link>
+          </TriggerGuard>
           <div className="ap-crumbs">
-            <Link href="/dashboard/action-pages">Action Pages</Link>
+            <TriggerGuard
+              pageId={page.id}
+              initialTrigger={page.bot_send_instructions}
+              backHref="/dashboard/action-pages"
+              onJumpToTrigger={() => setStep(2)}
+            >
+              Action Pages
+            </TriggerGuard>
             <Chevron dir="right" size={12} />
             <span className="ap-crumb-current">{title || page.title}</span>
           </div>

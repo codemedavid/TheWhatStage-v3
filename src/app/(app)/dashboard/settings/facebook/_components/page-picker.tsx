@@ -1,8 +1,15 @@
+'use client'
+
+import { useTransition } from 'react'
+import { useRouter } from 'next/navigation'
 import type { FacebookPage } from '@/lib/facebook/oauth'
 import { savePagesForm, disconnectForm } from '../actions'
 import { PageAvatar } from './page-avatar'
 
 export function PagePicker({ pages }: { pages: FacebookPage[] }) {
+  const router = useRouter()
+  const [pending, startTransition] = useTransition()
+
   if (pages.length === 0) {
     return (
       <div className="rounded-xl border border-[#E5E7EB] bg-white p-6 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
@@ -12,12 +19,20 @@ export function PagePicker({ pages }: { pages: FacebookPage[] }) {
         <p className="text-[13px] text-[#6B7280] mb-4">
           Your Facebook account doesn&apos;t manage any pages.
         </p>
-        <form action={disconnectForm}>
+        <form
+          action={() =>
+            startTransition(async () => {
+              await disconnectForm()
+              router.refresh()
+            })
+          }
+        >
           <button
             type="submit"
-            className="inline-flex items-center rounded-md border border-[#E5E7EB] px-3 py-1.5 text-[13px] font-medium text-[#374151] hover:bg-[#F3F4F6]"
+            disabled={pending}
+            className="inline-flex items-center rounded-md border border-[#E5E7EB] px-3 py-1.5 text-[13px] font-medium text-[#374151] hover:bg-[#F3F4F6] disabled:opacity-60"
           >
-            Disconnect
+            {pending ? 'Disconnecting…' : 'Disconnect'}
           </button>
         </form>
       </div>
@@ -26,7 +41,12 @@ export function PagePicker({ pages }: { pages: FacebookPage[] }) {
 
   return (
     <form
-      action={savePagesForm}
+      action={(formData) =>
+        startTransition(async () => {
+          await savePagesForm(formData)
+          router.refresh()
+        })
+      }
       className="rounded-xl border border-[#E5E7EB] bg-white p-6 shadow-[0_1px_2px_rgba(16,24,40,0.04)]"
     >
       <h2 className="text-[16px] font-semibold text-[#111827] mb-1">
@@ -66,9 +86,10 @@ export function PagePicker({ pages }: { pages: FacebookPage[] }) {
       </ul>
       <button
         type="submit"
-        className="inline-flex items-center rounded-md bg-[#059669] px-4 py-2 text-[14px] font-medium text-white hover:bg-[#047857]"
+        disabled={pending}
+        className="inline-flex items-center rounded-md bg-[#059669] px-4 py-2 text-[14px] font-medium text-white hover:bg-[#047857] disabled:opacity-60"
       >
-        Save pages
+        {pending ? 'Saving…' : 'Save pages'}
       </button>
     </form>
   )

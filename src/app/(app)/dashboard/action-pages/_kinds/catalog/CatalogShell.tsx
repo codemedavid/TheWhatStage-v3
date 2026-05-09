@@ -7,6 +7,7 @@ import { updateActionPage, deleteActionPage } from '../../actions/crud'
 import type { ActionPageRow } from '../../_lib/queries'
 import { CopyField } from '../../_components/CopyField'
 import { PipelineRulesEditor } from '../../_components/PipelineRulesEditor'
+import { TriggerGuard } from '../../_components/TriggerGuard'
 import CatalogEditor from './Editor'
 
 export function CatalogShell({
@@ -31,6 +32,7 @@ export function CatalogShell({
   const [slug, setSlug] = useState(page.slug)
   const [status, setStatus] = useState<ActionPageRow['status']>(page.status)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [settingsTab, setSettingsTab] = useState<'general' | 'workflow' | 'share'>('general')
 
   useEffect(() => {
     if (settingsOpen) {
@@ -69,12 +71,18 @@ export function CatalogShell({
         {/* Top bar */}
         <header className="sticky top-0 z-30 border-b border-zinc-200 bg-white/95 backdrop-blur">
           <div className="mx-auto flex h-14 max-w-7xl items-center gap-3 px-5">
-            <Link
-              href="/dashboard/action-pages"
+            <TriggerGuard
+              pageId={page.id}
+              initialTrigger={page.bot_send_instructions}
+              backHref="/dashboard/action-pages"
               className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[13px] font-medium text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900"
+              onJumpToTrigger={() => {
+                setSettingsTab('workflow')
+                setSettingsOpen(true)
+              }}
             >
               <ChevronLeft /> Back
-            </Link>
+            </TriggerGuard>
 
             <div className="mx-1 h-5 w-px bg-zinc-200" />
 
@@ -189,6 +197,8 @@ export function CatalogShell({
           onSlug={setSlug}
           onStatus={setStatus}
           onDescription={setDescription}
+          tab={settingsTab}
+          onTabChange={setSettingsTab}
         />
       </form>
     </div>
@@ -211,6 +221,8 @@ function SettingsDrawer({
   onSlug,
   onStatus,
   onDescription,
+  tab,
+  onTabChange,
 }: {
   open: boolean
   onClose: () => void
@@ -225,8 +237,9 @@ function SettingsDrawer({
   onSlug: (v: string) => void
   onStatus: (v: ActionPageRow['status']) => void
   onDescription: (v: string) => void
+  tab: 'general' | 'workflow' | 'share'
+  onTabChange: (t: 'general' | 'workflow' | 'share') => void
 }) {
-  const [tab, setTab] = useState<'general' | 'workflow' | 'share'>('general')
 
   return (
     <>
@@ -276,7 +289,7 @@ function SettingsDrawer({
               <button
                 key={t.id}
                 type="button"
-                onClick={() => setTab(t.id)}
+                onClick={() => onTabChange(t.id)}
                 className={`relative px-3 py-2 text-[13px] font-medium transition ${
                   tab === t.id
                     ? 'text-zinc-900'
