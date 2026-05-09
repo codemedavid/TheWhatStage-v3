@@ -2,6 +2,8 @@
 
 import { useMemo, useState } from 'react'
 import type { KindEditorProps } from '../types'
+import { FollowupTouchpointsEditor } from './FollowupTouchpointsEditor'
+import { KIND_REGISTRY } from '@/lib/action-pages/kinds'
 import {
   defaultBookingConfig,
   parseBookingConfig,
@@ -327,6 +329,16 @@ export default function BookingEditor({ page }: KindEditorProps) {
           </button>
         </div>
       </SubSection>
+
+      {KIND_REGISTRY[page.kind].supportsFollowups && (
+        <SubSection title="Follow-up touchpoints">
+          <p className="mb-2 text-[12px] text-[#6B7280]">
+            Send up to 7 Meta utility-template messages around the booking time. Templates must be
+            approved on the Templates page first.
+          </p>
+          <FollowupTouchpointsEditor pageId={page.id} />
+        </SubSection>
+      )}
     </div>
   )
 }
