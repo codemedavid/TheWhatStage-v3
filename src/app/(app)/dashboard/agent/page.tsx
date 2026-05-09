@@ -25,7 +25,7 @@ export default async function AgentPage() {
   // Approved utility templates available for shared-template campaigns.
   const { data: tplData } = await supabase
     .from('messenger_message_templates')
-    .select('id, display_name, name, language, body_text, variable_count, buttons')
+    .select('id, display_name, name, language, body_text, variable_count, buttons, messenger_template_categories(category:template_categories(id, slug, label, is_system, sort_order))')
     .eq('user_id', user.id)
     .eq('meta_status', 'approved')
     .order('display_name', { ascending: true })
@@ -38,7 +38,18 @@ export default async function AgentPage() {
     body_text: t.body_text as string,
     variable_count: t.variable_count as number,
     buttons: (t.buttons as TemplateButton[]) ?? [],
+    categories: ((((t as unknown) as { messenger_template_categories?: Array<{ category: { id: string; slug: string; label: string; is_system: boolean; sort_order: number } | null } | null> }).messenger_template_categories) ?? [])
+      .map((j) => j?.category)
+      .filter((c): c is { id: string; slug: string; label: string; is_system: boolean; sort_order: number } => !!c),
   }))
+
+  const { data: catData } = await supabase
+    .from('template_categories')
+    .select('id, slug, label, is_system, sort_order')
+    .order('is_system', { ascending: false })
+    .order('sort_order', { ascending: true })
+    .order('label', { ascending: true })
+  const categories = (catData ?? []) as Array<{ id: string; slug: string; label: string; is_system: boolean; sort_order: number }>
 
   // Published action pages — shown as optional button targets for templates
   // that have a URL button slot.
@@ -56,5 +67,5 @@ export default async function AgentPage() {
     kind: p.kind as string,
   }))
 
-  return <AgentClient stages={stages} templates={templates} actionPages={actionPages} />
+  return <AgentClient stages={stages} templates={templates} actionPages={actionPages} categories={categories} />
 }

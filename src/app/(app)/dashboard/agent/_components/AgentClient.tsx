@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react'
-import type { TemplateButton } from '@/lib/messenger-templates/types'
+import type { TemplateButton, TemplateCategory } from '@/lib/messenger-templates/types'
 import { renderTemplate } from '@/lib/messenger-templates/types'
 import type { VariableMap, VariableRule } from '@/lib/messenger-templates/render'
 
@@ -46,6 +46,7 @@ interface ApprovedTemplate {
   body_text: string
   variable_count: number
   buttons: TemplateButton[]
+  categories: TemplateCategory[]
 }
 
 interface ActionPageOption {
@@ -59,6 +60,7 @@ interface AgentClientProps {
   stages: Stage[]
   templates: ApprovedTemplate[]
   actionPages: ActionPageOption[]
+  categories: TemplateCategory[]
 }
 
 interface Campaign {
@@ -132,7 +134,7 @@ function fmtDate(iso: string) {
 }
 
 /* ── main component ── */
-export function AgentClient({ stages, templates, actionPages }: AgentClientProps) {
+export function AgentClient({ stages, templates, actionPages, categories }: AgentClientProps) {
   const [tab, setTab] = useState<'new' | 'history'>('new')
   const [, startTransition] = useTransition()
 
@@ -143,6 +145,18 @@ export function AgentClient({ stages, templates, actionPages }: AgentClientProps
   const [stageName, setStageName] = useState<string>('')
   const [lastActiveDays, setLastActiveDays] = useState<string>('')
   const [actionPageId, setActionPageId] = useState<string>('')
+
+  const [filterCategoryIds, setFilterCategoryIds] = useState<string[]>([])
+  const filteredTemplates = useMemo(() => {
+    if (filterCategoryIds.length === 0) return templates
+    return templates.filter((t) => t.categories.some((c) => filterCategoryIds.includes(c.id)))
+  }, [templates, filterCategoryIds])
+
+  useEffect(() => {
+    if (!filteredTemplates.find((t) => t.id === templateId)) {
+      setTemplateId(filteredTemplates[0]?.id ?? '')
+    }
+  }, [filteredTemplates, templateId])
 
   const selectedTemplate = useMemo(
     () => templates.find((t) => t.id === templateId) ?? null,
@@ -490,6 +504,33 @@ export function AgentClient({ stages, templates, actionPages }: AgentClientProps
               </p>
             ) : (
               <>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+                  {categories.map((c) => {
+                    const on = filterCategoryIds.includes(c.id)
+                    return (
+                      <button
+                        key={c.id}
+                        type="button"
+                        onClick={() =>
+                          setFilterCategoryIds((prev) =>
+                            prev.includes(c.id) ? prev.filter((x) => x !== c.id) : [...prev, c.id],
+                          )
+                        }
+                        style={{
+                          border: `1px solid ${on ? S.accent : S.border}`,
+                          background: on ? S.accentSoft : S.surface,
+                          color: on ? S.accent : S.ink2,
+                          padding: '3px 9px',
+                          borderRadius: 999,
+                          fontSize: 11,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        {c.label}
+                      </button>
+                    )
+                  })}
+                </div>
                 <label style={{ display:'flex', flexDirection:'column', gap:6 }}>
                   <span style={{ fontSize:12, fontWeight:500, color:S.ink2 }}>Template</span>
                   <select
@@ -500,7 +541,7 @@ export function AgentClient({ stages, templates, actionPages }: AgentClientProps
                     }}
                     style={{ padding:'8px 10px', borderRadius:6, border:`1px solid ${S.border}`, fontSize:13, background:S.surface, color:S.ink }}
                   >
-                    {templates.map((t) => (
+                    {filteredTemplates.map((t) => (
                       <option key={t.id} value={t.id}>{t.display_name}</option>
                     ))}
                   </select>
