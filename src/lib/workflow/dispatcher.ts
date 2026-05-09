@@ -1,5 +1,6 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { triggerWorkflowWorker } from './trigger'
+import { parseOffset } from './offsets'
 
 type AdminClient = ReturnType<typeof createAdminClient>
 
@@ -47,25 +48,16 @@ export interface CartAbandonedPayload {
   source: string | null
 }
 
-// Callers pass the shared fields; dispatchBookingOffsets creates 3 runs
-// (one per offset) internally.
+// Callers pass the shared fields; dispatchBookingOffsets creates one run
+// per offset found in the workflow triggers.
 export interface BookingBasePayload {
   userId: string
   bookingEventId: string
   leadId: string | null
   threadId: string | null
   eventAt: string  // ISO UTC — used to compute next_run_at for each offset
-}
-
-const OFFSET_MS: Record<string, number> = {
-  '-3d':  -3  * 24 * 60 * 60 * 1000,
-  '-2d':  -2  * 24 * 60 * 60 * 1000,
-  '-1d':  -1  * 24 * 60 * 60 * 1000,
-  '-2h':  -2  * 60 * 60 * 1000,
-  '-1h':  -1  * 60 * 60 * 1000,
-  '-20m': -20 * 60 * 1000,
-  '-10m': -10 * 60 * 1000,
-  '-5m':  -5  * 60 * 1000,
+  /** When set, only fires triggers whose action_page_id matches (or is unset). */
+  actionPageId?: string
 }
 
 // ---------------------------------------------------------------------------
@@ -276,8 +268,9 @@ export async function dispatchSubmissionReceived(
   }
 }
 
-// Dispatches one run per offset (-3d, -2h, -10m) — all start in 'waiting'
-// with next_run_at computed from eventAt.
+// Dispatches one run per booking_offset trigger found in the user's active
+// workflows. Offsets are driven entirely by trigger config (not a hardcoded
+// table), and filtered by action_page_id when provided.
 export async function dispatchBookingOffsets(
   admin: AdminClient,
   payload: BookingBasePayload,
@@ -288,21 +281,54 @@ export async function dispatchBookingOffsets(
     return
   }
 
-  for (const [offset, deltaMs] of Object.entries(OFFSET_MS)) {
-    const nextRunAt = new Date(eventMs + deltaMs).toISOString()
-    // Skip offsets already in the past — no point scheduling a reminder that's overdue.
-    if (Date.now() >= eventMs + deltaMs) continue
+  const { data: workflows, error: wfErr } = await admin
+    .from('workflows')
+    .select('id, version, trigger, triggers')
+    .eq('user_id', payload.userId)
+    .eq('status', 'active')
+  if (wfErr || !workflows?.length) return
+
+  type Pair = { wfId: string; offset: string; deltaMs: number }
+  const pairs: Pair[] = []
+  for (const wf of workflows) {
+    const arr: Array<{ kind: string; config: Record<string, unknown> }> =
+      Array.isArray(wf.triggers) && wf.triggers.length > 0
+        ? (wf.triggers as Array<{ kind: string; config: Record<string, unknown> }>)
+        : [wf.trigger as { kind: string; config: Record<string, unknown> }]
+    const seen = new Set<string>()
+    for (const t of arr) {
+      if (t?.kind !== 'booking_offset') continue
+      const cfg = t.config as { offset?: string; action_page_id?: string }
+      if (!cfg.offset) continue
+      if (cfg.action_page_id) {
+        if (!payload.actionPageId || cfg.action_page_id !== payload.actionPageId) continue
+      }
+      const deltaMs = parseOffset(cfg.offset)
+      if (deltaMs === null) continue
+      if (seen.has(cfg.offset)) continue
+      seen.add(cfg.offset)
+      pairs.push({ wfId: wf.id, offset: cfg.offset, deltaMs })
+    }
+  }
+
+  for (const { wfId, offset, deltaMs } of pairs) {
+    const fireAtMs = eventMs + deltaMs
+    if (Date.now() >= fireAtMs) continue
+    const nextRunAt = new Date(fireAtMs).toISOString()
 
     try {
       await createRunsForMatchingWorkflows(admin, {
         userId: payload.userId,
         triggerKind: 'booking_offset',
         matchFn: (trigger) => {
-          const cfg = trigger.config as { offset?: string }
-          return !cfg.offset || cfg.offset === offset
+          const cfg = trigger.config as { offset?: string; action_page_id?: string }
+          if (cfg.offset !== offset) return false
+          if (cfg.action_page_id) {
+            if (!payload.actionPageId || cfg.action_page_id !== payload.actionPageId) return false
+          }
+          return true
         },
-        buildDedupKey: (wfId) =>
-          `wf:${wfId}:bk:${payload.bookingEventId}:${offset}`,
+        buildDedupKey: (id) => `wf:${id}:bk:${payload.bookingEventId}:${offset}`,
         buildRunSeed: () => ({
           lead_id: payload.leadId,
           thread_id: payload.threadId,
@@ -317,7 +343,7 @@ export async function dispatchBookingOffsets(
         }),
       })
     } catch (e) {
-      console.error('[workflow.dispatcher] dispatchBookingOffsets threw', { offset, e })
+      console.error('[workflow.dispatcher] dispatchBookingOffsets pair threw', { wfId, offset, e })
     }
   }
 }
@@ -510,5 +536,36 @@ export async function sweepCartAbandonedTriggers(admin: AdminClient): Promise<vo
         source: cart.source,
       })
     }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Booking-followup cancellation
+// ---------------------------------------------------------------------------
+
+/**
+ * Cancels all *waiting* workflow runs scheduled for the given booking event.
+ * Matches by dedup_key pattern `wf:%:bk:{bookingEventId}:%`. Idempotent.
+ */
+export async function cancelBookingFollowups(
+  admin: AdminClient,
+  bookingEventId: string,
+): Promise<void> {
+  try {
+    const pattern = `wf:%:bk:${bookingEventId}:%`
+    const { error } = await admin
+      .from('workflow_runs')
+      .update({
+        status: 'cancelled',
+        next_run_at: null,
+        cancel_reason: 'booking_cancelled',
+      })
+      .eq('status', 'waiting')
+      .like('dedup_key', pattern)
+    if (error) {
+      console.error('[workflow.dispatcher] cancelBookingFollowups failed', error.message)
+    }
+  } catch (e) {
+    console.error('[workflow.dispatcher] cancelBookingFollowups threw', e)
   }
 }
