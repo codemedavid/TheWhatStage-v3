@@ -784,7 +784,8 @@ describe('POST /api/messenger/process', () => {
       await POST(makeWorkerRequest() as Parameters<typeof POST>[0])
       await new Promise((r) => setTimeout(r, 10))
       expect(deepMocks.runDeepReclassify).toHaveBeenCalledTimes(1)
-      const arg = deepMocks.runDeepReclassify.mock.calls[0][0] as Record<string, unknown>
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const arg = (deepMocks.runDeepReclassify.mock.calls as any)[0][0] as Record<string, unknown>
       expect(arg.windowIndex).toBe(1)
       expect(arg.threadId).toBeTruthy()
       expect(arg.leadId).toBeTruthy()
