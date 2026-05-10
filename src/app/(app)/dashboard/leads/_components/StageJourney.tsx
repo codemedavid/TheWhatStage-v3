@@ -79,7 +79,7 @@ export function StageJourney({
       {created_at && (
         <JourneyDot
           when={created_at}
-          source="user"
+          source="manual"
           title="Lead created"
           subtitle={
             events[0]?.from_stage_name ? `in ${events[0].from_stage_name}` : null
@@ -100,6 +100,11 @@ export function StageJourney({
           }
           subtitle={e.reason?.trim() || null}
           confidence={e.confidence}
+          backward={
+            e.from_position != null &&
+            e.to_position != null &&
+            e.to_position < e.from_position
+          }
         />
       ))}
     </ol>
@@ -112,14 +117,16 @@ function JourneyDot({
   title,
   subtitle,
   confidence,
+  backward,
 }: {
   when: string
-  source: 'ai' | 'user'
+  source: import('../actions/messenger').StageEventSource
   title: string
   subtitle: string | null
   confidence?: 'low' | 'medium' | 'high' | null
+  backward?: boolean
 }) {
-  const isAi = source === 'ai'
+  const sourceMeta = SOURCE_PILL[source] ?? SOURCE_PILL.unknown
   const stamp = new Date(when).toLocaleString(undefined, {
     month: 'short',
     day: 'numeric',
@@ -132,8 +139,8 @@ function JourneyDot({
         aria-hidden
         className="absolute left-0 top-[5px] h-[11px] w-[11px] rounded-full"
         style={{
-          background: isAi ? 'var(--lead-accent)' : 'var(--lead-surface)',
-          border: `1.5px solid ${isAi ? 'var(--lead-accent)' : 'var(--lead-muted)'}`,
+          background: sourceMeta.dotFill,
+          border: `1.5px solid ${sourceMeta.dotBorder}`,
         }}
       />
       <div className="flex items-baseline gap-2">
@@ -142,16 +149,25 @@ function JourneyDot({
           style={{ color: 'var(--lead-ink)' }}
         >
           {title}
+          {backward && (
+            <span
+              className="ml-1.5 text-[11px]"
+              style={{ color: 'var(--lead-faint)' }}
+              title="Backward move"
+            >
+              ↩
+            </span>
+          )}
         </span>
         <span
           className="rounded-full px-1.5 py-0.5 text-[9.5px] uppercase tracking-wider"
           style={{
-            background: 'var(--lead-surface-2)',
-            border: '1px solid var(--lead-line)',
-            color: 'var(--lead-body)',
+            background: sourceMeta.pillBg,
+            border: `1px solid ${sourceMeta.pillBorder}`,
+            color: sourceMeta.pillFg,
           }}
         >
-          {isAi ? 'AI' : 'Manual'}
+          {sourceMeta.label}
         </span>
         {confidence && (
           <span
@@ -182,4 +198,65 @@ function JourneyDot({
       )}
     </li>
   )
+}
+
+const SOURCE_PILL: Record<
+  import('../actions/messenger').StageEventSource,
+  {
+    label: string
+    dotFill: string
+    dotBorder: string
+    pillBg: string
+    pillBorder: string
+    pillFg: string
+  }
+> = {
+  manual: {
+    label: 'Manual',
+    dotFill: 'var(--lead-surface)',
+    dotBorder: 'var(--lead-muted)',
+    pillBg: 'var(--lead-surface-2)',
+    pillBorder: 'var(--lead-line)',
+    pillFg: 'var(--lead-body)',
+  },
+  classifier: {
+    label: 'AI · per-turn',
+    dotFill: 'var(--lead-accent)',
+    dotBorder: 'var(--lead-accent)',
+    pillBg: 'var(--lead-surface-2)',
+    pillBorder: 'var(--lead-line)',
+    pillFg: 'var(--lead-body)',
+  },
+  deep_classifier: {
+    label: 'AI · audit',
+    dotFill: '#7c3aed',
+    dotBorder: '#7c3aed',
+    pillBg: 'var(--lead-surface-2)',
+    pillBorder: 'var(--lead-line)',
+    pillFg: 'var(--lead-body)',
+  },
+  action_page: {
+    label: 'Form',
+    dotFill: '#16a34a',
+    dotBorder: '#16a34a',
+    pillBg: 'var(--lead-surface-2)',
+    pillBorder: 'var(--lead-line)',
+    pillFg: 'var(--lead-body)',
+  },
+  workflow: {
+    label: 'Workflow',
+    dotFill: '#0891b2',
+    dotBorder: '#0891b2',
+    pillBg: 'var(--lead-surface-2)',
+    pillBorder: 'var(--lead-line)',
+    pillFg: 'var(--lead-body)',
+  },
+  unknown: {
+    label: 'Auto',
+    dotFill: 'var(--lead-surface)',
+    dotBorder: 'var(--lead-muted)',
+    pillBg: 'var(--lead-surface-2)',
+    pillBorder: 'var(--lead-line)',
+    pillFg: 'var(--lead-body)',
+  },
 }

@@ -148,7 +148,7 @@ export async function loadConversation(
 
 export interface LatestStageRationale {
   stage_name: string | null
-  source: 'ai' | 'user'
+  source: StageEventSource
   reason: string | null
   confidence: 'low' | 'medium' | 'high' | null
   created_at: string
@@ -186,7 +186,7 @@ export async function loadLatestStageRationale(
     .limit(1)
     .maybeSingle<{
       to_stage_id: string | null
-      source: 'ai' | 'user'
+      source: string
       reason: string | null
       confidence: 'low' | 'medium' | 'high' | null
       created_at: string
@@ -201,21 +201,44 @@ export async function loadLatestStageRationale(
 
   return {
     stage_name: stage?.name ?? null,
-    source: event.source,
+    source: mapEventSource(event.source),
     reason: event.reason,
     confidence: event.confidence,
     created_at: event.created_at,
   }
 }
 
+export type StageEventSource =
+  | 'manual'
+  | 'classifier'
+  | 'deep_classifier'
+  | 'action_page'
+  | 'workflow'
+  | 'unknown'
+
 export interface StageJourneyEvent {
   id: string
   from_stage_name: string | null
   to_stage_name: string | null
-  source: 'ai' | 'user'
+  from_position: number | null
+  to_position: number | null
+  source: StageEventSource
   reason: string | null
   confidence: 'low' | 'medium' | 'high' | null
   created_at: string
+}
+
+function mapEventSource(raw: string): StageEventSource {
+  switch (raw) {
+    case 'user':                   return 'manual'
+    case 'classifier':
+    case 'ai':                     return 'classifier'  // legacy 'ai' rows
+    case 'deep_classifier':        return 'deep_classifier'
+    case 'action_page':
+    case 'action_page_submission': return 'action_page'
+    case 'workflow':               return 'workflow'
+    default:                       return 'unknown'
+  }
 }
 
 export interface StageJourney {
@@ -238,7 +261,7 @@ export async function loadStageJourney(leadId: string): Promise<StageJourney> {
       .eq('lead_id', leadId)
       .order('created_at', { ascending: true })
       .limit(500),
-    supabase.from('pipeline_stages').select('id, name'),
+    supabase.from('pipeline_stages').select('id, name, position'),
     supabase
       .from('leads')
       .select('stage_id, created_at')
@@ -246,20 +269,30 @@ export async function loadStageJourney(leadId: string): Promise<StageJourney> {
       .maybeSingle<{ stage_id: string; created_at: string }>(),
   ])
 
-  const stageName = new Map((stages ?? []).map((s) => [s.id as string, s.name as string]))
-  const journey: StageJourneyEvent[] = (events ?? []).map((e) => ({
-    id: e.id as string,
-    from_stage_name: e.from_stage_id ? (stageName.get(e.from_stage_id as string) ?? null) : null,
-    to_stage_name: e.to_stage_id ? (stageName.get(e.to_stage_id as string) ?? null) : null,
-    source: e.source as 'ai' | 'user',
-    reason: (e.reason as string | null) ?? null,
-    confidence: (e.confidence as StageJourneyEvent['confidence']) ?? null,
-    created_at: e.created_at as string,
-  }))
+  const stageById = new Map(
+    ((stages ?? []) as Array<{ id: string; name: string; position: number }>).map((s) => [s.id, s]),
+  )
+  const journey: StageJourneyEvent[] = (events ?? []).map((e) => {
+    const fromId = e.from_stage_id as string | null
+    const toId = e.to_stage_id as string | null
+    const fromStage = fromId ? stageById.get(fromId) ?? null : null
+    const toStage = toId ? stageById.get(toId) ?? null : null
+    return {
+      id: e.id as string,
+      from_stage_name: fromStage?.name ?? null,
+      to_stage_name: toStage?.name ?? null,
+      from_position: fromStage?.position ?? null,
+      to_position: toStage?.position ?? null,
+      source: mapEventSource(e.source as string),
+      reason: (e.reason as string | null) ?? null,
+      confidence: (e.confidence as StageJourneyEvent['confidence']) ?? null,
+      created_at: e.created_at as string,
+    }
+  })
 
   return {
     events: journey,
-    current_stage_name: lead?.stage_id ? (stageName.get(lead.stage_id) ?? null) : null,
+    current_stage_name: lead?.stage_id ? (stageById.get(lead.stage_id)?.name ?? null) : null,
     created_at: lead?.created_at ?? null,
   }
 }
