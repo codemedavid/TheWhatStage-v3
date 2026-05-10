@@ -331,7 +331,7 @@ export async function applyStageChange(
   }
 }
 
-function stageInstruction(
+export function stageInstruction(
   stages: StageBrief[],
   currentStageId: string | null,
   actionPages: ActionPageBrief[],
@@ -505,7 +505,7 @@ function coerceActionPage(
   return { action_page_id: id, reason, button_text }
 }
 
-function stageList(stages: StageBrief[], currentStageId: string | null): string {
+export function stageList(stages: StageBrief[], currentStageId: string | null): string {
   // Render in position order so the hierarchy is visually obvious.
   const ordered = [...stages].sort((a, b) => a.position - b.position)
   const lines = ordered.map((s) => {
