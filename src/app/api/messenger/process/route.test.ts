@@ -3,6 +3,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 process.env.FB_TOKEN_ENCRYPTION_KEY ??= Buffer.alloc(32, 1).toString('base64')
 process.env.MESSENGER_WORKER_SECRET ??= 'test-secret'
 
+const deepMocks = vi.hoisted(() => ({
+  runDeepReclassify: vi.fn(async () => undefined),
+}))
+vi.mock('@/lib/chatbot/deep-reclassify', () => ({
+  runDeepReclassify: deepMocks.runDeepReclassify,
+}))
+
 const mocks = vi.hoisted(() => ({
   admin: null as unknown,
   answer: vi.fn(async () => ({ text: 'Fallback reply', sourceTitles: [] })),
@@ -94,11 +101,17 @@ vi.mock('@/lib/messenger/property-outbound', () => ({
   },
 }))
 
+let pendingInboundCount = 0
+let pendingDeepFlag = false
+
 const { resolveCommentBridgesForThread } = await import('./route')
 const { POST } = await import('./route')
 
 beforeEach(() => {
   vi.clearAllMocks()
+  deepMocks.runDeepReclassify.mockClear()
+  pendingInboundCount = 0
+  pendingDeepFlag = false
 })
 
 function makeWorkerRequest(): Request {
@@ -117,10 +130,14 @@ function makeWorkerAdminMock() {
     private filters: Record<string, unknown> = {}
     private updatePayload: unknown = null
     private insertPayload: unknown = null
+    private selectOpts: Record<string, unknown> = {}
 
     constructor(private table: string) {}
 
-    select() { return this }
+    select(_col?: unknown, opts?: Record<string, unknown>) {
+      this.selectOpts = opts ?? {}
+      return this
+    }
     eq(key: string, value: unknown) {
       this.filters[key] = value
       return this
@@ -162,6 +179,11 @@ function makeWorkerAdminMock() {
     private async resolveSingle() {
       if (this.updatePayload) return { data: null, error: null }
 
+      // Count query: select('id', { head: true, count: 'exact' })
+      if (this.table === 'messenger_messages' && this.selectOpts.count === 'exact') {
+        return { count: pendingInboundCount, data: null, error: null }
+      }
+
       if (this.table === 'messenger_messages') {
         return {
           data: {
@@ -194,7 +216,13 @@ function makeWorkerAdminMock() {
       }
 
       if (this.table === 'chatbot_configs') {
-        return { data: { auto_classify_enabled: true }, error: null }
+        return {
+          data: {
+            auto_classify_enabled: true,
+            deep_reclassify_enabled: pendingDeepFlag,
+          },
+          error: null,
+        }
       }
 
       if (this.table === 'leads') {
@@ -227,6 +255,11 @@ function makeWorkerAdminMock() {
 
     private async resolveMany() {
       if (this.updatePayload) return { data: null, error: null }
+
+      // Count query landing in resolveMany (via .then) — return count shape
+      if (this.table === 'messenger_messages' && this.selectOpts.count === 'exact') {
+        return { count: pendingInboundCount, data: null, error: null }
+      }
 
       if (this.table === 'messenger_messages') {
         return { data: [], error: null }
@@ -734,5 +767,57 @@ describe('POST /api/messenger/process', () => {
     expect(res.status).toBe(200)
     expect(mocks.sendPropertyRecommendation).toHaveBeenCalledTimes(1)
     expect(mocks.sendMessengerGenericTemplate).not.toHaveBeenCalled()
+  })
+
+  describe('deep re-evaluation trigger', () => {
+    beforeEach(() => {
+      deepMocks.runDeepReclassify.mockClear()
+      pendingInboundCount = 0
+      pendingDeepFlag = false
+    })
+
+    it('invokes runDeepReclassify when inbound count is 10 and flag is on', async () => {
+      pendingInboundCount = 10
+      pendingDeepFlag = true
+      const { admin } = makeWorkerAdminMock()
+      mocks.admin = admin
+      await POST(makeWorkerRequest() as Parameters<typeof POST>[0])
+      await new Promise((r) => setTimeout(r, 10))
+      expect(deepMocks.runDeepReclassify).toHaveBeenCalledTimes(1)
+      const arg = deepMocks.runDeepReclassify.mock.calls[0][0] as Record<string, unknown>
+      expect(arg.windowIndex).toBe(1)
+      expect(arg.threadId).toBeTruthy()
+      expect(arg.leadId).toBeTruthy()
+    })
+
+    it('does not invoke when inbound count is 5', async () => {
+      pendingInboundCount = 5
+      pendingDeepFlag = true
+      const { admin } = makeWorkerAdminMock()
+      mocks.admin = admin
+      await POST(makeWorkerRequest() as Parameters<typeof POST>[0])
+      await new Promise((r) => setTimeout(r, 10))
+      expect(deepMocks.runDeepReclassify).not.toHaveBeenCalled()
+    })
+
+    it('does not invoke when flag is off, even at multiples of 10', async () => {
+      pendingInboundCount = 20
+      pendingDeepFlag = false
+      const { admin } = makeWorkerAdminMock()
+      mocks.admin = admin
+      await POST(makeWorkerRequest() as Parameters<typeof POST>[0])
+      await new Promise((r) => setTimeout(r, 10))
+      expect(deepMocks.runDeepReclassify).not.toHaveBeenCalled()
+    })
+
+    it('reply path completes when runDeepReclassify throws', async () => {
+      pendingInboundCount = 10
+      pendingDeepFlag = true
+      deepMocks.runDeepReclassify.mockRejectedValueOnce(new Error('boom'))
+      const { admin } = makeWorkerAdminMock()
+      mocks.admin = admin
+      const response = await POST(makeWorkerRequest() as Parameters<typeof POST>[0])
+      expect(response.status).toBe(200)
+    })
   })
 })
