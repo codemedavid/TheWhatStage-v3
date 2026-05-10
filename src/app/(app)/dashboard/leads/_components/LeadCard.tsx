@@ -60,6 +60,47 @@ export function LeadCard({ lead, onClick }: { lead: LeadRow; onClick: () => void
       {...(mounted ? attributes : {})}
       {...(mounted ? listeners : {})}
     >
+      {lead.latest_auto_move && (
+        <div
+          className="absolute right-2 top-2 group/badge"
+          aria-label={`Auto-moved to ${lead.latest_auto_move.to_stage_name ?? 'stage'} by AI`}
+        >
+          <span
+            className="inline-flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-semibold cursor-default"
+            style={{
+              background: lead.latest_auto_move.source === 'deep_classifier' ? '#ede9fe' : '#dbeafe',
+              color:      lead.latest_auto_move.source === 'deep_classifier' ? '#6d28d9' : '#1d4ed8',
+              border: '1px solid var(--lead-line)',
+            }}
+          >
+            AI
+          </span>
+          <div
+            className="pointer-events-none absolute right-0 top-6 z-10 hidden w-56 rounded-lg p-2 text-[11px] shadow-md group-hover/badge:block"
+            style={{
+              background: 'var(--lead-surface)',
+              border: '1px solid var(--lead-line)',
+              color: 'var(--lead-body)',
+            }}
+          >
+            <div className="font-medium" style={{ color: 'var(--lead-ink)' }}>
+              {lead.latest_auto_move.source === 'deep_classifier' ? 'AI audit' : 'AI per-turn'} →{' '}
+              {lead.latest_auto_move.to_stage_name ?? 'stage'}
+            </div>
+            <div className="mt-1" style={{ color: 'var(--lead-faint)' }}>
+              {new Date(lead.latest_auto_move.created_at).toLocaleString(undefined, {
+                month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+              })}
+              {lead.latest_auto_move.confidence ? ` · ${lead.latest_auto_move.confidence}` : ''}
+            </div>
+            {lead.latest_auto_move.reason && (
+              <div className="mt-1 line-clamp-3" style={{ color: 'var(--lead-body)' }}>
+                {lead.latest_auto_move.reason.slice(0, 200)}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
       <div className="flex items-start gap-2.5">
         {lead.picture_url ? (
           <img

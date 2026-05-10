@@ -17,6 +17,7 @@ const lead: LeadRow = {
   picture_url: null,
   campaign_id: null,
   campaign_name: null,
+  latest_auto_move: null,
 }
 
 describe('leadsToCsv', () => {

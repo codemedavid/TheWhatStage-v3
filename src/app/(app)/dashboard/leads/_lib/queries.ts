@@ -33,9 +33,18 @@ export type LeadRow = {
   picture_url: string | null
   campaign_id: string | null
   campaign_name: string | null
+  /** Set when the most recent AI-driven stage event for this lead exists.
+   *  null otherwise. Used to render the auto-move badge on the kanban card. */
+  latest_auto_move: {
+    source: 'classifier' | 'deep_classifier'
+    confidence: 'low' | 'medium' | 'high' | null
+    reason: string | null
+    to_stage_name: string | null
+    created_at: string
+  } | null
 }
 
-type LeadRowWithJoins = Omit<LeadRow, 'picture_url' | 'campaign_name'> & {
+type LeadRowWithJoins = Omit<LeadRow, 'picture_url' | 'campaign_name' | 'latest_auto_move'> & {
   messenger_threads: { picture_url: string | null }[] | { picture_url: string | null } | null
   campaigns: { name: string } | { name: string }[] | null
 }
@@ -48,7 +57,7 @@ function flattenLead(row: LeadRowWithJoins): LeadRow {
   const campaign_name = Array.isArray(c)
     ? (c[0]?.name ?? null)
     : (c?.name ?? null)
-  return { ...rest, picture_url, campaign_name }
+  return { ...rest, picture_url, campaign_name, latest_auto_move: null }
 }
 
 export type StageRow = {
@@ -167,6 +176,65 @@ export async function fetchLeadsPage(
   const { data, error, count } = await query.range(from, to)
   if (error) throw error
   const rows = ((data ?? []) as LeadRowWithJoins[]).map(flattenLead)
+
+  // Populate latest_auto_move for each lead from lead_stage_events
+  const leadIds = rows.map((l) => l.id)
+  if (leadIds.length > 0) {
+    type AutoMoveRaw = {
+      lead_id: string
+      source: 'classifier' | 'deep_classifier'
+      confidence: 'low' | 'medium' | 'high' | null
+      reason: string | null
+      to_stage_id: string | null
+      created_at: string
+    }
+    const autoMoveByLead = new Map<string, AutoMoveRaw>()
+    const { data: events } = await supabase
+      .from('lead_stage_events')
+      .select('lead_id, source, confidence, reason, to_stage_id, created_at')
+      .in('lead_id', leadIds)
+      .in('source', ['classifier', 'deep_classifier'])
+      .order('created_at', { ascending: false })
+      .limit(500)
+    for (const e of (events ?? []) as AutoMoveRaw[]) {
+      if (!autoMoveByLead.has(e.lead_id)) {
+        autoMoveByLead.set(e.lead_id, e)
+      }
+    }
+
+    // Resolve stage names
+    const stageIds = [
+      ...new Set(
+        [...autoMoveByLead.values()]
+          .map((m) => m.to_stage_id)
+          .filter((id): id is string => id !== null),
+      ),
+    ]
+    const stageNameById = new Map<string, string>()
+    if (stageIds.length > 0) {
+      const { data: stageRows } = await supabase
+        .from('pipeline_stages')
+        .select('id, name')
+        .in('id', stageIds)
+      for (const s of (stageRows ?? []) as Array<{ id: string; name: string }>) {
+        stageNameById.set(s.id, s.name)
+      }
+    }
+
+    for (const l of rows) {
+      const m = autoMoveByLead.get(l.id)
+      l.latest_auto_move = m
+        ? {
+            source: m.source,
+            confidence: m.confidence,
+            reason: m.reason,
+            to_stage_name: m.to_stage_id ? (stageNameById.get(m.to_stage_id) ?? null) : null,
+            created_at: m.created_at,
+          }
+        : null
+    }
+  }
+
   return { rows, total: count ?? 0 }
 }
 
