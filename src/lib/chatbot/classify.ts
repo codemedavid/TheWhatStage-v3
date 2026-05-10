@@ -386,6 +386,17 @@ function stageInstruction(
   const recommendPropertySection = hasRecommendProperty
     ? recommendInstruction(recommendPropertyRules!, 'property')
     : ''
+  const hierarchyBlock =
+    'STAGE HIERARCHY RULES — read carefully:\n' +
+    '- Stages are listed in pipeline order. Earlier position = earlier in the customer journey.\n' +
+    '- The stage NAME is first-class evidence. A customer message clearly invoking the destination stage\'s name (e.g. "cancel my booking", "I\'m ready to buy") is direct evidence to move there.\n' +
+    '- Forward moves (later position, or any move into a `won`/`lost` terminal stage) are allowed when the customer\'s intent matches the destination stage\'s description or name.\n' +
+    '- Backward moves (earlier position) require BOTH:\n' +
+    '    (a) `confidence` = "high", AND\n' +
+    '    (b) `reason` MUST cite an explicit disqualifying signal — e.g. customer cancelled, said "not interested", changed their mind, asked to be removed from the funnel.\n' +
+    '- Never move backward on tone alone. A frustrated message is not a backward signal unless the customer explicitly disengages.\n' +
+    '- If the lead is on the right stage, return `stage_change: null`.'
+
   return (
     'You are also responsible for classifying the lead\'s pipeline stage' +
     (hasActionPages ? ' and deciding whether to attach an action page button to your reply' : '') +
@@ -395,7 +406,9 @@ function stageInstruction(
     schema +
     '\n`reply` is what the customer sees — write it in the same persona/rules above. ' +
     '`stage_change` is null when the lead should stay in the current stage. ' +
-    'Only use stage_ids from the list. Pick the stage whose description best matches the customer\'s intent in the latest message + conversation.\n\n' +
+    'Only use stage_ids from the list. Pick the stage whose name AND description best match the customer\'s intent in the latest message + conversation history.\n\n' +
+    hierarchyBlock +
+    '\n\n' +
     stageList(stages, currentStageId) +
     apSection +
     recommendSection +
@@ -493,12 +506,18 @@ function coerceActionPage(
 }
 
 function stageList(stages: StageBrief[], currentStageId: string | null): string {
-  const lines = stages.map((s) => {
+  // Render in position order so the hierarchy is visually obvious.
+  const ordered = [...stages].sort((a, b) => a.position - b.position)
+  const lines = ordered.map((s) => {
     const cur = s.id === currentStageId ? '  [CURRENT]' : ''
     const desc = (s.description ?? '').trim() || '(no description)'
-    return `- id: ${s.id}${cur}\n  name: ${s.name}\n  description: ${desc}`
+    return (
+      `- [${s.position} · ${s.kind}] ${s.name}${cur}\n` +
+      `  id: ${s.id}\n` +
+      `  description: ${desc}`
+    )
   })
-  return `Pipeline stages:\n${lines.join('\n')}`
+  return `Pipeline stages (in order — earlier first):\n${lines.join('\n')}`
 }
 
 function formatHistory(history: AnswerHistory): string {
