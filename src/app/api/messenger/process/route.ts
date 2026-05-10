@@ -35,6 +35,7 @@ import {
 } from '@/lib/chatbot/classify'
 import { loadLeadContext } from '@/lib/chatbot/leadContext'
 import { interruptWorkflowRun } from '@/lib/workflow/trigger'
+import { runDeepReclassify } from '@/lib/chatbot/deep-reclassify'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -1000,6 +1001,29 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
           stages,
         })
       }
+
+      // Layer 2: deep re-evaluation every 10 inbound messages. Fire-and-forget.
+      if (thread.lead_id && stages.length > 0) {
+        const leadId = thread.lead_id
+        void (async () => {
+          try {
+            const enabled = await isDeepReclassifyEnabled(admin, thread.user_id)
+            if (!enabled) return
+            const inboundCount = await countInboundMessages(admin, thread.id)
+            if (inboundCount === 0 || inboundCount % 10 !== 0) return
+            const windowIndex = Math.floor(inboundCount / 10)
+            await runDeepReclassify({
+              adminClient: admin,
+              leadId,
+              threadId: thread.id,
+              userId: thread.user_id,
+              windowIndex,
+            })
+          } catch (e) {
+            console.error('[messenger.worker] deep-reclassify trigger threw', e)
+          }
+        })()
+      }
     } else if (classifyEnabled && thread.lead_id && stages.length > 0) {
       // Bot is muted on this thread — only classify, every Nth inbound.
       const next = thread.inbound_since_classify + 1
@@ -1237,6 +1261,38 @@ async function loadStageContext(
     currentStageId = lead?.stage_id ?? null
   }
   return { stages, currentStageId }
+}
+
+async function countInboundMessages(
+  admin: AdminClient,
+  threadId: string,
+): Promise<number> {
+  const { count, error } = await admin
+    .from('messenger_messages')
+    .select('id', { head: true, count: 'exact' })
+    .eq('thread_id', threadId)
+    .eq('direction', 'inbound')
+  if (error) {
+    console.warn('[messenger.worker] countInboundMessages failed', error.message)
+    return 0
+  }
+  return count ?? 0
+}
+
+async function isDeepReclassifyEnabled(
+  admin: AdminClient,
+  userId: string,
+): Promise<boolean> {
+  try {
+    const { data } = await admin
+      .from('chatbot_configs')
+      .select('deep_reclassify_enabled')
+      .eq('user_id', userId)
+      .maybeSingle<{ deep_reclassify_enabled: boolean }>()
+    return !!data?.deep_reclassify_enabled
+  } catch {
+    return false
+  }
 }
 
 async function pickDefaultStage(
