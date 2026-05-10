@@ -21,6 +21,10 @@ export interface StageBrief {
   id: string
   name: string
   description: string | null
+  /** 0-based ordering within the user's pipeline. Lower = earlier. */
+  position: number
+  /** Pipeline-stage semantic kind. Drives hierarchy reasoning in the prompt. */
+  kind: 'entry' | 'qualifying' | 'nurture' | 'decision' | 'won' | 'lost' | 'dormant'
 }
 
 export interface StageChange {
@@ -136,8 +140,12 @@ export async function answerWithClassification(
     recommendRules,
     recommendPropertyRules,
   )
+  const firstName = options.leadName?.split(' ')[0]?.trim()
+  const leadNameBlock = firstName
+    ? `# Lead\nThe customer's first name is ${firstName}. Address them by their first name when greeting or when it feels natural.`
+    : null
   const leadContext = options.leadContextBlock?.trim()
-  const system = [built.system, stageSystem, leadContext].filter(Boolean).join('\n\n')
+  const system = [built.system, stageSystem, leadNameBlock, leadContext].filter(Boolean).join('\n\n')
 
   // Scan ALL retrieved chunks (including grader-rejected ones) for @asset /
   // #folder references — a slug-only paragraph often scores low in the

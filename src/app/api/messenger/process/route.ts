@@ -477,6 +477,7 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
               activeCatalogPageId,
               activeRealestatePageId,
               leadContextBlock,
+              leadName: thread.full_name ?? undefined,
             },
           )
           reply = r.text.trim()
@@ -495,6 +496,7 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
           campaignPersona: effectivePersona,
           conversationSummary,
           leadContextBlock,
+          leadName: thread.full_name ?? undefined,
         })
         reply = r.text.trim()
         selectedMedia = r.media
@@ -1221,7 +1223,7 @@ async function loadStageContext(
 ): Promise<{ stages: StageBrief[]; currentStageId: string | null }> {
   const { data: stagesData } = await admin
     .from('pipeline_stages')
-    .select('id, name, description')
+    .select('id, name, description, position, kind')
     .eq('user_id', userId)
     .order('position', { ascending: true })
   const stages = (stagesData ?? []) as StageBrief[]
