@@ -47,6 +47,8 @@ export const OutcomeMatchSchema = z.discriminatedUnion('kind', [
 ])
 export type QualificationOutcomeMatch = z.infer<typeof OutcomeMatchSchema>
 
+// Zod's uuid() rejects the nil UUID; keep UUID shape validation while allowing
+// deterministic all-zero IDs in fixtures and config references.
 const OutcomeUuidSchema = z
   .string()
   .regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)
@@ -100,7 +102,7 @@ export type QualificationConfig = z.infer<typeof QualificationConfigSchema>
 export function defaultQualificationOutcomes(
   scoring: QualificationScoring,
 ): QualificationOutcomeAction[] {
-  const threshold = scoring.threshold ?? 1
+  const threshold = scoring.threshold ?? 0
   const qualified = scoring.qualified_outcome || 'qualified'
   const disqualified = scoring.disqualified_outcome || 'disqualified'
   return [
@@ -170,6 +172,19 @@ export const DEFAULT_QUALIFICATION_CONFIG: QualificationConfig = {
 
 /** Parse, falling back to defaults on any validation failure. */
 export function parseQualificationConfig(raw: unknown): QualificationConfig {
+  const parseOutcomeActions = (value: unknown): QualificationOutcomeAction[] => {
+    if (!Array.isArray(value)) return []
+    return value.flatMap((item) => {
+      const parsed = OutcomeActionSchema.safeParse(item)
+      return parsed.success ? [parsed.data] : []
+    })
+  }
+
+  const sanitizeOutcomes = (candidate: Record<string, unknown>): Record<string, unknown> => {
+    if (!('outcomes' in candidate)) return candidate
+    return { ...candidate, outcomes: parseOutcomeActions(candidate.outcomes) }
+  }
+
   const normalize = (candidate: QualificationConfig): QualificationConfig => ({
     ...candidate,
     outcomes:
@@ -178,11 +193,16 @@ export function parseQualificationConfig(raw: unknown): QualificationConfig {
         : defaultQualificationOutcomes(candidate.scoring),
   })
 
-  const result = QualificationConfigSchema.safeParse(raw)
+  const result = QualificationConfigSchema.safeParse(
+    raw && typeof raw === 'object' ? sanitizeOutcomes(raw as Record<string, unknown>) : raw,
+  )
   if (result.success) return normalize(result.data)
   // Try a partial merge so partially-valid configs at least keep questions.
   if (raw && typeof raw === 'object') {
-    const merged = { ...DEFAULT_QUALIFICATION_CONFIG, ...(raw as Record<string, unknown>) }
+    const merged = {
+      ...DEFAULT_QUALIFICATION_CONFIG,
+      ...sanitizeOutcomes(raw as Record<string, unknown>),
+    }
     const second = QualificationConfigSchema.safeParse(merged)
     if (second.success) return normalize(second.data)
   }

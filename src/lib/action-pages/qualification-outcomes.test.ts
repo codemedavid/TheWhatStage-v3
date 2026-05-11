@@ -68,4 +68,72 @@ describe('parseQualificationConfig outcome normalization', () => {
     expect(config.outcomes[0]?.outcome).toBe('needs_financing')
     expect(config.outcomes[0]?.attach_cta_label).toBe('See options')
   })
+
+  it('drops malformed outcome actions without losing valid questions or scoring', () => {
+    const config = parseQualificationConfig({
+      theme: {
+        background_color: '#FFFFFF',
+        accent_color: '#059669',
+        button_text_color: '#FFFFFF',
+      },
+      progress_bar: true,
+      questions: [
+        {
+          id: 'budget',
+          prompt: 'What is your budget?',
+          kind: 'single_choice',
+          required: true,
+          options: [{ label: 'Ready', value: 'ready', score: 2 }],
+        },
+      ],
+      scoring: {
+        mode: 'rule_based',
+        threshold: 2,
+        qualified_outcome: 'ready',
+        disqualified_outcome: 'not_ready',
+      },
+      outcomes: [
+        {
+          id: '',
+          label: '',
+          outcome: '',
+          match: { kind: 'answer_equals', question_id: '', value: 'ready' },
+        },
+      ],
+    })
+
+    expect(config.questions).toHaveLength(1)
+    expect(config.questions[0]?.id).toBe('budget')
+    expect(config.scoring).toMatchObject({
+      threshold: 2,
+      qualified_outcome: 'ready',
+      disqualified_outcome: 'not_ready',
+    })
+    expect(config.outcomes.map((o) => o.outcome)).toEqual([
+      'ready',
+      'not_ready',
+      'pending_review',
+    ])
+    expect(config.outcomes[0]?.match).toEqual({ kind: 'score_at_least', value: 2 })
+  })
+
+  it('derives default outcome actions with legacy zero threshold when omitted', () => {
+    const config = parseQualificationConfig({
+      theme: {
+        background_color: '#FFFFFF',
+        accent_color: '#059669',
+        button_text_color: '#FFFFFF',
+      },
+      progress_bar: true,
+      questions: [],
+      scoring: {
+        mode: 'rule_based',
+        qualified_outcome: 'qualified',
+        disqualified_outcome: 'disqualified',
+      },
+    })
+
+    expect(config.outcomes[0]?.match).toEqual({ kind: 'score_at_least', value: 0 })
+    expect(config.outcomes[1]?.match).toEqual({ kind: 'score_below', value: 0 })
+  })
 })
