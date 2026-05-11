@@ -484,7 +484,7 @@ function StageRationale({ leadId, stageId }: { leadId: string; stageId: string }
   }, [leadId, stageId, startTransition])
 
   if (data === 'loading' || data === null) return null
-  const isAi = data.source === 'ai'
+  const isAi = data.source === 'classifier' || data.source === 'deep_classifier'
   const when = new Date(data.created_at).toLocaleString(undefined, {
     month: 'short',
     day: 'numeric',

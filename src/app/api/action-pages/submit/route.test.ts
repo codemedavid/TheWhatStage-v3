@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   admin: null as unknown,
   decryptToken: vi.fn((token: string) => `decrypted:${token}`),
   sendMessengerText: vi.fn(async () => ({ message_id: 'mid.echo.1' })),
+  sendOutbound: vi.fn(async () => ({ sent: true, messageId: 'mid.echo.1' })),
 }))
 
 vi.mock('@/lib/supabase/admin', () => ({
@@ -18,6 +19,10 @@ vi.mock('@/lib/facebook/crypto', () => ({
 
 vi.mock('@/lib/facebook/messenger', () => ({
   sendMessengerText: mocks.sendMessengerText,
+}))
+
+vi.mock('@/lib/messenger/outbound', () => ({
+  sendOutbound: mocks.sendOutbound,
 }))
 
 function makeActionPageConfig() {
@@ -75,15 +80,17 @@ function makeAdminMock() {
     }
 
     if (table === 'messenger_threads') {
+      const threadResult = {
+        maybeSingle: vi.fn(async () => ({
+          data: { id: 'thread_1', lead_id: 'lead_1', last_inbound_at: null },
+          error: null,
+        })),
+      }
       return {
         select: vi.fn(() => ({
           eq: vi.fn(() => ({
-            eq: vi.fn(() => ({
-              maybeSingle: vi.fn(async () => ({
-                data: { id: 'thread_1', lead_id: 'lead_1' },
-                error: null,
-              })),
-            })),
+            ...threadResult,
+            eq: vi.fn(() => threadResult),
           })),
         })),
         update: vi.fn((payload) => {
@@ -209,10 +216,12 @@ describe('POST /api/action-pages/submit', () => {
     )
 
     expect(res.status).toBe(200)
-    expect(mocks.sendMessengerText).toHaveBeenCalledWith({
-      pageAccessToken: 'decrypted:encrypted-page-token',
-      recipientPsid: 'psid_1',
-      text: 'Thanks, we received it.',
+    expect(mocks.sendOutbound).toHaveBeenCalledWith({
+      admin,
+      thread: { id: 'thread_1', psid: 'psid_1', last_inbound_at: null },
+      pageToken: 'decrypted:encrypted-page-token',
+      payload: { kind: 'text', text: 'Thanks, we received it.' },
+      kind: 'submission_echo',
     })
     expect(inserts.messenger_messages).toEqual([
       {

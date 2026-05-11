@@ -43,6 +43,8 @@ export interface AnswerOptions {
    *  bot can answer "when is my booking?"-style questions without hallucinating.
    *  Empty string when the lead has no records. */
   leadContextBlock?: string
+  /** Lead display name, used by classifier-backed replies to personalize greetings. */
+  leadName?: string
 }
 
 /**
