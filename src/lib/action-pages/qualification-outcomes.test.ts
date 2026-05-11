@@ -238,4 +238,153 @@ describe('evaluateQualificationOutcome', () => {
     expect(result.outcome).toBe('pending_review')
     expect(result.score).toBeNull()
   })
+
+  it('matches answer_includes against multi-choice arrays', () => {
+    const config = parseQualificationConfig({
+      theme: {
+        background_color: '#FFFFFF',
+        accent_color: '#059669',
+        button_text_color: '#FFFFFF',
+      },
+      progress_bar: true,
+      questions: [
+        {
+          id: 'needs',
+          prompt: 'Needs?',
+          kind: 'multi_choice',
+          required: true,
+          weight: 1,
+          options: [
+            { label: 'Financing', value: 'financing', score: 1 },
+            { label: 'Inspection', value: 'inspection', score: 1 },
+          ],
+        },
+      ],
+      scoring: { mode: 'rule_based', threshold: 3 },
+      outcomes: [
+        {
+          id: 'inspection_requested',
+          label: 'Inspection requested',
+          outcome: 'inspection_requested',
+          match: { kind: 'answer_includes', question_id: 'needs', value: 'inspection' },
+          to_stage_id: null,
+          messenger_text: '',
+          attach_action_page_id: null,
+          attach_cta_label: '',
+          public_message: '',
+        },
+        {
+          id: 'pending_review',
+          label: 'Needs review',
+          outcome: 'pending_review',
+          match: { kind: 'manual_review' },
+          to_stage_id: null,
+          messenger_text: '',
+          attach_action_page_id: null,
+          attach_cta_label: '',
+          public_message: '',
+        },
+      ],
+    })
+
+    const result = evaluateQualificationOutcome(config, {
+      needs: ['financing', 'inspection'],
+    })
+
+    expect(result.outcome).toBe('inspection_requested')
+    expect(result.matchedOutcome.id).toBe('inspection_requested')
+  })
+
+  it('matches answer_equals against numeric rating values', () => {
+    const config = parseQualificationConfig({
+      theme: {
+        background_color: '#FFFFFF',
+        accent_color: '#059669',
+        button_text_color: '#FFFFFF',
+      },
+      progress_bar: true,
+      questions: [
+        {
+          id: 'urgency',
+          prompt: 'Urgency?',
+          kind: 'rating',
+          required: true,
+          weight: 1,
+          rating_max: 5,
+        },
+      ],
+      scoring: { mode: 'rule_based', threshold: 5 },
+      outcomes: [
+        {
+          id: 'urgent',
+          label: 'Urgent',
+          outcome: 'urgent',
+          match: { kind: 'answer_equals', question_id: 'urgency', value: 5 },
+          to_stage_id: null,
+          messenger_text: '',
+          attach_action_page_id: null,
+          attach_cta_label: '',
+          public_message: '',
+        },
+        {
+          id: 'pending_review',
+          label: 'Needs review',
+          outcome: 'pending_review',
+          match: { kind: 'manual_review' },
+          to_stage_id: null,
+          messenger_text: '',
+          attach_action_page_id: null,
+          attach_cta_label: '',
+          public_message: '',
+        },
+      ],
+    })
+
+    const result = evaluateQualificationOutcome(config, { urgency: 5 })
+
+    expect(result.outcome).toBe('urgent')
+    expect(result.matchedOutcome.id).toBe('urgent')
+  })
+
+  it('returns synthetic pending review instead of first positive outcome when no conditions match', () => {
+    const config = parseQualificationConfig({
+      theme: {
+        background_color: '#FFFFFF',
+        accent_color: '#059669',
+        button_text_color: '#FFFFFF',
+      },
+      progress_bar: true,
+      questions: [
+        {
+          id: 'budget',
+          prompt: 'Budget?',
+          kind: 'single_choice',
+          required: true,
+          weight: 1,
+          options: [{ label: 'Not ready', value: 'not_ready', score: 0 }],
+        },
+      ],
+      scoring: { mode: 'rule_based', threshold: 10 },
+      outcomes: [
+        {
+          id: 'qualified',
+          label: 'Qualified',
+          outcome: 'qualified',
+          match: { kind: 'score_at_least', value: 10 },
+          to_stage_id: null,
+          messenger_text: '',
+          attach_action_page_id: null,
+          attach_cta_label: '',
+          public_message: '',
+        },
+      ],
+    })
+
+    const result = evaluateQualificationOutcome(config, { budget: 'not_ready' })
+
+    expect(result.outcome).toBe('pending_review')
+    expect(result.matchedOutcome.id).toBe('pending_review')
+    expect(result.score).toBe(0)
+    expect(result.missing_required).toEqual([])
+  })
 })

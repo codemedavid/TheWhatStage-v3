@@ -26,7 +26,7 @@ function fallbackOutcome(config: QualificationConfig): QualificationOutcomeActio
   return (
     config.outcomes.find((o) => o.outcome === 'pending_review') ??
     config.outcomes.find((o) => /disqual/i.test(o.outcome)) ??
-    config.outcomes[0] ?? {
+    {
       id: 'pending_review',
       label: 'Needs review',
       outcome: 'pending_review',
@@ -69,24 +69,30 @@ export function evaluateQualificationOutcome(
   config: QualificationConfig,
   answers: QualificationAnswers,
 ): QualificationOutcomeResult {
-  const missing_required = config.questions
-    .filter((q) => q.required && isMissingAnswer(answers[q.id]))
-    .map((q) => q.id)
-
   const reviewOutcome =
     config.outcomes.find((o) => o.match.kind === 'manual_review') ?? fallbackOutcome(config)
 
-  if (config.scoring.mode === 'manual_review' || missing_required.length > 0) {
+  if (config.scoring.mode === 'manual_review') {
     return {
       outcome: reviewOutcome.outcome,
-      score:
-        config.scoring.mode === 'manual_review' ? null : scoreQualification(config, answers).score,
+      score: null,
+      matchedOutcome: reviewOutcome,
+      missing_required: config.questions
+        .filter((q) => q.required && isMissingAnswer(answers[q.id]))
+        .map((q) => q.id),
+    }
+  }
+
+  const { score, missing_required } = scoreQualification(config, answers)
+  if (missing_required.length > 0) {
+    return {
+      outcome: reviewOutcome.outcome,
+      score,
       matchedOutcome: reviewOutcome,
       missing_required,
     }
   }
 
-  const { score } = scoreQualification(config, answers)
   const matched =
     config.outcomes.find((outcome) => answerMatches(outcome.match, answers, score)) ??
     fallbackOutcome(config)
