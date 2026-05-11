@@ -51,15 +51,15 @@ export function StageManager({ stages }: { stages: StageRow[] }) {
           />
         </label>
         <label className="flex-1">
-          <div className="text-xs">Description</div>
+          <div className="text-xs font-medium">When should the AI move leads here?</div>
           <input
             value={desc}
             onChange={(e) => setDesc(e.target.value)}
-            placeholder="e.g. Lead has shown buying intent and asked about pricing"
+            placeholder="e.g. Lead has confirmed interest and asked about pricing or availability"
             className="w-full border rounded px-2 py-1 text-sm"
           />
           <div className="text-[11px] text-[#9CA3AF] mt-0.5">
-            Used by AI auto-classify to decide when a lead belongs in this stage.
+            Describe the signals — keywords, intent, replies. The AI uses this to auto-classify conversations into this stage.
           </div>
         </label>
         <button

@@ -9,6 +9,7 @@ import { LeadsHeader } from './_components/LeadsHeader'
 import { Toolbar } from './_components/Toolbar'
 import { KanbanBoard } from './_components/KanbanBoard'
 import { LeadsTable } from './_components/LeadsTable'
+import { StageRulesTip } from './_components/StageRulesTip'
 
 export default async function LeadsPage({
   searchParams,
@@ -55,6 +56,12 @@ async function LeadsBody({ params }: { params: ReturnType<typeof LeadsQuery.pars
         campaigns={campaigns}
       />
       <Toolbar params={params} />
+
+      {params.view === 'kanban' && (
+        <StageRulesTip
+          hasUnconfiguredStage={stages.some((s) => !s.description?.trim())}
+        />
+      )}
 
       <div className="mt-5">
         {params.view === 'kanban' ? (

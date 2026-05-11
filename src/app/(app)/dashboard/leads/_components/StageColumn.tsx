@@ -123,6 +123,10 @@ export function StageColumn({
             {stageValue} pipeline value
           </div>
         )}
+        <StageRulesPreview
+          description={stage.description}
+          onClick={() => setEditStage(true)}
+        />
       </div>
 
       {/* Cards */}
@@ -176,6 +180,68 @@ export function StageColumn({
         />
       )}
     </div>
+  )
+}
+
+function StageRulesPreview({
+  description,
+  onClick,
+}: {
+  description: string | null
+  onClick: () => void
+}) {
+  const hasRules = !!description?.trim()
+  const truncated = hasRules
+    ? description!.trim().length > 70
+      ? `${description!.trim().slice(0, 70)}…`
+      : description!.trim()
+    : null
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={hasRules ? description! : 'Add AI rules for this stage'}
+      className="lead-focus mt-2 flex w-full items-start gap-1.5 rounded-md px-1.5 py-1 text-left text-[11px] leading-snug transition-colors"
+      style={{
+        color: hasRules ? 'var(--lead-muted)' : 'var(--lead-faint)',
+        border: hasRules ? '1px solid transparent' : '1px dashed var(--lead-line)',
+        background: 'transparent',
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.background = 'var(--lead-accent-tint)'
+        e.currentTarget.style.color = 'var(--lead-accent)'
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = 'transparent'
+        e.currentTarget.style.color = hasRules ? 'var(--lead-muted)' : 'var(--lead-faint)'
+      }}
+    >
+      <svg
+        width="11"
+        height="11"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className="mt-[1px] shrink-0"
+        aria-hidden
+      >
+        <path d="M12 2l2.39 4.84L20 8l-4 3.9.94 5.5L12 14.77 7.06 17.4 8 11.9 4 8l5.61-1.16L12 2z" />
+      </svg>
+      <span className="flex-1 truncate">
+        {hasRules ? (
+          <>
+            <span style={{ color: 'var(--lead-faint)' }}>AI moves leads here when: </span>
+            {truncated}
+          </>
+        ) : (
+          <>No AI rules — won&apos;t auto-move leads here. <span style={{ textDecoration: 'underline' }}>Add rules</span></>
+        )}
+      </span>
+    </button>
   )
 }
 
@@ -265,17 +331,19 @@ function StageEditor({ stage, onClose }: { stage: StageRow; onClose: () => void 
           />
         </label>
         <label className="mb-3 block">
-          <div className="mb-1 text-[12px]" style={{ color: 'var(--lead-muted)' }}>Description</div>
+          <div className="mb-1 text-[12px] font-medium" style={{ color: 'var(--lead-ink)' }}>
+            When should the AI move leads here?
+          </div>
           <textarea
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            rows={3}
-            placeholder="e.g. Lead has shown buying intent and asked about pricing"
-            className="w-full rounded-md border px-2.5 py-1.5 text-[13px]"
+            rows={4}
+            placeholder={'Describe the signals — keywords, intent, replies, behaviors.\n\ne.g. Lead has confirmed interest and asked about pricing or availability.'}
+            className="w-full rounded-md border px-2.5 py-1.5 text-[13px] leading-relaxed"
             style={{ borderColor: 'var(--lead-line)', background: 'var(--lead-surface-2)', color: 'var(--lead-ink)' }}
           />
           <div className="mt-1 text-[11px]" style={{ color: 'var(--lead-faint)' }}>
-            Used by AI auto-classify to decide when a lead belongs in this stage.
+            The AI reads this to decide when a conversation belongs in this stage. The clearer the rules, the better the auto-classification.
           </div>
         </label>
         {error && (

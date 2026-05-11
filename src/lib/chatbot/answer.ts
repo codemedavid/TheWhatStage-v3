@@ -43,6 +43,9 @@ export interface AnswerOptions {
    *  bot can answer "when is my booking?"-style questions without hallucinating.
    *  Empty string when the lead has no records. */
   leadContextBlock?: string
+  /** Full name of the lead (e.g. from Facebook profile). Only the first name
+   *  is injected into the prompt so the bot can address the customer naturally. */
+  leadName?: string
 }
 
 /**
@@ -115,9 +118,13 @@ export async function answer(
     return [] as SelectedMediaAsset[]
   })
 
-  const system = options.leadContextBlock
-    ? `${built.system}\n\n${options.leadContextBlock}`
-    : built.system
+  const firstName = options.leadName?.split(' ')[0]?.trim()
+  const leadNameBlock = firstName
+    ? `# Lead\nThe customer's first name is ${firstName}. Address them by their first name when greeting or when it feels natural.`
+    : null
+  const system = [built.system, leadNameBlock, options.leadContextBlock?.trim() || null]
+    .filter(Boolean)
+    .join('\n\n')
 
   const text = await llm.complete(
     [

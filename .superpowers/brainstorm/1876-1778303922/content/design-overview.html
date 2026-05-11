@@ -1,0 +1,34 @@
+<h2>Property Page CTA FAB — Design</h2>
+<p class="subtitle">Section 1 of 3 — Architecture & Component Structure</p>
+
+<div class="section">
+  <h3>New file: <code>CTAFab.client.tsx</code></h3>
+  <p>One new client component alongside the existing <code>Renderer.tsx</code> in the realestate kind folder. <code>PropertyDetail</code> (server component) instantiates it and passes:</p>
+  <ul>
+    <li><strong>pages</strong> — lightweight metadata array <code>{ id, kind, title, cta_label }</code> for rendering the FAB buttons</li>
+    <li><strong>accent</strong> — theme accent color for button styling</li>
+    <li><strong>children</strong> — pre-rendered <code>LinkedRenderer</code> outputs (one per linked page), passed as React nodes so they render on the server, not the client</li>
+  </ul>
+</div>
+
+<div class="section">
+  <h3>What changes in <code>Renderer.tsx</code></h3>
+  <p>Only <code>PropertyDetail</code> is modified — wrap the existing <code>LinkedRenderer</code> calls and pass them as children to <code>CTAFab</code>. The existing "Next Steps" inline section stays untouched.</p>
+</div>
+
+<div class="section">
+  <h3>Component tree</h3>
+  <div style="font-family:monospace;font-size:12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;line-height:1.8;">
+    PropertyDetail <span style="color:#64748b">(server)</span><br>
+    &nbsp;&nbsp;└─ CTAFab.client <span style="color:#3b82f6">(client)</span><br>
+    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;├─ FabButton (expands/collapses menu)<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;├─ FabMenu (list of page buttons)<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;└─ Sheet (bottom sheet / modal)<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;└─ children[activeIndex] <span style="color:#64748b">(server-rendered form/booking)</span>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Does this look right so far?</h3>
+  <p>Reply in terminal to confirm or ask questions.</p>
+</div>

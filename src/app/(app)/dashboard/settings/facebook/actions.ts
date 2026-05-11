@@ -7,6 +7,7 @@ import { createClient } from '@/lib/supabase/server'
 import { decryptToken, encryptToken } from '@/lib/facebook/crypto'
 import { fetchUserPages } from '@/lib/facebook/oauth'
 import { subscribePageToWebhook } from '@/lib/facebook/messenger'
+import { submitAllPendingTemplates } from '@/app/(app)/dashboard/templates/actions'
 
 const SETTINGS_PATH = '/dashboard/settings/facebook'
 
@@ -86,6 +87,17 @@ export async function savePagesForm(formData: FormData): Promise<void> {
       }
     }),
   )
+
+  // Auto-submit every draft/rejected utility template now that we have a
+  // page to register them against. Meta usually returns APPROVED on the
+  // create response for simple utility templates, so this effectively
+  // pre-approves the user's whole registry on first connect.
+  try {
+    const result = await submitAllPendingTemplates(session.userId)
+    console.log('[savePagesForm] auto-submit templates:', result)
+  } catch (e) {
+    console.error('[savePagesForm] auto-submit templates failed:', e)
+  }
 
   revalidatePath(SETTINGS_PATH)
 }

@@ -1,0 +1,88 @@
+<h2>Section 2 — FAB & Sheet Behavior</h2>
+<p class="subtitle">How the button expands and the sheet opens</p>
+
+<div class="section">
+  <h3>FAB States</h3>
+  <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-end;font-family:sans-serif;">
+
+    <!-- State 1: Collapsed -->
+    <div style="flex:1;min-width:140px;">
+      <div class="label" style="margin-bottom:6px;">1. Collapsed</div>
+      <div style="background:#f1f5f9;border-radius:10px;padding:16px;min-height:80px;position:relative;">
+        <div style="position:absolute;bottom:12px;right:12px;width:44px;height:44px;border-radius:50%;background:#3b82f6;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 12px rgba(59,130,246,0.4);cursor:pointer;">
+          <span style="color:#fff;font-size:20px;font-weight:300;line-height:1;">✦</span>
+        </div>
+      </div>
+      <p style="font-size:11px;color:#64748b;margin-top:6px;text-align:center">Floating ✦ icon (accent color)</p>
+    </div>
+
+    <!-- State 2: Expanded menu -->
+    <div style="flex:1;min-width:180px;">
+      <div class="label" style="margin-bottom:6px;">2. Expanded (2 linked pages)</div>
+      <div style="background:#f1f5f9;border-radius:10px;padding:16px;min-height:120px;position:relative;">
+        <div style="position:absolute;bottom:12px;right:12px;display:flex;flex-direction:column;align-items:flex-end;gap:6px;">
+          <button style="background:#fff;border:1px solid #e2e8f0;border-radius:20px;padding:6px 14px;font-size:11px;color:#1e293b;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,0.1);cursor:pointer;">📅 Book Appointment</button>
+          <button style="background:#fff;border:1px solid #e2e8f0;border-radius:20px;padding:6px 14px;font-size:11px;color:#1e293b;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,0.1);cursor:pointer;">📋 Buyer Qualification</button>
+          <div style="width:44px;height:44px;border-radius:50%;background:#3b82f6;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 12px rgba(59,130,246,0.4);cursor:pointer;">
+            <span style="color:#fff;font-size:18px;line-height:1;transform:rotate(45deg);display:block;">✦</span>
+          </div>
+        </div>
+      </div>
+      <p style="font-size:11px;color:#64748b;margin-top:6px;text-align:center">Pills stack above FAB. Icon rotates.</p>
+    </div>
+
+    <!-- State 3: Sheet open (mobile) -->
+    <div style="flex:1;min-width:160px;">
+      <div class="label" style="margin-bottom:6px;">3. Sheet open (mobile)</div>
+      <div style="background:#f1f5f9;border-radius:10px;padding:0;min-height:140px;position:relative;overflow:hidden;">
+        <div style="position:absolute;inset:0;background:rgba(0,0,0,0.35);border-radius:10px;"></div>
+        <div style="position:absolute;bottom:0;left:0;right:0;background:#fff;border-radius:14px 14px 0 0;padding:12px;">
+          <div style="width:36px;height:3px;background:#e2e8f0;border-radius:2px;margin:0 auto 10px;"></div>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+            <span style="font-size:12px;font-weight:600;color:#0f172a;">Book Appointment</span>
+            <span style="font-size:14px;color:#94a3b8;cursor:pointer;">✕</span>
+          </div>
+          <div style="background:#f8fafc;border-radius:6px;padding:8px;font-size:10px;color:#94a3b8;text-align:center;">Booking form renders here</div>
+        </div>
+      </div>
+      <p style="font-size:11px;color:#64748b;margin-top:6px;text-align:center">Slides up, drag-handle, dimmed backdrop</p>
+    </div>
+
+    <!-- State 3b: Sheet open (desktop) -->
+    <div style="flex:1;min-width:160px;">
+      <div class="label" style="margin-bottom:6px;">3b. Modal (desktop ≥ lg)</div>
+      <div style="background:#f1f5f9;border-radius:10px;padding:8px;min-height:140px;position:relative;overflow:hidden;display:flex;align-items:center;justify-content:center;">
+        <div style="position:absolute;inset:0;background:rgba(0,0,0,0.35);border-radius:10px;"></div>
+        <div style="position:relative;background:#fff;border-radius:10px;padding:12px;width:90%;z-index:1;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+            <span style="font-size:12px;font-weight:600;color:#0f172a;">Book Appointment</span>
+            <span style="font-size:14px;color:#94a3b8;cursor:pointer;">✕</span>
+          </div>
+          <div style="background:#f8fafc;border-radius:6px;padding:8px;font-size:10px;color:#94a3b8;text-align:center;">Booking form renders here</div>
+        </div>
+      </div>
+      <p style="font-size:11px;color:#64748b;margin-top:6px;text-align:center">Centered dialog, max-w-lg, same backdrop</p>
+    </div>
+
+  </div>
+</div>
+
+<div class="section">
+  <h3>Button labels</h3>
+  <p>Each pill uses <code>cta_label</code> from the linked page if set, otherwise falls back to the page <code>title</code>. Kind icon prefix: 📅 for booking, 📋 for form/qualification.</p>
+</div>
+
+<div class="section">
+  <h3>Sheet details</h3>
+  <ul>
+    <li><strong>Mobile:</strong> slides up from bottom, max-height 85dvh, overflows with scroll, drag-handle decoration at top</li>
+    <li><strong>Desktop:</strong> centered overlay, max-w-lg, max-height 85dvh, same scroll behavior</li>
+    <li><strong>Close:</strong> ✕ button in header OR clicking/tapping the backdrop</li>
+    <li><strong>Body scroll:</strong> locked while sheet is open (overflow-hidden on body)</li>
+    <li><strong>Animation:</strong> CSS transition — slide-up on mobile, fade+scale on desktop</li>
+  </ul>
+</div>
+
+<div class="section">
+  <h3>Does this look right? Reply in terminal to confirm or adjust.</h3>
+</div>
