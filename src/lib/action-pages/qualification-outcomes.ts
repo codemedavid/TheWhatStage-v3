@@ -1,0 +1,100 @@
+import {
+  type QualificationAnswers,
+  type QualificationConfig,
+  type QualificationOutcomeAction,
+  type QualificationOutcomeMatch,
+} from '@/app/a/[slug]/_kinds/qualification/schema'
+import { scoreQualification } from './handlers/qualification.score'
+
+export interface QualificationOutcomeResult {
+  outcome: string
+  score: number | null
+  matchedOutcome: QualificationOutcomeAction
+  missing_required: string[]
+}
+
+function isMissingAnswer(answer: unknown): boolean {
+  return (
+    answer === undefined ||
+    answer === null ||
+    (typeof answer === 'string' && answer.trim() === '') ||
+    (Array.isArray(answer) && answer.length === 0)
+  )
+}
+
+function fallbackOutcome(config: QualificationConfig): QualificationOutcomeAction {
+  return (
+    config.outcomes.find((o) => o.outcome === 'pending_review') ??
+    config.outcomes.find((o) => /disqual/i.test(o.outcome)) ??
+    config.outcomes[0] ?? {
+      id: 'pending_review',
+      label: 'Needs review',
+      outcome: 'pending_review',
+      match: { kind: 'manual_review' },
+      to_stage_id: null,
+      messenger_text: '',
+      attach_action_page_id: null,
+      attach_cta_label: '',
+      public_message: '',
+    }
+  )
+}
+
+function answerMatches(
+  match: QualificationOutcomeMatch,
+  answers: QualificationAnswers,
+  score: number,
+): boolean {
+  switch (match.kind) {
+    case 'score_at_least':
+      return score >= match.value
+    case 'score_below':
+      return score < match.value
+    case 'manual_review':
+      return false
+    case 'answer_equals': {
+      const answer = answers[match.question_id]
+      if (Array.isArray(answer)) return answer.includes(String(match.value))
+      return answer === match.value
+    }
+    case 'answer_includes': {
+      const answer = answers[match.question_id]
+      if (Array.isArray(answer)) return answer.includes(match.value)
+      return answer === match.value
+    }
+  }
+}
+
+export function evaluateQualificationOutcome(
+  config: QualificationConfig,
+  answers: QualificationAnswers,
+): QualificationOutcomeResult {
+  const missing_required = config.questions
+    .filter((q) => q.required && isMissingAnswer(answers[q.id]))
+    .map((q) => q.id)
+
+  const reviewOutcome =
+    config.outcomes.find((o) => o.match.kind === 'manual_review') ?? fallbackOutcome(config)
+
+  if (config.scoring.mode === 'manual_review' || missing_required.length > 0) {
+    return {
+      outcome: reviewOutcome.outcome,
+      score:
+        config.scoring.mode === 'manual_review' ? null : scoreQualification(config, answers).score,
+      matchedOutcome: reviewOutcome,
+      missing_required,
+    }
+  }
+
+  const { score } = scoreQualification(config, answers)
+  const matched =
+    config.outcomes.find((outcome) => answerMatches(outcome.match, answers, score)) ??
+    fallbackOutcome(config)
+
+  return {
+    outcome: matched.outcome,
+    score,
+    matchedOutcome: matched,
+    missing_required,
+  }
+}
