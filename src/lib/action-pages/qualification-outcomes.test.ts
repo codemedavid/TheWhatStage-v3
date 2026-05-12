@@ -234,9 +234,10 @@ describe('evaluateQualificationOutcome', () => {
       ...baseConfig,
       scoring: { mode: 'manual_review' },
     })
-    const result = evaluateQualificationOutcome(config, { budget: 'ready' })
+    const result = evaluateQualificationOutcome(config, {})
     expect(result.outcome).toBe('pending_review')
     expect(result.score).toBeNull()
+    expect(result.missing_required).toEqual(['budget'])
   })
 
   it('matches answer_includes against multi-choice arrays', () => {
@@ -386,5 +387,57 @@ describe('evaluateQualificationOutcome', () => {
     expect(result.matchedOutcome.id).toBe('pending_review')
     expect(result.score).toBe(0)
     expect(result.missing_required).toEqual([])
+  })
+
+  it('uses configured score_below fallback with non-disqualified outcome name when no conditions match', () => {
+    const config = parseQualificationConfig({
+      theme: {
+        background_color: '#FFFFFF',
+        accent_color: '#059669',
+        button_text_color: '#FFFFFF',
+      },
+      progress_bar: true,
+      questions: [
+        {
+          id: 'budget',
+          prompt: 'Budget?',
+          kind: 'single_choice',
+          required: true,
+          weight: 1,
+          options: [{ label: 'Needs review', value: 'review', score: 5 }],
+        },
+      ],
+      scoring: { mode: 'rule_based', threshold: 10 },
+      outcomes: [
+        {
+          id: 'qualified',
+          label: 'Qualified',
+          outcome: 'qualified',
+          match: { kind: 'score_at_least', value: 10 },
+          to_stage_id: null,
+          messenger_text: '',
+          attach_action_page_id: null,
+          attach_cta_label: '',
+          public_message: '',
+        },
+        {
+          id: 'low_score',
+          label: 'Not fit',
+          outcome: 'not_fit',
+          match: { kind: 'score_below', value: 0 },
+          to_stage_id: null,
+          messenger_text: '',
+          attach_action_page_id: null,
+          attach_cta_label: '',
+          public_message: '',
+        },
+      ],
+    })
+
+    const result = evaluateQualificationOutcome(config, { budget: 'review' })
+
+    expect(result.outcome).toBe('not_fit')
+    expect(result.matchedOutcome.id).toBe('low_score')
+    expect(result.score).toBe(5)
   })
 })
