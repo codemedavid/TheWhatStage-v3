@@ -36,6 +36,7 @@ export function PipelineRulesEditor({
 }) {
   const outcomes = OUTCOMES_BY_KIND[kind] ?? []
   const firstOutcome = outcomes[0]?.value ?? ''
+  const allowCustomOutcome = kind === 'qualification'
 
   const [rules, setRules] = useState<PipelineRule[]>(
     initial.length ? initial : [{ outcome: firstOutcome, to_stage_id: null, reason: '' }],
@@ -73,7 +74,28 @@ export function PipelineRulesEditor({
                 <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-[#6B7280]">
                   Outcome
                 </span>
-                {outcomes.length > 0 ? (
+                {allowCustomOutcome ? (
+                  <div className="space-y-1">
+                    <select
+                      value={outcomes.some((o) => o.value === rule.outcome) ? rule.outcome : ''}
+                      onChange={(e) => update(i, { outcome: e.target.value })}
+                      className="w-full rounded border border-[#E5E7EB] px-2 py-1 text-[13px]"
+                    >
+                      <option value="">Custom outcome</option>
+                      {outcomes.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      value={rule.outcome}
+                      onChange={(e) => update(i, { outcome: e.target.value })}
+                      placeholder="custom_outcome"
+                      className="w-full rounded border border-[#E5E7EB] px-2 py-1 font-mono text-[12px]"
+                    />
+                  </div>
+                ) : outcomes.length > 0 ? (
                   <select
                     value={rule.outcome}
                     onChange={(e) => update(i, { outcome: e.target.value })}
