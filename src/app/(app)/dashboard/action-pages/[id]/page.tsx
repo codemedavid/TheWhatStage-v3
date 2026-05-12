@@ -1,6 +1,6 @@
 import { notFound, redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
-import { fetchActionPage, fetchPipelineStages } from '../_lib/queries'
+import { fetchActionPage, fetchPipelineStages, fetchActionPageOptions } from '../_lib/queries'
 import { EditActionPageShell } from '../_components/EditActionPageShell'
 
 export default async function ActionPageEditor({
@@ -23,9 +23,10 @@ export default async function ActionPageEditor({
   } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const [page, stages] = await Promise.all([
+  const [page, stages, actionPages] = await Promise.all([
     fetchActionPage(supabase, user.id, id),
     fetchPipelineStages(supabase, user.id),
+    fetchActionPageOptions(supabase, user.id),
   ])
   if (!page) notFound()
 
@@ -38,6 +39,7 @@ export default async function ActionPageEditor({
     <EditActionPageShell
       page={page}
       stages={stages}
+      actionPages={actionPages}
       publicUrl={publicUrl}
       embedUrl={embedUrl}
       embedSnippet={embedSnippet}

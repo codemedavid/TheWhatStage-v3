@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { useRef, useState, type ReactNode } from 'react'
 import { useFormStatus } from 'react-dom'
 import { KIND_REGISTRY } from '@/lib/action-pages/kinds'
-import type { ActionPageRow } from '../_lib/queries'
+import type { ActionPageOption, ActionPageRow, PipelineStageOption } from '../_lib/queries'
 import type { PipelineRule } from '../_lib/schemas'
 import { updateActionPage, deleteActionPage } from '../actions/crud'
 import { ActionPagePreview } from './ActionPagePreview'
@@ -33,6 +33,7 @@ const STATUS_OPTIONS: { v: ActionPageRow['status']; l: string }[] = [
 export function EditActionPageShell({
   page,
   stages,
+  actionPages,
   publicUrl,
   embedUrl,
   embedSnippet,
@@ -40,7 +41,8 @@ export function EditActionPageShell({
   errorBanner,
 }: {
   page: ActionPageRow
-  stages: { id: string; name: string }[]
+  stages: PipelineStageOption[]
+  actionPages?: ActionPageOption[]
   publicUrl: string
   embedUrl: string
   embedSnippet: string
@@ -79,6 +81,7 @@ export function EditActionPageShell({
     <EditActionPageShellInner
       page={page}
       stages={stages}
+      actionPages={actionPages}
       publicUrl={publicUrl}
       embedUrl={embedUrl}
       embedSnippet={embedSnippet}
@@ -91,6 +94,7 @@ export function EditActionPageShell({
 function EditActionPageShellInner({
   page,
   stages,
+  actionPages,
   publicUrl,
   embedUrl,
   embedSnippet,
@@ -98,7 +102,8 @@ function EditActionPageShellInner({
   errorBanner,
 }: {
   page: ActionPageRow
-  stages: { id: string; name: string }[]
+  stages: PipelineStageOption[]
+  actionPages?: ActionPageOption[]
   publicUrl: string
   embedUrl: string
   embedSnippet: string
@@ -252,7 +257,7 @@ function EditActionPageShellInner({
                     <p>The fields below control the live public page.</p>
                   </div>
                   <div className="ap-section-body">
-                    <KindEditor page={page} />
+                    <KindEditor page={page} stages={stages} actionPages={actionPages} />
                   </div>
                 </div>
               </Panel>

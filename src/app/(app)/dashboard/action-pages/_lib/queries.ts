@@ -159,15 +159,50 @@ export async function fetchSubmissions(
   return rows
 }
 
+export interface PipelineStageOption {
+  id: string
+  name: string
+  kind: string | null
+}
+
 export async function fetchPipelineStages(
   supabase: SupabaseClient,
   userId: string,
-): Promise<{ id: string; name: string }[]> {
+): Promise<PipelineStageOption[]> {
   const { data, error } = await supabase
     .from('pipeline_stages')
-    .select('id, name, position')
+    .select('id, name, kind, position')
     .eq('user_id', userId)
     .order('position', { ascending: true })
   if (error) throw new Error(`fetchPipelineStages: ${error.message}`)
-  return (data ?? []).map((s) => ({ id: s.id as string, name: s.name as string }))
+  return (data ?? []).map((s) => ({
+    id: s.id as string,
+    name: s.name as string,
+    kind: (s.kind as string | null) ?? null,
+  }))
+}
+
+export interface ActionPageOption {
+  id: string
+  kind: ActionPageKind
+  title: string
+  status: ActionPageRow['status']
+}
+
+export async function fetchActionPageOptions(
+  supabase: SupabaseClient,
+  userId: string,
+): Promise<ActionPageOption[]> {
+  const { data, error } = await supabase
+    .from('action_pages')
+    .select('id, kind, title, status, updated_at')
+    .eq('user_id', userId)
+    .order('updated_at', { ascending: false })
+  if (error) throw new Error(`fetchActionPageOptions: ${error.message}`)
+  return (data ?? []).map((p) => ({
+    id: p.id as string,
+    kind: p.kind as ActionPageKind,
+    title: p.title as string,
+    status: p.status as ActionPageRow['status'],
+  }))
 }

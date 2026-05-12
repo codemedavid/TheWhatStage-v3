@@ -1,4 +1,4 @@
-import type { ActionPageRow } from '../_lib/queries'
+import type { ActionPageOption, ActionPageRow, PipelineStageOption } from '../_lib/queries'
 
 /**
  * Contract every kind editor must satisfy.
@@ -14,4 +14,6 @@ import type { ActionPageRow } from '../_lib/queries'
  */
 export interface KindEditorProps {
   page: ActionPageRow
+  stages?: PipelineStageOption[]
+  actionPages?: ActionPageOption[]
 }
