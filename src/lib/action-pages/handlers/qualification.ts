@@ -6,7 +6,7 @@ import {
   type QualificationAnswers,
   type QualificationConfig,
 } from '@/app/a/[slug]/_kinds/qualification/schema'
-import { scoreQualification } from './qualification.score'
+import { evaluateQualificationOutcome } from '@/lib/action-pages/qualification-outcomes'
 
 function parseAnswers(raw: unknown): QualificationAnswers {
   let candidate: unknown = raw
@@ -69,24 +69,26 @@ registerHandler('qualification', (payload, rawConfig) => {
   const config = parseQualificationConfig(rawConfig)
   const answers = parseAnswers(payload.answers)
   const displayAnswers = buildDisplayAnswers(config, answers)
+  const evaluated = evaluateQualificationOutcome(config, answers)
 
-  if (config.scoring.mode === 'manual_review') {
-    return {
-      outcome: 'pending_review',
-      data: { answers: displayAnswers, score: null },
+  const data: Record<string, unknown> = {
+    answers: displayAnswers,
+    score: evaluated.score,
+    outcome_action_id: evaluated.matchedOutcome.id,
+    outcome_label: evaluated.matchedOutcome.label,
+    outcome_action: {
+      to_stage_id: evaluated.matchedOutcome.to_stage_id,
+      messenger_text: evaluated.matchedOutcome.messenger_text,
+      attach_action_page_id: evaluated.matchedOutcome.attach_action_page_id,
+      attach_cta_label: evaluated.matchedOutcome.attach_cta_label,
+      public_message: evaluated.matchedOutcome.public_message,
+    },
+  }
+  if (evaluated.missing_required.length > 0) {
+    data.meta = {
+      validation_errors: { missing_required: evaluated.missing_required },
     }
   }
 
-  const { score, missing_required } = scoreQualification(config, answers)
-  const threshold = config.scoring.threshold ?? 0
-  const qualifiedOutcome = config.scoring.qualified_outcome ?? 'qualified'
-  const disqualifiedOutcome = config.scoring.disqualified_outcome ?? 'disqualified'
-  const outcome = score >= threshold ? qualifiedOutcome : disqualifiedOutcome
-
-  const data: Record<string, unknown> = { answers: displayAnswers, score }
-  if (missing_required.length > 0) {
-    data.meta = { validation_errors: { missing_required } }
-  }
-
-  return { outcome, data }
+  return { outcome: evaluated.outcome, data }
 })

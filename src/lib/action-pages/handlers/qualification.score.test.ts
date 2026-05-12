@@ -229,4 +229,51 @@ describe('qualification handler', () => {
     )
     expect(result.data.meta).toEqual({ validation_errors: { missing_required: ['q1'] } })
   })
+
+  it('stores matched outcome action metadata', () => {
+    const cfg: QualificationConfig = {
+      ...baseConfig,
+      scoring: { mode: 'rule_based', threshold: 5 },
+      questions: [
+        {
+          id: 'q1',
+          prompt: 'A?',
+          kind: 'single_choice',
+          required: false,
+          weight: 1,
+          options: [{ label: 'Yes', value: 'yes', score: 5 }],
+        },
+      ],
+      outcomes: [
+        {
+          id: 'qualified',
+          label: 'Qualified buyer',
+          outcome: 'qualified',
+          match: { kind: 'score_at_least', value: 5 },
+          to_stage_id: '00000000-0000-0000-0000-000000000101',
+          messenger_text: 'Great fit.',
+          attach_action_page_id: '00000000-0000-0000-0000-000000000201',
+          attach_cta_label: 'Continue',
+          public_message: 'You qualify.',
+        },
+      ],
+    }
+
+    const result = parseSubmission(
+      'qualification',
+      { answers: JSON.stringify({ q1: 'yes' }) },
+      cfg as unknown as Record<string, unknown>,
+    )
+
+    expect(result.outcome).toBe('qualified')
+    expect(result.data.outcome_action_id).toBe('qualified')
+    expect(result.data.outcome_label).toBe('Qualified buyer')
+    expect(result.data.outcome_action).toEqual({
+      to_stage_id: '00000000-0000-0000-0000-000000000101',
+      messenger_text: 'Great fit.',
+      attach_action_page_id: '00000000-0000-0000-0000-000000000201',
+      attach_cta_label: 'Continue',
+      public_message: 'You qualify.',
+    })
+  })
 })
