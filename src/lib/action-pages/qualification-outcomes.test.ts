@@ -576,4 +576,87 @@ describe('evaluateQualificationOutcome', () => {
     expect(result.score).toBe(0)
     expect(result.missing_required).toEqual(['budget'])
   })
+
+  it('manual review mode ignores disqualified-ish manual-review actions', () => {
+    const config = parseQualificationConfig({
+      theme: {
+        background_color: '#FFFFFF',
+        accent_color: '#059669',
+        button_text_color: '#FFFFFF',
+      },
+      progress_bar: true,
+      questions: [
+        {
+          id: 'budget',
+          prompt: 'Budget?',
+          kind: 'single_choice',
+          required: true,
+          weight: 1,
+          options: [{ label: 'Ready', value: 'ready', score: 5 }],
+        },
+      ],
+      scoring: { mode: 'manual_review' },
+      outcomes: [
+        {
+          id: 'manual_not_fit',
+          label: 'Not fit',
+          outcome: 'not_fit',
+          match: { kind: 'manual_review' },
+          to_stage_id: null,
+          messenger_text: '',
+          attach_action_page_id: null,
+          attach_cta_label: '',
+          public_message: '',
+        },
+      ],
+    })
+
+    const result = evaluateQualificationOutcome(config, { budget: 'ready' })
+
+    expect(result.outcome).toBe('pending_review')
+    expect(result.matchedOutcome.id).toBe('pending_review')
+    expect(result.score).toBeNull()
+  })
+
+  it('missing required answers ignore disqualified-ish manual-review actions', () => {
+    const config = parseQualificationConfig({
+      theme: {
+        background_color: '#FFFFFF',
+        accent_color: '#059669',
+        button_text_color: '#FFFFFF',
+      },
+      progress_bar: true,
+      questions: [
+        {
+          id: 'budget',
+          prompt: 'Budget?',
+          kind: 'single_choice',
+          required: true,
+          weight: 1,
+          options: [{ label: 'Ready', value: 'ready', score: 5 }],
+        },
+      ],
+      scoring: { mode: 'rule_based', threshold: 5 },
+      outcomes: [
+        {
+          id: 'manual_not_fit',
+          label: 'Not fit',
+          outcome: 'not_fit',
+          match: { kind: 'manual_review' },
+          to_stage_id: null,
+          messenger_text: '',
+          attach_action_page_id: null,
+          attach_cta_label: '',
+          public_message: '',
+        },
+      ],
+    })
+
+    const result = evaluateQualificationOutcome(config, {})
+
+    expect(result.outcome).toBe('pending_review')
+    expect(result.matchedOutcome.id).toBe('pending_review')
+    expect(result.score).toBe(0)
+    expect(result.missing_required).toEqual(['budget'])
+  })
 })

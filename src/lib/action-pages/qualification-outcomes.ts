@@ -35,9 +35,10 @@ function reviewOutcome(config: QualificationConfig): QualificationOutcomeAction 
   return (
     config.outcomes.find(
       (o) =>
-        o.outcome === 'pending_review' ||
-        o.id === 'pending_review' ||
-        o.match.kind === 'manual_review',
+        !isDisqualifiedOutcome(o.outcome) &&
+        (o.outcome === 'pending_review' ||
+          o.id === 'pending_review' ||
+          o.match.kind === 'manual_review'),
     ) ?? syntheticPendingReviewOutcome()
   )
 }
