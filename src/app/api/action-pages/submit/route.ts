@@ -675,7 +675,10 @@ export async function POST(req: NextRequest) {
     })
   }
   const base = (process.env.NEXT_PUBLIC_APP_URL ?? '').replace(/\/+$/, '')
-  return NextResponse.redirect(`${base}/a/${slug}?submitted=1`, { status: 303 })
+  const redirectUrl = new URL(`${base}/a/${slug}`)
+  redirectUrl.searchParams.set('submitted', '1')
+  if (subInsert?.id) redirectUrl.searchParams.set('submission', subInsert.id)
+  return NextResponse.redirect(redirectUrl.toString(), { status: 303 })
 }
 
 interface CatalogOrderResult {

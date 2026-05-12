@@ -1,6 +1,25 @@
 import { notFound } from 'next/navigation'
 import { loadPublicActionPage } from './_lib/load'
 import { ActionPageRenderer } from './_components/Renderer'
+import { createAdminClient } from '@/lib/supabase/admin'
+
+async function loadSubmissionPublicMessage(args: {
+  pageId: string
+  submissionId: string | null
+}): Promise<string | null> {
+  if (!args.submissionId) return null
+  const admin = createAdminClient()
+  const { data } = await admin
+    .from('action_page_submissions')
+    .select('data')
+    .eq('id', args.submissionId)
+    .eq('action_page_id', args.pageId)
+    .maybeSingle<{ data: Record<string, unknown> | null }>()
+  const outcomeAction = data?.data?.outcome_action
+  if (!outcomeAction || typeof outcomeAction !== 'object') return null
+  const msg = (outcomeAction as { public_message?: unknown }).public_message
+  return typeof msg === 'string' && msg.trim() ? msg.trim() : null
+}
 
 export default async function PublicActionPage({
   params,
@@ -16,6 +35,10 @@ export default async function PublicActionPage({
 
   const rawToken = typeof sp.t === 'string' ? sp.t : null
   const submitted = sp.submitted === '1'
+  const submissionId = typeof sp.submission === 'string' ? sp.submission : null
+  const publicMessage = submitted
+    ? await loadSubmissionPublicMessage({ pageId: result.page.id, submissionId })
+    : null
   const isBooking = result.page.kind === 'booking' && !submitted
   const isCatalog = result.page.kind === 'catalog' && !submitted
   const isRealestate = result.page.kind === 'realestate' && !submitted
@@ -42,8 +65,8 @@ export default async function PublicActionPage({
           <div className="text-center">
             <h1 className="text-[22px] font-semibold text-[#111827]">Thanks!</h1>
             <p className="mt-1 text-[14px] text-[#6B7280]">
-              Your submission has been received. You can close this tab and head
-              back to Messenger.
+              {publicMessage ??
+                'Your submission has been received. You can close this tab and head back to Messenger.'}
             </p>
           </div>
         ) : (
