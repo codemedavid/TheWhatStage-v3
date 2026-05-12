@@ -492,6 +492,17 @@ function FormCard({ submission: s }: { submission: SubmissionListItem }) {
    QUALIFICATION VIEW
 ═══════════════════════════════════════════════ */
 
+function formatOutcomeLabel(outcome: string): string {
+  return OUTCOME_META[outcome]?.label ?? outcome.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
+function qualificationStatColor(outcome: string): 'green' | 'red' | 'amber' | 'blue' | 'violet' | 'indigo' {
+  if (/disqual|lost|not_fit/i.test(outcome)) return 'red'
+  if (/review|pending/i.test(outcome)) return 'amber'
+  if (/qual|won|hot/i.test(outcome)) return 'green'
+  return 'indigo'
+}
+
 function QualificationView({
   submissions,
   weekAgo,
@@ -499,18 +510,27 @@ function QualificationView({
   submissions: SubmissionListItem[]
   weekAgo: Date
 }) {
-  const qualified = submissions.filter((s) => s.outcome === 'qualified')
-  const disqualified = submissions.filter((s) => s.outcome === 'disqualified')
-  const pending = submissions.filter((s) => s.outcome === 'pending_review')
+  const outcomeCounts = Array.from(
+    submissions.reduce((map, s) => {
+      const key = s.outcome || 'unknown'
+      map.set(key, (map.get(key) ?? 0) + 1)
+      return map
+    }, new Map<string, number>()),
+  ).sort((a, b) => b[1] - a[1])
   const thisWeek = submissions.filter((s) => new Date(s.created_at) >= weekAgo)
   const groups = groupByCreatedDate(submissions)
 
   return (
     <>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <StatCard value={qualified.length} label="Qualified" color="green" />
-        <StatCard value={disqualified.length} label="Disqualified" color="red" />
-        <StatCard value={pending.length} label="Pending review" color="amber" />
+        {outcomeCounts.slice(0, 3).map(([outcome, count]) => (
+          <StatCard
+            key={outcome}
+            value={count}
+            label={formatOutcomeLabel(outcome)}
+            color={qualificationStatColor(outcome)}
+          />
+        ))}
         <StatCard value={thisWeek.length} label="This week" color="blue" />
       </div>
 
