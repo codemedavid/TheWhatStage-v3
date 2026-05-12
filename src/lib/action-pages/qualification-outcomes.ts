@@ -17,6 +17,15 @@ function isDisqualifiedOutcome(outcome: string): boolean {
   return /disqual|not_fit|no_fit|unfit|lost|cold/i.test(outcome)
 }
 
+function isSafeReviewOutcome(outcome: QualificationOutcomeAction): boolean {
+  return (
+    !isDisqualifiedOutcome(outcome.outcome) &&
+    (outcome.outcome === 'pending_review' ||
+      outcome.id === 'pending_review' ||
+      outcome.match.kind === 'manual_review')
+  )
+}
+
 function syntheticPendingReviewOutcome(): QualificationOutcomeAction {
   return {
     id: 'pending_review',
@@ -33,24 +42,14 @@ function syntheticPendingReviewOutcome(): QualificationOutcomeAction {
 
 function reviewOutcome(config: QualificationConfig): QualificationOutcomeAction {
   return (
-    config.outcomes.find(
-      (o) =>
-        !isDisqualifiedOutcome(o.outcome) &&
-        (o.outcome === 'pending_review' ||
-          o.id === 'pending_review' ||
-          o.match.kind === 'manual_review'),
-    ) ?? syntheticPendingReviewOutcome()
+    config.outcomes.find((outcome) => isSafeReviewOutcome(outcome)) ??
+    syntheticPendingReviewOutcome()
   )
 }
 
 function fallbackOutcome(config: QualificationConfig): QualificationOutcomeAction {
   return (
-    config.outcomes.find(
-      (o) =>
-        o.outcome === 'pending_review' ||
-        o.id === 'pending_review' ||
-        o.match.kind === 'manual_review',
-    ) ??
+    config.outcomes.find((outcome) => isSafeReviewOutcome(outcome)) ??
     config.outcomes.find(
       (o) =>
         o.id === 'disqualified' ||
