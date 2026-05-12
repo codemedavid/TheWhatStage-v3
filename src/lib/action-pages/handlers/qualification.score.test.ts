@@ -18,6 +18,7 @@ const baseConfig: QualificationConfig = {
     qualified_outcome: 'qualified',
     disqualified_outcome: 'disqualified',
   },
+  outcomes: [],
 }
 
 describe('scoreQualification', () => {

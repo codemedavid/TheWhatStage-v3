@@ -17,6 +17,31 @@ function isDisqualifiedOutcome(outcome: string): boolean {
   return /disqual|not_fit|no_fit|unfit|lost|cold/i.test(outcome)
 }
 
+function syntheticPendingReviewOutcome(): QualificationOutcomeAction {
+  return {
+    id: 'pending_review',
+    label: 'Needs review',
+    outcome: 'pending_review',
+    match: { kind: 'manual_review' },
+    to_stage_id: null,
+    messenger_text: '',
+    attach_action_page_id: null,
+    attach_cta_label: '',
+    public_message: '',
+  }
+}
+
+function reviewOutcome(config: QualificationConfig): QualificationOutcomeAction {
+  return (
+    config.outcomes.find(
+      (o) =>
+        o.outcome === 'pending_review' ||
+        o.id === 'pending_review' ||
+        o.match.kind === 'manual_review',
+    ) ?? syntheticPendingReviewOutcome()
+  )
+}
+
 function fallbackOutcome(config: QualificationConfig): QualificationOutcomeAction {
   return (
     config.outcomes.find(
@@ -31,17 +56,7 @@ function fallbackOutcome(config: QualificationConfig): QualificationOutcomeActio
         o.match.kind === 'score_below' ||
         isDisqualifiedOutcome(o.outcome),
     ) ??
-    {
-      id: 'pending_review',
-      label: 'Needs review',
-      outcome: 'pending_review',
-      match: { kind: 'manual_review' },
-      to_stage_id: null,
-      messenger_text: '',
-      attach_action_page_id: null,
-      attach_cta_label: '',
-      public_message: '',
-    }
+    syntheticPendingReviewOutcome()
   )
 }
 
@@ -75,23 +90,22 @@ export function evaluateQualificationOutcome(
   answers: QualificationAnswers,
 ): QualificationOutcomeResult {
   const { score, missing_required } = scoreQualification(config, answers)
-  const reviewOutcome =
-    config.outcomes.find((o) => o.match.kind === 'manual_review') ?? fallbackOutcome(config)
+  const review = reviewOutcome(config)
 
   if (config.scoring.mode === 'manual_review') {
     return {
-      outcome: reviewOutcome.outcome,
+      outcome: review.outcome,
       score: null,
-      matchedOutcome: reviewOutcome,
+      matchedOutcome: review,
       missing_required,
     }
   }
 
   if (missing_required.length > 0) {
     return {
-      outcome: reviewOutcome.outcome,
+      outcome: review.outcome,
       score,
-      matchedOutcome: reviewOutcome,
+      matchedOutcome: review,
       missing_required,
     }
   }

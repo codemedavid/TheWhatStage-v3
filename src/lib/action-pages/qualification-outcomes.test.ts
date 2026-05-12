@@ -492,4 +492,88 @@ describe('evaluateQualificationOutcome', () => {
     expect(result.matchedOutcome.id).toBe('fallback_not_fit')
     expect(result.score).toBe(5)
   })
+
+  it('manual review mode uses synthetic pending review instead of disqualified fallback', () => {
+    const config = parseQualificationConfig({
+      theme: {
+        background_color: '#FFFFFF',
+        accent_color: '#059669',
+        button_text_color: '#FFFFFF',
+      },
+      progress_bar: true,
+      questions: [
+        {
+          id: 'budget',
+          prompt: 'Budget?',
+          kind: 'single_choice',
+          required: true,
+          weight: 1,
+          options: [{ label: 'Ready', value: 'ready', score: 5 }],
+        },
+      ],
+      scoring: { mode: 'manual_review' },
+      outcomes: [
+        {
+          id: 'fallback_not_fit',
+          label: 'Not fit',
+          outcome: 'not_fit',
+          match: { kind: 'answer_equals', question_id: 'budget', value: 'impossible' },
+          to_stage_id: null,
+          messenger_text: '',
+          attach_action_page_id: null,
+          attach_cta_label: '',
+          public_message: '',
+        },
+      ],
+    })
+
+    const result = evaluateQualificationOutcome(config, { budget: 'ready' })
+
+    expect(result.outcome).toBe('pending_review')
+    expect(result.matchedOutcome.id).toBe('pending_review')
+    expect(result.score).toBeNull()
+    expect(result.missing_required).toEqual([])
+  })
+
+  it('missing required answers use synthetic pending review instead of disqualified fallback', () => {
+    const config = parseQualificationConfig({
+      theme: {
+        background_color: '#FFFFFF',
+        accent_color: '#059669',
+        button_text_color: '#FFFFFF',
+      },
+      progress_bar: true,
+      questions: [
+        {
+          id: 'budget',
+          prompt: 'Budget?',
+          kind: 'single_choice',
+          required: true,
+          weight: 1,
+          options: [{ label: 'Ready', value: 'ready', score: 5 }],
+        },
+      ],
+      scoring: { mode: 'rule_based', threshold: 5 },
+      outcomes: [
+        {
+          id: 'fallback_not_fit',
+          label: 'Not fit',
+          outcome: 'not_fit',
+          match: { kind: 'answer_equals', question_id: 'budget', value: 'impossible' },
+          to_stage_id: null,
+          messenger_text: '',
+          attach_action_page_id: null,
+          attach_cta_label: '',
+          public_message: '',
+        },
+      ],
+    })
+
+    const result = evaluateQualificationOutcome(config, {})
+
+    expect(result.outcome).toBe('pending_review')
+    expect(result.matchedOutcome.id).toBe('pending_review')
+    expect(result.score).toBe(0)
+    expect(result.missing_required).toEqual(['budget'])
+  })
 })
