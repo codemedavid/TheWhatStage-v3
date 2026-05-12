@@ -440,4 +440,56 @@ describe('evaluateQualificationOutcome', () => {
     expect(result.matchedOutcome.id).toBe('low_score')
     expect(result.score).toBe(5)
   })
+
+  it('uses configured not_fit outcome-string fallback when no conditions match', () => {
+    const config = parseQualificationConfig({
+      theme: {
+        background_color: '#FFFFFF',
+        accent_color: '#059669',
+        button_text_color: '#FFFFFF',
+      },
+      progress_bar: true,
+      questions: [
+        {
+          id: 'budget',
+          prompt: 'Budget?',
+          kind: 'single_choice',
+          required: true,
+          weight: 1,
+          options: [{ label: 'Needs review', value: 'review', score: 5 }],
+        },
+      ],
+      scoring: { mode: 'rule_based', threshold: 10 },
+      outcomes: [
+        {
+          id: 'qualified',
+          label: 'Qualified',
+          outcome: 'qualified',
+          match: { kind: 'score_at_least', value: 10 },
+          to_stage_id: null,
+          messenger_text: '',
+          attach_action_page_id: null,
+          attach_cta_label: '',
+          public_message: '',
+        },
+        {
+          id: 'fallback_not_fit',
+          label: 'Not fit',
+          outcome: 'not_fit',
+          match: { kind: 'answer_equals', question_id: 'budget', value: 'impossible' },
+          to_stage_id: null,
+          messenger_text: '',
+          attach_action_page_id: null,
+          attach_cta_label: '',
+          public_message: '',
+        },
+      ],
+    })
+
+    const result = evaluateQualificationOutcome(config, { budget: 'review' })
+
+    expect(result.outcome).toBe('not_fit')
+    expect(result.matchedOutcome.id).toBe('fallback_not_fit')
+    expect(result.score).toBe(5)
+  })
 })

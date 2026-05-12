@@ -13,6 +13,10 @@ export interface QualificationOutcomeResult {
   missing_required: string[]
 }
 
+function isDisqualifiedOutcome(outcome: string): boolean {
+  return /disqual|not_fit|no_fit|unfit|lost|cold/i.test(outcome)
+}
+
 function fallbackOutcome(config: QualificationConfig): QualificationOutcomeAction {
   return (
     config.outcomes.find(
@@ -25,7 +29,7 @@ function fallbackOutcome(config: QualificationConfig): QualificationOutcomeActio
       (o) =>
         o.id === 'disqualified' ||
         o.match.kind === 'score_below' ||
-        /disqual/i.test(o.outcome),
+        isDisqualifiedOutcome(o.outcome),
     ) ??
     {
       id: 'pending_review',
