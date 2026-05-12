@@ -14,6 +14,8 @@ import {
   dispatchBookingOffsets,
 } from '@/lib/workflow/dispatcher'
 import type { PipelineRule } from '@/app/(app)/dashboard/action-pages/_lib/schemas'
+import { deeplinkActionPageUrl } from '@/lib/action-pages/urls'
+import { getDefaultStageKind, resolveDefaultStageId } from '@/lib/action-pages/default-stage'
 
 export const dynamic = 'force-dynamic'
 
@@ -26,6 +28,45 @@ interface ActionPageRecord {
   pipeline_rules: PipelineRule[]
   notification_template: { text?: string } | null
   signing_secret: string
+}
+
+interface ParsedOutcomeAction {
+  to_stage_id?: string | null
+  messenger_text?: string
+  attach_action_page_id?: string | null
+  attach_cta_label?: string
+  public_message?: string
+}
+
+interface AttachedActionPageRecord {
+  id: string
+  user_id: string
+  kind: string
+  slug: string
+  title: string
+  status: string
+  cta_label: string | null
+  signing_secret: string
+}
+
+function parsedOutcomeAction(data: Record<string, unknown>): ParsedOutcomeAction | null {
+  const raw = data.outcome_action
+  return raw && typeof raw === 'object' ? (raw as ParsedOutcomeAction) : null
+}
+
+async function resolveAttachedActionPage(
+  admin: ReturnType<typeof createAdminClient>,
+  userId: string,
+  id: string,
+): Promise<AttachedActionPageRecord | null> {
+  const { data } = await admin
+    .from('action_pages')
+    .select('id, user_id, kind, slug, title, status, cta_label, signing_secret')
+    .eq('id', id)
+    .maybeSingle<AttachedActionPageRecord>()
+
+  if (!data || data.user_id !== userId || data.status !== 'published') return null
+  return data
 }
 
 function hashIp(ip: string | null): string | null {
@@ -442,17 +483,27 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // Resolve outcome action once; used in both the stage-move block and the echo/attach blocks.
+  const outcomeAction = parsedOutcomeAction(parsed.data)
+
   // Apply pipeline rule best-effort. For catalog, the order remains source of
   // truth even if action_page_submissions linkage failed.
   if (leadId) {
     const rule = page.pipeline_rules.find((r) => r.outcome === parsed.outcome)
-    if (rule?.to_stage_id) {
+    let toStageId = outcomeAction?.to_stage_id || rule?.to_stage_id || null
+    if (!toStageId) {
+      const defaultKind = getDefaultStageKind(page.kind as ActionPageKind, parsed.outcome)
+      if (defaultKind) {
+        toStageId = await resolveDefaultStageId(admin, page.user_id, defaultKind)
+      }
+    }
+    if (toStageId) {
       try {
         await applyStageMove({
           adminClient: admin,
           userId: page.user_id,
           leadId,
-          toStageId: rule.to_stage_id,
+          toStageId,
           outcome: parsed.outcome,
           submissionId: subInsert?.id ?? null,
           threadId: messengerThreadId,
@@ -483,28 +534,40 @@ export async function POST(req: NextRequest) {
   // Per-outcome notify_text wins over the global template for the closing line.
   const matchedRule = page.pipeline_rules.find((r) => r.outcome === parsed.outcome)
   const notifyText =
+    (outcomeAction?.messenger_text && outcomeAction.messenger_text.trim()) ||
     (matchedRule?.notify_text && matchedRule.notify_text.trim()) ||
     page.notification_template?.text
   const echo = catalogOrderResult
     ? buildOrderEcho(catalogOrderResult, notifyText)
     : notifyText
-  if (echo && psid && fbPageId && messengerThreadId) {
-    try {
-      const { data: pageData } = await admin
+  // Fetch page token and thread data once; reused by both the echo block and
+  // the attached-action-page block below.
+  let messengerPageData: { page_access_token: string } | null = null
+  let messengerThreadData: { last_inbound_at: string | null } | null = null
+  if (psid && fbPageId && messengerThreadId) {
+    const [{ data: _pageData }, { data: _threadData }] = await Promise.all([
+      admin
         .from('facebook_pages')
         .select('page_access_token')
         .eq('id', fbPageId)
-        .maybeSingle<{ page_access_token: string }>()
-      const { data: threadData } = await admin
+        .maybeSingle<{ page_access_token: string }>(),
+      admin
         .from('messenger_threads')
         .select('last_inbound_at')
         .eq('id', messengerThreadId)
-        .maybeSingle<{ last_inbound_at: string | null }>()
-      if (pageData?.page_access_token) {
-        const token = decryptToken(pageData.page_access_token)
+        .maybeSingle<{ last_inbound_at: string | null }>(),
+    ])
+    messengerPageData = _pageData
+    messengerThreadData = _threadData
+  }
+
+  if (echo && psid && fbPageId && messengerThreadId) {
+    try {
+      if (messengerPageData?.page_access_token) {
+        const token = decryptToken(messengerPageData.page_access_token)
         const result = await sendOutbound({
           admin,
-          thread: { id: messengerThreadId, psid, last_inbound_at: threadData?.last_inbound_at ?? null },
+          thread: { id: messengerThreadId, psid, last_inbound_at: messengerThreadData?.last_inbound_at ?? null },
           pageToken: token,
           payload: { kind: 'text', text: echo },
           kind: 'submission_echo',
@@ -536,6 +599,67 @@ export async function POST(req: NextRequest) {
       }
     } catch (e) {
       console.warn('[action-pages.submit] messenger echo failed', {
+        psid,
+        err: e instanceof Error ? e.message : String(e),
+      })
+    }
+  }
+
+  if (
+    outcomeAction?.attach_action_page_id &&
+    psid &&
+    fbPageId &&
+    messengerThreadId
+  ) {
+    try {
+      const attached = await resolveAttachedActionPage(
+        admin,
+        page.user_id,
+        outcomeAction.attach_action_page_id,
+      )
+      if (attached) {
+        if (messengerPageData?.page_access_token) {
+          const token = decryptToken(messengerPageData.page_access_token)
+          const exp = Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60
+          const url = deeplinkActionPageUrl(attached.signing_secret, {
+            slug: attached.slug,
+            psid,
+            pageId: fbPageId,
+            exp,
+          })
+          const result = await sendOutbound({
+            admin,
+            thread: {
+              id: messengerThreadId,
+              psid,
+              last_inbound_at: messengerThreadData?.last_inbound_at ?? null,
+            },
+            pageToken: token,
+            payload: {
+              kind: 'button',
+              text: attached.title,
+              url,
+              ctaLabel:
+                outcomeAction.attach_cta_label ||
+                attached.cta_label ||
+                'Open',
+            },
+            kind: 'submission_echo',
+          })
+          if (result.sent) {
+            await admin.from('messenger_messages').insert({
+              thread_id: messengerThreadId,
+              user_id: page.user_id,
+              direction: 'outbound',
+              sender: 'bot',
+              fb_message_id: result.messageId,
+              body: `${attached.title}\n${outcomeAction.attach_cta_label || attached.cta_label || 'Open'} → ${url}`,
+            })
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[action-pages.submit] attached action page send failed', {
         psid,
         err: e instanceof Error ? e.message : String(e),
       })
