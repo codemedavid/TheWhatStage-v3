@@ -5,10 +5,12 @@ import {
   DEFAULT_QUALIFICATION_CONFIG,
   parseQualificationConfig,
   type QualificationConfig,
+  type QualificationOutcomeAction,
   type QualificationQuestion,
   type QuestionKind,
 } from '@/app/a/[slug]/_kinds/qualification/schema'
 import type { KindEditorProps } from '../types'
+import { OutcomeCard } from './OutcomeCard'
 
 function newQuestion(kind: QuestionKind = 'single_choice'): QualificationQuestion {
   const id =
@@ -34,7 +36,11 @@ function newQuestion(kind: QuestionKind = 'single_choice'): QualificationQuestio
   return base
 }
 
-export default function QualificationEditor({ page }: KindEditorProps) {
+export default function QualificationEditor({
+  page,
+  stages = [],
+  actionPages = [],
+}: KindEditorProps) {
   const initial = useMemo<QualificationConfig>(
     () => parseQualificationConfig(page.config ?? {}),
     [page.config],
@@ -50,17 +56,8 @@ export default function QualificationEditor({ page }: KindEditorProps) {
   const updateTheme = (partial: Partial<QualificationConfig['theme']>) =>
     setConfig((c) => ({ ...c, theme: { ...c.theme, ...partial } }))
 
-  const updateScoring = (partial: Partial<QualificationConfig['scoring']>) =>
-    setConfig((c) => ({ ...c, scoring: { ...c.scoring, ...partial } }))
-
   const updateIntro = (partial: { headline?: string; body?: string }) =>
     setConfig((c) => ({ ...c, intro: { ...(c.intro ?? {}), ...partial } }))
-
-  const updateOutro = (partial: {
-    qualified_message?: string
-    disqualified_message?: string
-    pending_message?: string
-  }) => setConfig((c) => ({ ...c, outro: { ...(c.outro ?? {}), ...partial } }))
 
   const setQuestion = (idx: number, patch: Partial<QualificationQuestion>) =>
     setConfig((c) => {
@@ -81,6 +78,35 @@ export default function QualificationEditor({ page }: KindEditorProps) {
       next.splice(target, 0, it)
       return { ...c, questions: next }
     })
+
+  const setOutcome = (idx: number, patch: Partial<QualificationOutcomeAction>) =>
+    setConfig((c) => {
+      const next = [...c.outcomes]
+      next[idx] = { ...next[idx]!, ...patch }
+      return { ...c, outcomes: next }
+    })
+
+  const addOutcome = () =>
+    setConfig((c) => ({
+      ...c,
+      outcomes: [
+        ...c.outcomes,
+        {
+          id: `outcome_${Date.now()}`,
+          label: 'Custom outcome',
+          outcome: 'custom_outcome',
+          match: { kind: 'score_at_least' as const, value: c.scoring.threshold ?? 1 },
+          to_stage_id: null,
+          messenger_text: '',
+          attach_action_page_id: null,
+          attach_cta_label: '',
+          public_message: '',
+        },
+      ],
+    }))
+
+  const removeOutcome = (idx: number) =>
+    setConfig((c) => ({ ...c, outcomes: c.outcomes.filter((_, i) => i !== idx) }))
 
   const addQuestion = () => {
     const q = newQuestion()
@@ -182,7 +208,7 @@ export default function QualificationEditor({ page }: KindEditorProps) {
       >
         {config.questions.length === 0 ? (
           <div className="rounded-md border border-dashed border-[#D1D5DB] bg-[#F9FAFB] p-6 text-center text-[13px] text-[#6B7280]">
-            No questions yet. Click “+ Add question” to start.
+            No questions yet. Click &quot;+ Add question&quot; to start.
           </div>
         ) : (
           <ol className="space-y-2">
@@ -319,35 +345,20 @@ export default function QualificationEditor({ page }: KindEditorProps) {
                   )}
 
                   {q.kind === 'rating' && (
-                    <div className="grid grid-cols-2 gap-3">
-                      <Field label="Max value">
-                        <input
-                          type="number"
-                          min={3}
-                          max={10}
-                          value={q.rating_max ?? 5}
-                          onChange={(e) =>
-                            setQuestion(idx, {
-                              rating_max: Math.max(3, Math.min(10, Number(e.target.value) || 5)),
-                            })
-                          }
-                          className="w-full rounded-md border border-[#D1D5DB] bg-white px-3 py-2 text-[13px]"
-                        />
-                      </Field>
-                      <Field label="Pass at (optional)">
-                        <input
-                          type="number"
-                          value={q.min_rating_to_pass ?? ''}
-                          onChange={(e) => {
-                            const v = e.target.value
-                            setQuestion(idx, {
-                              min_rating_to_pass: v === '' ? undefined : Number(v),
-                            })
-                          }}
-                          className="w-full rounded-md border border-[#D1D5DB] bg-white px-3 py-2 text-[13px]"
-                        />
-                      </Field>
-                    </div>
+                    <Field label="Max value">
+                      <input
+                        type="number"
+                        min={3}
+                        max={10}
+                        value={q.rating_max ?? 5}
+                        onChange={(e) =>
+                          setQuestion(idx, {
+                            rating_max: Math.max(3, Math.min(10, Number(e.target.value) || 5)),
+                          })
+                        }
+                        className="w-full rounded-md border border-[#D1D5DB] bg-white px-3 py-2 text-[13px]"
+                      />
+                    </Field>
                   )}
                 </div>
                 )}
@@ -358,97 +369,32 @@ export default function QualificationEditor({ page }: KindEditorProps) {
         )}
       </Subsection>
 
-      {/* Scoring */}
-      <Subsection title="Scoring">
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Mode">
-            <select
-              value={config.scoring.mode}
-              onChange={(e) =>
-                updateScoring({
-                  mode: e.target.value as QualificationConfig['scoring']['mode'],
-                })
-              }
-              className="w-full rounded-md border border-[#D1D5DB] bg-white px-3 py-2 text-[13px]"
-            >
-              <option value="rule_based">Rule-based</option>
-              <option value="manual_review">Manual review</option>
-            </select>
-          </Field>
-          {config.scoring.mode === 'rule_based' && (
-            <Field label="Threshold">
-              <input
-                type="number"
-                value={config.scoring.threshold ?? 0}
-                step="any"
-                onChange={(e) =>
-                  updateScoring({ threshold: Number(e.target.value) || 0 })
-                }
-                className="w-full rounded-md border border-[#D1D5DB] bg-white px-3 py-2 text-[13px]"
-              />
-            </Field>
-          )}
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Qualified outcome">
-            <input
-              type="text"
-              value={config.scoring.qualified_outcome ?? 'qualified'}
-              onChange={(e) => updateScoring({ qualified_outcome: e.target.value })}
-              className="w-full rounded-md border border-[#D1D5DB] bg-white px-3 py-2 text-[13px]"
+      {/* Outcomes */}
+      <Subsection
+        title="Outcomes"
+        right={
+          <button
+            type="button"
+            onClick={addOutcome}
+            className="rounded-md border border-[#D1D5DB] bg-white px-3 py-1.5 text-[12px] font-semibold text-[#374151] hover:bg-[#F9FAFB]"
+          >
+            + Add outcome
+          </button>
+        }
+      >
+        <div className="space-y-3">
+          {config.outcomes.map((outcome, idx) => (
+            <OutcomeCard
+              key={outcome.id}
+              outcome={outcome}
+              questions={config.questions}
+              stages={stages}
+              actionPages={actionPages.filter((p) => p.id !== page.id && p.status === 'published')}
+              onChange={(patch) => setOutcome(idx, patch)}
+              onRemove={() => removeOutcome(idx)}
             />
-          </Field>
-          <Field label="Disqualified outcome">
-            <input
-              type="text"
-              value={config.scoring.disqualified_outcome ?? 'disqualified'}
-              onChange={(e) =>
-                updateScoring({ disqualified_outcome: e.target.value })
-              }
-              className="w-full rounded-md border border-[#D1D5DB] bg-white px-3 py-2 text-[13px]"
-            />
-          </Field>
+          ))}
         </div>
-        <p className="text-[12px] text-[#6B7280]">
-          The matching outcome triggers the pipeline rule above.{' '}
-          {config.scoring.mode === 'manual_review'
-            ? 'Manual-review mode always emits “pending_review”.'
-            : 'Rule-based mode compares the summed weighted score to the threshold.'}
-        </p>
-      </Subsection>
-
-      {/* Outro */}
-      <Subsection title="Outro messages">
-        <Field label="Qualified message">
-          <textarea
-            value={config.outro?.qualified_message ?? ''}
-            onChange={(e) => updateOutro({ qualified_message: e.target.value })}
-            rows={2}
-            maxLength={2000}
-            className="w-full rounded-md border border-[#D1D5DB] bg-white px-3 py-2 text-[14px]"
-            placeholder="Great — we'll be in touch shortly."
-          />
-        </Field>
-        <Field label="Disqualified message">
-          <textarea
-            value={config.outro?.disqualified_message ?? ''}
-            onChange={(e) => updateOutro({ disqualified_message: e.target.value })}
-            rows={2}
-            maxLength={2000}
-            className="w-full rounded-md border border-[#D1D5DB] bg-white px-3 py-2 text-[14px]"
-            placeholder="Thanks for your time."
-          />
-        </Field>
-        <Field label="Pending review message">
-          <textarea
-            value={config.outro?.pending_message ?? ''}
-            onChange={(e) => updateOutro({ pending_message: e.target.value })}
-            rows={2}
-            maxLength={2000}
-            className="w-full rounded-md border border-[#D1D5DB] bg-white px-3 py-2 text-[14px]"
-            placeholder="Thanks — a teammate will review your answers."
-          />
-        </Field>
       </Subsection>
     </div>
   )
