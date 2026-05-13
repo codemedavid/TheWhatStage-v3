@@ -126,6 +126,7 @@ export async function loadKnowledgeSummary(admin: Admin, userId: string): Promis
     .select('id, kind, config')
     .eq('user_id', userId)
     .eq('kind', 'qualification')
+    .limit(20)
   for (const p of (pages ?? []) as { config: unknown }[]) {
     const cfg = p.config as { questions?: { prompt?: string }[] } | null
     for (const q of cfg?.questions ?? []) {
@@ -152,58 +153,60 @@ export async function runSuggesterForUser(admin: Admin, userId: string): Promise
 
   if (!stages || stages.length === 0) return 0
 
-  const knowledge = await loadKnowledgeSummary(admin, userId)
-  const prompt = buildSuggesterPrompt({ stages: stages as SuggesterStage[], knowledge })
-
-  const llm = new HfRouterLlm({ model: ragConfig.classifierModel })
-  const raw = await llm.complete(
-    [
-      { role: 'system', content: prompt },
-      { role: 'user', content: 'Return the suggestions JSON now.' },
-    ],
-    { responseFormat: 'json_object', temperature: 0.2 },
-  )
-
-  const suggestions = parseSuggesterOutput(raw)
-
   let written = 0
-  for (const s of suggestions) {
-    const stage = (stages as SuggesterStage[]).find((x) => x.id === s.stage_id)
-    if (!stage) continue
-    const currentValue =
-      s.field === 'description'
-        ? stage.description
-        : s.field === 'entry_signals'
-          ? stage.entry_signals
-          : s.field === 'exit_signals'
-            ? stage.exit_signals
-            : stage.required_fields
+  try {
+    const knowledge = await loadKnowledgeSummary(admin, userId)
+    const prompt = buildSuggesterPrompt({ stages: stages as SuggesterStage[], knowledge })
 
-    // Supersede earlier pending suggestions for the same (stage_id, field).
+    const llm = new HfRouterLlm({ model: ragConfig.llmModel })
+    const raw = await llm.complete(
+      [
+        { role: 'system', content: prompt },
+        { role: 'user', content: 'Return the suggestions JSON now.' },
+      ],
+      { responseFormat: 'json_object', temperature: 0.2 },
+    )
+
+    const suggestions = parseSuggesterOutput(raw)
+
+    for (const s of suggestions) {
+      const stage = (stages as SuggesterStage[]).find((x) => x.id === s.stage_id)
+      if (!stage) continue
+      const currentValue =
+        s.field === 'description'
+          ? stage.description
+          : s.field === 'entry_signals'
+            ? stage.entry_signals
+            : s.field === 'exit_signals'
+              ? stage.exit_signals
+              : stage.required_fields
+
+      // Supersede earlier pending suggestions for the same (stage_id, field).
+      await admin
+        .from('pipeline_stage_suggestions')
+        .update({ status: 'superseded' })
+        .eq('user_id', userId)
+        .eq('stage_id', s.stage_id)
+        .eq('field', s.field)
+        .eq('status', 'pending')
+
+      const { error } = await admin.from('pipeline_stage_suggestions').insert({
+        user_id: userId,
+        stage_id: s.stage_id,
+        field: s.field,
+        current_value: currentValue,
+        proposed_value: s.proposed_value,
+        reason: s.reason,
+        source_refs: s.source_refs ?? [],
+      })
+      if (!error) written++
+    }
+  } finally {
     await admin
-      .from('pipeline_stage_suggestions')
-      .update({ status: 'superseded' })
+      .from('stage_suggestion_jobs')
+      .update({ status: 'idle', last_completed_at: new Date().toISOString() })
       .eq('user_id', userId)
-      .eq('stage_id', s.stage_id)
-      .eq('field', s.field)
-      .eq('status', 'pending')
-
-    const { error } = await admin.from('pipeline_stage_suggestions').insert({
-      user_id: userId,
-      stage_id: s.stage_id,
-      field: s.field,
-      current_value: currentValue,
-      proposed_value: s.proposed_value,
-      reason: s.reason,
-      source_refs: s.source_refs ?? [],
-    })
-    if (!error) written++
   }
-
-  await admin
-    .from('stage_suggestion_jobs')
-    .update({ status: 'idle', last_completed_at: new Date().toISOString() })
-    .eq('user_id', userId)
 
   return written
 }
