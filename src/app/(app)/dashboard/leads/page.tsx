@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { LeadsQuery } from './_lib/schemas'
 import { seedDefaultStagesIfEmpty } from './_lib/seed'
-import { fetchStagesCached, fetchFieldDefsCached, fetchLeadsTotal, fetchCampaignOptions } from './_lib/queries'
+import { fetchStages, fetchStagesCached, fetchFieldDefsCached, fetchLeadsTotal, fetchCampaignOptions } from './_lib/queries'
 import { LeadsShell } from './_components/LeadsShell'
 import { LeadsHeader } from './_components/LeadsHeader'
 import { Toolbar } from './_components/Toolbar'
@@ -36,10 +36,10 @@ async function LeadsBody({ params }: { params: ReturnType<typeof LeadsQuery.pars
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  await seedDefaultStagesIfEmpty(supabase, user.id)
+  const justSeeded = await seedDefaultStagesIfEmpty(supabase, user.id)
 
   const [stages, fieldDefs, total, campaigns] = await Promise.all([
-    fetchStagesCached(user.id),
+    justSeeded ? fetchStages(supabase, user.id) : fetchStagesCached(user.id),
     fetchFieldDefsCached(user.id),
     fetchLeadsTotal(supabase, user.id, params),
     fetchCampaignOptions(supabase, user.id),
