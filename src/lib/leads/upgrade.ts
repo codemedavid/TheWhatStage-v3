@@ -128,7 +128,12 @@ export async function applyUpgrade(admin: Admin, userId: string): Promise<{ enri
     .from('pipeline_stages')
     .select('*')
     .eq('user_id', userId)
-  await admin.from('pipeline_stage_upgrade_snapshots').upsert({ user_id: userId, snapshot })
+  const { error: snapErr } = await admin
+    .from('pipeline_stage_upgrade_snapshots')
+    .upsert({ user_id: userId, snapshot })
+  if (snapErr) {
+    throw new Error(`Snapshot write failed: ${snapErr.message}`)
+  }
 
   const plan = await previewUpgrade(admin, userId)
   let enriched = 0
