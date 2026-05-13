@@ -22,7 +22,13 @@ create index pipeline_stage_suggestions_stage_field_idx
   on public.pipeline_stage_suggestions (stage_id, field)
   where status = 'pending';
 
+create unique index pipeline_stage_suggestions_pending_unique_idx
+  on public.pipeline_stage_suggestions (user_id, stage_id, field)
+  where status = 'pending';
+
 alter table public.pipeline_stage_suggestions enable row level security;
+-- All writes go through the admin client (service role bypasses RLS).
+-- The owner_update policy only covers status changes via accept/reject server actions.
 
 create policy pipeline_stage_suggestions_owner_select
   on public.pipeline_stage_suggestions
