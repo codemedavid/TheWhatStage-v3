@@ -36,6 +36,8 @@ interface StageRow {
   description: string | null
   position: number
   kind: string
+  entry_signals: string[] | null
+  exit_signals: string[] | null
 }
 
 interface MessageRow {
@@ -167,7 +169,7 @@ async function loadContext(
     ] = await Promise.all([
       admin
         .from('pipeline_stages')
-        .select('id, name, description, position, kind')
+        .select('id, name, kind, position, description, entry_signals, exit_signals')
         .eq('user_id', userId)
         .order('position', { ascending: true }),
       admin
@@ -234,25 +236,46 @@ async function callLlm(ctx: DeepContext): Promise<DeepDecision | null> {
 
 function buildSystemPrompt(ctx: DeepContext): string {
   const currentStage = ctx.stages.find((s) => s.id === ctx.lead.stage_id)
+
   const stageListText = ctx.stages
-    .map(
-      (s) =>
-        `- id=${s.id} name="${s.name}" kind=${s.kind} pos=${s.position}` +
-        (s.description ? ` desc="${s.description}"` : ''),
-    )
-    .join('\n')
+    .map((s) => {
+      const entry = (s.entry_signals ?? []).map((sig) => `    • ${sig}`).join('\n')
+      const exit = (s.exit_signals ?? []).map((sig) => `    • ${sig}`).join('\n')
+      return (
+        `- id=${s.id} name="${s.name}" kind=${s.kind} pos=${s.position}\n` +
+        (s.description ? `  description: ${s.description}\n` : '') +
+        (entry ? `  enter_when (≥1 must be observed):\n${entry}\n` : '') +
+        (exit ? `  leave_when:\n${exit}` : '')
+      )
+    })
+    .join('\n\n')
 
   return (
     'You are a deep sales-pipeline classifier. ' +
     'Analyse the full conversation history, form submissions, and prior stage transitions ' +
     'to decide whether this lead should move to a different pipeline stage.\n\n' +
+    'Each stage has explicit ENTER signals — ≥1 must be observed in the lead\'s behaviour ' +
+    'before you can move them in. The conversation may be in English, Tagalog, Taglish, or any language.\n\n' +
     'Output JSON only, matching this schema exactly:\n' +
-    '{"stage_change": {"to_stage_id": string, "confidence": "low"|"medium"|"high", "reason": string} | null}\n\n' +
-    'Return null when the lead should stay in the current stage.\n' +
-    'Use ONLY stage_ids from the list below. ' +
-    'This is a deep review pass — only set a stage_change when you are HIGHLY confident.\n\n' +
+    '{"stage_change": {' +
+    '"to_stage_id": string, ' +
+    '"move_type": "adjacent_forward"|"skip_ahead"|"into_terminal"|"into_objection"|"out_of_objection"|"backward", ' +
+    '"confidence": "low"|"medium"|"high", ' +
+    '"matched_signals": string[], ' +
+    '"reason": string' +
+    '} | null}\n\n' +
+    'Rules for move_type:\n' +
+    '  - adjacent_forward: target position is current position + 1 (or current is Objection and target is the lead\'s prior stage).\n' +
+    '  - skip_ahead: target position is more than 1 greater than current.\n' +
+    '  - into_terminal: target is Won or Lost (kind=won|lost).\n' +
+    '  - into_objection: target kind=objection.\n' +
+    '  - out_of_objection: current kind=objection and target is non-objection.\n' +
+    '  - backward: target position is lower than current and not an objection move.\n\n' +
+    'Return null when no move is warranted.\n' +
+    'matched_signals MUST list which specific enter_when signals you observed (verbatim short phrases).\n' +
+    'If no enter_when signal is observed, return null.\n\n' +
     `Current stage: id=${ctx.lead.stage_id}` +
-    (currentStage ? ` name="${currentStage.name}"` : '') +
+    (currentStage ? ` name="${currentStage.name}" kind=${currentStage.kind}` : '') +
     '\n\n' +
     'Available stages:\n' +
     stageListText
