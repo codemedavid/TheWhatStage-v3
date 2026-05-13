@@ -23,6 +23,9 @@ export async function seedDefaultStagesIfEmpty(
     is_won: s.kind === 'won',
     is_lost: s.kind === 'lost',
     is_terminal: s.kind === 'won' || s.kind === 'lost',
+    entry_signals: s.entry_signals,
+    exit_signals: s.exit_signals,
+    required_fields: s.required_fields,
   }))
 
   const { error } = await supabase.from('pipeline_stages').insert(rows)
