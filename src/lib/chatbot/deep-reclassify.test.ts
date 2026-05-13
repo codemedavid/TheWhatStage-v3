@@ -9,9 +9,11 @@ vi.mock('@/lib/rag', async (orig) => {
   const actual = await orig<typeof import('@/lib/rag')>()
   return {
     ...actual,
-    HfRouterLlm: vi.fn().mockImplementation(() => ({
+    HfRouterLlm: vi.fn().mockImplementation(function HfRouterLlmMock() {
+      return {
       complete: llmMocks.complete,
-    })),
+      }
+    }),
   }
 })
 
@@ -24,6 +26,7 @@ type AdminMockState = {
   submissions: Array<{ id: string; outcome: string; created_at: string; action_page_id: string }>
   pages: Array<{ id: string; title: string; kind: string }>
   messages: Array<{ direction: 'inbound' | 'outbound'; body: string; created_at: string }>
+  queries: Array<{ table: string; filters: Record<string, unknown> }>
   rpcCalls: Array<{ name: string; args: Record<string, unknown> }>
   rpcResult: { data: unknown; error: unknown } | null
 }
@@ -31,14 +34,19 @@ type AdminMockState = {
 function makeAdmin(state: AdminMockState) {
   const from = (table: string) => {
     const fluent: Record<string, unknown> = {}
-    const self: Record<string, (...args: unknown[]) => unknown> = {
+    const filters: Record<string, unknown> = {}
+    const self: Record<string, (...args: never[]) => unknown> = {
       select: () => self,
-      eq: () => self,
+      eq: (key: string, value: unknown) => {
+        filters[key] = value
+        return self
+      },
       neq: () => self,
       in: () => self,
       order: () => self,
       limit: () => self,
       maybeSingle: async () => {
+        state.queries.push({ table, filters: { ...filters } })
         if (table === 'leads') return { data: state.lead, error: null }
         return { data: null, error: null }
       },
@@ -46,6 +54,7 @@ function makeAdmin(state: AdminMockState) {
     // Thenable so `await query` resolves without explicit .then()
     Object.assign(self, {
       then: (resolve: (v: { data: unknown; error: null }) => unknown) => {
+        state.queries.push({ table, filters: { ...filters } })
         if (table === 'pipeline_stages') return resolve({ data: state.stages, error: null })
         if (table === 'lead_stage_events') return resolve({ data: state.events, error: null })
         if (table === 'action_page_submissions') return resolve({ data: state.submissions, error: null })
@@ -89,6 +98,7 @@ function makeState(): AdminMockState {
       { direction: 'inbound',  body: 'I want to book a call', created_at: '2026-05-10T00:00:00Z' },
       { direction: 'outbound', body: 'Sure!',                 created_at: '2026-05-10T00:00:01Z' },
     ],
+    queries: [],
     rpcCalls: [],
     rpcResult: null,
   }
@@ -156,6 +166,22 @@ describe('runDeepReclassify', () => {
       p_thread_id: 'th_1',
     })
     expect((state.rpcCalls[0].args.p_reason as string)).toContain('explicitly asked')
+  })
+
+  it('loads conversation history by thread_id, not a nonexistent lead_id column', async () => {
+    const state = makeState()
+    llmMocks.complete.mockResolvedValueOnce(JSON.stringify({ stage_change: null }))
+    await runDeepReclassify({
+      adminClient: makeAdmin(state),
+      leadId: 'lead_1',
+      threadId: 'th_1',
+      userId: 'user_1',
+      windowIndex: 1,
+    })
+
+    const messageQuery = state.queries.find((q) => q.table === 'messenger_messages')
+    expect(messageQuery?.filters).toMatchObject({ thread_id: 'th_1' })
+    expect(messageQuery?.filters).not.toHaveProperty('lead_id')
   })
 
   it('skips when target stage equals current stage', async () => {

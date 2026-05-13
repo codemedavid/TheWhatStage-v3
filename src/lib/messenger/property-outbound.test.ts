@@ -172,7 +172,7 @@ describe('buildRealestateCarouselElements', () => {
       'https://example.com/a/page?sig=abc',
       'view property',
     )
-    expect(out[0].buttons.map((b) => b.title)).toEqual(['View property', 'View all listings'])
+    expect(out[0]?.buttons?.map((b) => b.title)).toEqual(['View property', 'View all listings'])
   })
 
   it('falls back to "View all listings" when ctaLabel is empty/whitespace', () => {
@@ -181,7 +181,7 @@ describe('buildRealestateCarouselElements', () => {
       'https://example.com/a/page?sig=abc',
       '   ',
     )
-    expect(out[0].buttons[1].title).toBe('View all listings')
+    expect(out[0].buttons?.[1]?.title).toBe('View all listings')
   })
 
   it('uses ? when the base URL has no query string', () => {
@@ -190,7 +190,7 @@ describe('buildRealestateCarouselElements', () => {
       'https://example.com/a/page',
       'View all',
     )
-    expect(out[0].defaultActionUrl).toBe('https://example.com/a/page?property=p-abc')
+    expect(out[0]?.defaultActionUrl).toBe('https://example.com/a/page?property=p-abc')
   })
 
   it('truncates title and subtitle to Messenger limits', () => {

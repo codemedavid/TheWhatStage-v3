@@ -5,15 +5,8 @@ import { ragConfig } from '@/lib/rag/config'
 
 type LlmLike = { complete: (messages: LlmMessage[], opts?: { temperature?: number; maxTokens?: number; responseFormat?: 'json_object' }) => Promise<string> }
 
-/**
- * Factory for the LLM client. Intentionally avoids `new` so that test mocks
- * using `vi.fn().mockImplementation(arrowFn)` work correctly with Vitest's
- * spy mechanism (which only supports arrow-function impls in non-constructor
- * call paths).
- */
 function createLlm(): LlmLike {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return (HfRouterLlm as unknown as (opts?: { model?: string }) => LlmLike)({ model: ragConfig.classifierModel })
+  return new HfRouterLlm({ model: ragConfig.classifierModel })
 }
 
 export interface RunDeepReclassifyArgs {
@@ -101,7 +94,7 @@ interface DeepDecision {
 export async function runDeepReclassify(args: RunDeepReclassifyArgs): Promise<void> {
   const { adminClient: admin, leadId, threadId, userId, windowIndex } = args
   try {
-    const ctx = await loadContext(admin, leadId)
+    const ctx = await loadContext(admin, leadId, threadId)
     if (!ctx) {
       console.warn('[deep-reclassify] context load failed', { leadId })
       return
@@ -152,6 +145,7 @@ export async function runDeepReclassify(args: RunDeepReclassifyArgs): Promise<vo
 async function loadContext(
   admin: SupabaseClient,
   leadId: string,
+  threadId: string,
 ): Promise<DeepContext | null> {
   try {
     const { data: lead, error: leadErr } = await admin
@@ -179,7 +173,7 @@ async function loadContext(
       admin
         .from('messenger_messages')
         .select('direction, body, created_at')
-        .eq('lead_id', leadId)
+        .eq('thread_id', threadId)
         .order('created_at', { ascending: true })
         .limit(60),
       admin
