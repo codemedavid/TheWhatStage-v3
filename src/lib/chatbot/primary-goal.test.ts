@@ -77,12 +77,16 @@ describe('loadPrimaryGoalInstruction', () => {
     )
     const out = await loadPrimaryGoalInstruction(c, userId)
     expect(out).toContain('Book a demo')
-    expect(out).toContain('https://app.example.com/a/demo')
+    // URL must NOT leak into the prompt — the bot routes via action_page id,
+    // not by pasting links into the reply.
+    expect(out).not.toContain('https://app.example.com/a/demo')
+    expect(out).not.toContain('/a/demo')
     expect(out).toContain('Offer when curiosity is high.')
-    expect(out).toMatch(/Do not force/i)
+    expect(out).toMatch(/action_page\.action_page_id/)
+    expect(out).toMatch(/do not force/i)
   })
 
-  it('omits the instructions line when bot_send_instructions is empty', async () => {
+  it('omits the trigger line when bot_send_instructions is empty', async () => {
     const c = mockClient(
       { primary_action_page_id: 'page-1' },
       {
@@ -93,7 +97,7 @@ describe('loadPrimaryGoalInstruction', () => {
       },
     )
     const out = await loadPrimaryGoalInstruction(c, userId)
-    expect(out).not.toContain('When to send / what to say')
+    expect(out).not.toMatch(/matches this trigger/i)
     expect(out).toContain('Book a demo')
   })
 })

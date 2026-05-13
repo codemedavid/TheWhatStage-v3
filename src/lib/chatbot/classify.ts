@@ -367,6 +367,12 @@ export function stageInstruction(
       'When the latest customer message matches one action page\'s "send when" guidance, set `action_page.action_page_id` to that page\'s id. ' +
       'Pick at most one. Only use action_page_ids from the list below. ' +
       'The system will automatically attach the button as a SEPARATE message right after your reply — you do NOT need to send, link, or describe the button yourself.\n\n' +
+      'QUALIFY BEFORE SENDING — read carefully:\n' +
+      '- Treat each page\'s "send when" text as TWO things at once: (1) the trigger that finally fires the send, AND (2) a checklist of qualifying info you must collect FIRST. Read it literally and look for prerequisites such as "ask X first", "only after the customer says Y", "make sure they\'ve mentioned Z", "after collecting their budget / timeline / event date / location / business type / etc.", "kapag nasagot na ang … bago", or any similar phrasing in any language.\n' +
+      '- If ANY prerequisite from that text is not yet visible in the conversation history, set `action_page` to null and ASK the missing qualifying question in `reply` — one focused question at a time, in the customer\'s language. Do NOT send the button yet.\n' +
+      '- Only set `action_page` once EVERY prerequisite has been answered AND the customer\'s latest message clearly fits the trigger. When in doubt, ask one more qualifying question instead of sending.\n' +
+      '- A page with no prerequisites in its "send when" text may be sent as soon as the trigger condition matches.\n' +
+      '- Never re-ask a question the customer already answered earlier in the thread.\n\n' +
       'STRICT REPLY RULES when attaching an action page:\n' +
       '- `reply` must be a normal conversational message — respond to what the customer said, nothing else.\n' +
       '- Do NOT mention the button, form, booking link, or action page in `reply` at all. The system will send the button as a completely separate message automatically.\n' +
