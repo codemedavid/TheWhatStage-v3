@@ -3,7 +3,7 @@ import { leadsToCsv } from './csv'
 import type { LeadRow, StageRow, FieldDefRow } from './queries'
 
 const stages: StageRow[] = [
-  { id: 's1', name: 'New Lead', description: null, position: 0, is_default: true },
+  { id: 's1', name: 'New Lead', description: null, position: 0, is_default: true, kind: null, entry_signals: [], exit_signals: [], required_fields: [] },
 ]
 const defs: FieldDefRow[] = [
   { id: 'f1', key: 'industry', label: 'Industry', type: 'text', options: null, position: 0 },

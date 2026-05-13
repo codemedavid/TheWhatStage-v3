@@ -2,6 +2,7 @@
 import { useState, useTransition } from 'react'
 import { createStage, updateStage, deleteStage, reorderStages } from '../actions/stages'
 import type { StageRow } from '../_lib/queries'
+import { SignalChipsInput } from './SignalChipsInput'
 
 export function StageManager({ stages }: { stages: StageRow[] }) {
   const [pending, start] = useTransition()
@@ -100,17 +101,35 @@ function StageRowItem({
   const [edit, setEdit] = useState(false)
   const [name, setName] = useState(stage.name)
   const [desc, setDesc] = useState(stage.description ?? '')
+  const [entrySignals, setEntrySignals] = useState<string[]>(stage.entry_signals)
+  const [exitSignals, setExitSignals] = useState<string[]>(stage.exit_signals)
+  const [requiredFields, setRequiredFields] = useState<string[]>(stage.required_fields)
   const [, start] = useTransition()
 
   const save = () =>
     start(async () => {
-      await updateStage(stage.id, { name, description: desc || null })
+      await updateStage(stage.id, {
+        name,
+        description: desc || null,
+        entry_signals: entrySignals,
+        exit_signals: exitSignals,
+        required_fields: requiredFields,
+      })
       setEdit(false)
     })
 
+  const cancelEdit = () => {
+    setName(stage.name)
+    setDesc(stage.description ?? '')
+    setEntrySignals(stage.entry_signals)
+    setExitSignals(stage.exit_signals)
+    setRequiredFields(stage.required_fields)
+    setEdit(false)
+  }
+
   return (
-    <li className="p-3 flex items-center gap-3">
-      <div className="flex flex-col">
+    <li className="p-3 flex items-start gap-3">
+      <div className="flex flex-col pt-1">
         <button
           disabled={index === 0 || pending}
           onClick={() => onMove(index, -1)}
@@ -127,24 +146,48 @@ function StageRowItem({
         </button>
       </div>
       {edit ? (
-        <>
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className="border rounded px-2 py-1 text-sm"
+        <div className="flex-1 space-y-3">
+          <div className="flex gap-2">
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Stage name"
+              className="border rounded px-2 py-1 text-sm w-40"
+            />
+            <input
+              value={desc}
+              onChange={(e) => setDesc(e.target.value)}
+              placeholder="When should the AI move leads here?"
+              className="flex-1 border rounded px-2 py-1 text-sm"
+            />
+          </div>
+          <SignalChipsInput
+            label="Entry signals"
+            value={entrySignals}
+            onChange={setEntrySignals}
+            placeholder="Add entry signal and press Enter"
           />
-          <input
-            value={desc}
-            onChange={(e) => setDesc(e.target.value)}
-            className="flex-1 border rounded px-2 py-1 text-sm"
+          <SignalChipsInput
+            label="Exit signals"
+            value={exitSignals}
+            onChange={setExitSignals}
+            placeholder="Add exit signal and press Enter"
           />
-          <button onClick={save} className="px-2 py-1 text-sm bg-emerald-600 text-white rounded">
-            Save
-          </button>
-          <button onClick={() => setEdit(false)} className="px-2 py-1 text-sm border rounded">
-            Cancel
-          </button>
-        </>
+          <SignalChipsInput
+            label="Required fields"
+            value={requiredFields}
+            onChange={setRequiredFields}
+            placeholder="Add required field and press Enter"
+          />
+          <div className="flex gap-2">
+            <button onClick={save} className="px-2 py-1 text-sm bg-emerald-600 text-white rounded">
+              Save
+            </button>
+            <button onClick={cancelEdit} className="px-2 py-1 text-sm border rounded">
+              Cancel
+            </button>
+          </div>
+        </div>
       ) : (
         <>
           <div className="flex-1">
@@ -155,6 +198,15 @@ function StageRowItem({
               )}
             </div>
             <div className="text-xs text-[#6B7280]">{stage.description}</div>
+            {stage.entry_signals.length > 0 && (
+              <div className="mt-1 flex flex-wrap gap-1">
+                {stage.entry_signals.map((s, i) => (
+                  <span key={i} className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700">
+                    {s}
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
           <button
             onClick={() => setEdit(true)}

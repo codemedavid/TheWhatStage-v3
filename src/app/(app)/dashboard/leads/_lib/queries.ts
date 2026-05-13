@@ -66,6 +66,10 @@ export type StageRow = {
   description: string | null
   position: number
   is_default: boolean
+  kind: 'entry' | 'qualifying' | 'nurture' | 'decision' | 'won' | 'lost' | 'dormant' | 'objection' | null
+  entry_signals: string[]
+  exit_signals: string[]
+  required_fields: string[]
 }
 
 export type FieldDefRow = {
@@ -77,12 +81,21 @@ export type FieldDefRow = {
   position: number
 }
 
+function normalizeStageRow(row: Record<string, unknown>): StageRow {
+  return {
+    ...(row as StageRow),
+    entry_signals: (row.entry_signals as string[] | null) ?? [],
+    exit_signals: (row.exit_signals as string[] | null) ?? [],
+    required_fields: (row.required_fields as string[] | null) ?? [],
+  }
+}
+
 export async function fetchStages(supabase: SupabaseClient, userId: string): Promise<StageRow[]> {
   const { data, error } = await supabase
     .from('pipeline_stages').select('*')
     .eq('user_id', userId).order('position', { ascending: true })
   if (error) throw error
-  return (data ?? []) as StageRow[]
+  return ((data ?? []) as Record<string, unknown>[]).map(normalizeStageRow)
 }
 
 export async function fetchFieldDefs(supabase: SupabaseClient, userId: string): Promise<FieldDefRow[]> {
@@ -104,7 +117,7 @@ export function fetchStagesCached(userId: string): Promise<StageRow[]> {
         .from('pipeline_stages').select('*')
         .eq('user_id', uid).order('position', { ascending: true })
       if (error) throw error
-      return (data ?? []) as StageRow[]
+      return ((data ?? []) as Record<string, unknown>[]).map(normalizeStageRow)
     },
     ['leads-stages', userId],
     { tags: [stagesTag(userId)], revalidate: 3600 },

@@ -25,9 +25,19 @@ export async function createStage(raw: unknown) {
     .maybeSingle()
 
   const nextPos = (maxRow?.position ?? -1) + 1
-  const { error } = await supabase.from('pipeline_stages').insert({
-    user_id: userId, ...input, position: nextPos, is_default: false,
-  })
+  const insert: Record<string, unknown> = {
+    user_id: userId,
+    name: input.name,
+    description: input.description ?? null,
+    position: nextPos,
+    is_default: false,
+  }
+  if (input.kind !== undefined) insert.kind = input.kind
+  if (input.entry_signals !== undefined) insert.entry_signals = input.entry_signals
+  if (input.exit_signals !== undefined) insert.exit_signals = input.exit_signals
+  if (input.required_fields !== undefined) insert.required_fields = input.required_fields
+
+  const { error } = await supabase.from('pipeline_stages').insert(insert)
   if (error) throw error
   revalidateTag(stagesTag(userId), 'max')
   revalidatePath('/dashboard/leads', 'layout')
@@ -36,9 +46,19 @@ export async function createStage(raw: unknown) {
 export async function updateStage(id: string, raw: unknown) {
   const input = StageInput.parse(raw)
   const { supabase, userId } = await requireUser()
+
+  const update: Record<string, unknown> = {
+    name: input.name,
+    description: input.description ?? null,
+  }
+  if (input.kind !== undefined) update.kind = input.kind
+  if (input.entry_signals !== undefined) update.entry_signals = input.entry_signals
+  if (input.exit_signals !== undefined) update.exit_signals = input.exit_signals
+  if (input.required_fields !== undefined) update.required_fields = input.required_fields
+
   const { error } = await supabase
     .from('pipeline_stages')
-    .update(input)
+    .update(update)
     .eq('id', id)
   if (error) throw error
   revalidateTag(stagesTag(userId), 'max')

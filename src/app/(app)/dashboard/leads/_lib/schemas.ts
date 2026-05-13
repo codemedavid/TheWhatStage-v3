@@ -3,6 +3,10 @@ import { z } from 'zod'
 export const StageInput = z.object({
   name: z.string().min(1).max(60),
   description: z.string().max(500).optional().nullable(),
+  kind: z.enum(['entry','qualifying','nurture','decision','won','lost','dormant','objection']).optional(),
+  entry_signals: z.array(z.string().min(1).max(240)).max(20).optional(),
+  exit_signals: z.array(z.string().min(1).max(240)).max(20).optional(),
+  required_fields: z.array(z.string().min(1).max(80)).max(20).optional(),
 })
 export type StageInput = z.infer<typeof StageInput>
 
