@@ -283,6 +283,37 @@ describe('runDeepReclassify integration', () => {
     expect(reasonPart.length).toBeLessThanOrEqual(500)
   })
 
+  // Test 6 — Fix 1: move_type mismatch with insufficient confidence aborts
+  it('aborts when LLM-reported move_type disagrees with structural and confidence is insufficient', async () => {
+    // Lead is in position 0 ('st_new'). LLM reports move_type='adjacent_forward' + confidence='medium',
+    // but to_stage_id='st_q' (position 1) — which is actually adjacent_forward position-wise, so let's
+    // use a state where the lead is in position 0 and target is position 3 ('st_won').
+    // LLM claims adjacent_forward + medium, but structural will be into_terminal → medium rejected.
+    const state = makeState()
+    // Move lead to position 0 (st_new)
+    state.lead = { ...state.lead, stage_id: 'st_new' }
+    llmMocks.complete.mockResolvedValueOnce(
+      JSON.stringify({
+        stage_change: {
+          to_stage_id: 'st_won',
+          move_type: 'adjacent_forward',
+          confidence: 'medium',
+          matched_signals: ['lead asked about pricing'],
+          reason: 'seems ready',
+        },
+      }),
+    )
+    await runDeepReclassify({
+      adminClient: makeAdmin(state),
+      leadId: 'lead_1',
+      threadId: 'th_1',
+      userId: 'user_1',
+      windowIndex: 1,
+    })
+    // structural move_type is 'into_terminal' which does not allow medium → abort
+    expect(state.rpcCalls).toHaveLength(0)
+  })
+
   // Test 5 — same-stage guard and unknown-stage guard both skip without applying
   it('skips when decision targets current stage or an unknown stage', async () => {
     // Same stage

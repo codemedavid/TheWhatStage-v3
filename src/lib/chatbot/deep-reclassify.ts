@@ -151,6 +151,18 @@ export async function runDeepReclassify(args: RunDeepReclassifyArgs): Promise<vo
     if (!structuralMoveType) return
 
     if (structuralMoveType !== decision.move_type) {
+      const structuralAllowsMedium =
+        structuralMoveType === 'adjacent_forward' ||
+        structuralMoveType === 'into_objection' ||
+        structuralMoveType === 'out_of_objection'
+      if (decision.confidence === 'medium' && !structuralAllowsMedium) {
+        console.warn('[deep-reclassify] move_type mismatch + insufficient confidence — aborting', {
+          llm: decision.move_type,
+          structural: structuralMoveType,
+          confidence: decision.confidence,
+        })
+        return
+      }
       console.warn('[deep-reclassify] move_type mismatch — trusting structural', {
         llm: decision.move_type,
         structural: structuralMoveType,
@@ -158,7 +170,7 @@ export async function runDeepReclassify(args: RunDeepReclassifyArgs): Promise<vo
     }
 
     const idempotencyKey = `deep:${threadId}:${leadId}:${windowIndex}`
-    await moveLeadToStage(admin, {
+    const moved = await moveLeadToStage(admin, {
       leadId,
       toStageId: decision.to_stage_id,
       source: 'deep_classifier',
@@ -168,6 +180,13 @@ export async function runDeepReclassify(args: RunDeepReclassifyArgs): Promise<vo
       idempotencyKey,
       threadId,
     })
+    if (!moved) {
+      console.warn('[deep-reclassify] move not applied (version mismatch or RPC failure)', {
+        leadId: ctx.lead.id,
+        toStageId: decision.to_stage_id,
+      })
+      return
+    }
 
     console.log('[deep-reclassify] applied', {
       leadId,
