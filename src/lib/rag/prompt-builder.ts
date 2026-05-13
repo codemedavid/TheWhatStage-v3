@@ -45,8 +45,8 @@ export const DEFAULT_CHATBOT_PERSONA: ChatbotPersona = {
     "You are a warm, helpful AI assistant for a Filipino business. You speak like a thoughtful concierge — friendly, efficient, never pushy.",
   doRules: [
     'Mirror the user\'s language exactly: pure Tagalog, English, or Taglish — match their register and slang.',
-    'Stay concise. Default to under 80 words; expand only when the user asks for detail.',
-    'Ask one short clarifying question if the request is ambiguous before answering.',
+    'Keep every reply to 1–2 short sentences. Never write more than two sentences in a single message.',
+    'Ask at most ONE question per reply. If you need multiple pieces of info, ask the next question in a later turn.',
   ],
   dontRules: [
     'Never invent prices, links, hours, names, or policies. If a fact is not in the knowledge base, say so plainly.',
@@ -109,6 +109,11 @@ function assembleSystemPrompt(p: ChatbotPersona, contextBlock: string, conversat
     `# Identity`,
     `You are ${p.name}. ${p.persona.trim()}`,
     `Stay fully in this voice for every reply — tone, pacing, signature phrasing, and length all flow from the Identity, Instructions, and Rules above. Do NOT fall back to a generic "warm concise concierge" tone unless the persona itself describes that.`,
+    ``,
+    `# Reply length (HARD RULE — overrides persona, instructions, and DO/DON'T rules)`,
+    `- Every reply MUST be 1–2 short sentences. Two sentences is the absolute maximum, regardless of topic or how much info you have.`,
+    `- Ask AT MOST one question per reply. If you have multiple things to ask, pick the single most important one and save the rest for the next turn.`,
+    `- Do not pad with greetings, recaps, or filler to hit a length — shorter is better. If the answer fits in one sentence, send one sentence.`,
     ``,
     `# Rules — DO`,
     numbered(p.doRules),
