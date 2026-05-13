@@ -102,4 +102,64 @@ describe('sanitizeReply', () => {
   it('passes a normal reply through unchanged (apart from trim)', () => {
     expect(sanitizeReply('  Hello, kumusta? 👋  ')).toBe('Hello, kumusta? 👋')
   })
+
+  // ---- Variants of the production-incident pattern. Every one of these
+  //      MUST sanitize to a string that contains zero tool-call residue.
+
+  it.each([
+    // Original incident
+    '<|tool_call>call:action_page.action_page_id("WhatStage")<tool_call|>',
+    // Both delimiters well-formed
+    '<|tool_call|>call:action_page.action_page_id("X")<|/tool_call|>',
+    '<|tool_call|>call:action_page.action_page_id("X")<|tool_call|>',
+    // XML-style
+    '<tool_call>call:action_page.action_page_id("X")</tool_call>',
+    '<tool_call>action_page.action_page_id("X")</tool_call>',
+    // function_call alias
+    '<|function_call|>call:action_page.action_page_id("X")<|/function_call|>',
+    '<function_call>foo("bar")</function_call>',
+    // tool_use alias (Anthropic-flavoured)
+    '<|tool_use|>action_page.action_page_id("X")<|/tool_use|>',
+    // Square-bracket variant
+    '[[tool_call]]call:action_page.action_page_id("X")[[/tool_call]]',
+    // Underscored / spaced / mixed-case names
+    '<|TOOL_CALL|>call:action_page.action_page_id("X")<|/TOOL_CALL|>',
+    '<|tool call|>call:action_page.action_page_id("X")<|/tool call|>',
+    // No `action_page.` prefix — bare `call:foo(...)` form
+    'call:foo("bar")',
+    'tool_call: action_page_id("WhatStage")',
+    // JSON fragment leak
+    '{"action_page_id":"WhatStage","reason":"x"}',
+    // Multiline with payload and noise
+    'Sigurado ka na ba?\n<|tool_call>\ncall:action_page.action_page_id("WhatStage")\n<tool_call|>\nSalamat!',
+    // Lone control token, no body
+    '<|tool_call|>',
+    '<tool_call>',
+    '<|/tool_call|>',
+  ])('scrubs all tool-call residue from variant: %s', (raw) => {
+    const out = sanitizeReply(raw)
+    expect(out).not.toMatch(/tool[_ ]?call/i)
+    expect(out).not.toMatch(/function[_ ]?call/i)
+    expect(out).not.toMatch(/tool[_ ]?use/i)
+    expect(out).not.toMatch(/<\|/)
+    expect(out).not.toMatch(/\|>/)
+    expect(out).not.toMatch(/action_page\.action_page_id/i)
+    expect(out).not.toMatch(/"action_page_id"/i)
+    expect(out).not.toMatch(/\bcall\s*:/i)
+  })
+
+  it('preserves real customer-facing content around a stripped tool call', () => {
+    const raw =
+      'Sigurado ka na ba?\n<|tool_call>call:action_page.action_page_id("WhatStage")<tool_call|>\nSalamat!'
+    const out = sanitizeReply(raw)
+    expect(out).toContain('Sigurado ka na ba?')
+    expect(out).toContain('Salamat!')
+  })
+
+  it('is idempotent — running twice produces the same string', () => {
+    const raw = '<|tool_call>call:action_page.action_page_id("X")<tool_call|>\nHello'
+    const once = sanitizeReply(raw)
+    const twice = sanitizeReply(once)
+    expect(twice).toBe(once)
+  })
 })

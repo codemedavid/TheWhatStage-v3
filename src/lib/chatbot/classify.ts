@@ -547,23 +547,58 @@ function formatHistory(history: AnswerHistory): string {
  */
 export function sanitizeReply(raw: string): string {
   let s = raw
-  // ChatML / Llama-style control tokens, including the malformed
-  // `<|tool_call>...<tool_call|>` pair we observed in production.
-  s = s.replace(/<\|[^>]*?\|>/g, '')
-  s = s.replace(/<\|[^|]*?>/g, '')
-  s = s.replace(/<[^>]*?\|>/g, '')
-  // Tool-call XML-ish wrappers (open + close, in either order).
-  s = s.replace(/<\/?\s*tool[_ ]?call\s*>/gi, '')
-  s = s.replace(/<\/?\s*function[_ ]?call\s*>/gi, '')
-  // Bare `call:foo.bar("x")` style fragments left behind on a line.
-  s = s.replace(/^\s*call\s*:\s*[\w.]+\s*\([^)]*\)\s*$/gim, '')
-  s = s.replace(/\bcall\s*:\s*action_page\.[\w.]+\s*\([^)]*\)/gi, '')
-  // Stray fenced JSON / code blocks that occasionally escape into reply.
+
+  // 1. Multiline tool-call / function-call BLOCKS — any wrapper variant we've
+  //    seen models emit, including ChatML, XML, square-bracket, and
+  //    parenthesised forms. Strip the whole block (open delim + body + close
+  //    delim) so nothing inside leaks out.
+  const blockPatterns: RegExp[] = [
+    // <|tool_call|> ... <|/tool_call|> or <|tool_call|> ... <|tool_call|>
+    /<\|\/?(?:tool[_ ]?call|function[_ ]?call|tool[_ ]?use)\|?>[\s\S]*?<\|\/?(?:tool[_ ]?call|function[_ ]?call|tool[_ ]?use)\|?>/gi,
+    // <tool_call> ... </tool_call> (both well- and mal-formed close tags)
+    /<\/?(?:tool[_ ]?call|function[_ ]?call|tool[_ ]?use)>[\s\S]*?<\/?(?:tool[_ ]?call|function[_ ]?call|tool[_ ]?use)>/gi,
+    // [[tool_call]] ... [[/tool_call]]
+    /\[\[\/?(?:tool[_ ]?call|function[_ ]?call|tool[_ ]?use)\]\][\s\S]*?\[\[\/?(?:tool[_ ]?call|function[_ ]?call|tool[_ ]?use)\]\]/gi,
+  ]
+  for (const re of blockPatterns) s = s.replace(re, '')
+
+  // 2. Stray ChatML / Llama / Mistral control tokens — every shape of `<|...>`,
+  //    `<...|>`, `<|...|>`. Order matters: do the both-pipes form first so
+  //    we don't half-strip and leave a dangling `|>`.
+  s = s.replace(/<\|[\s\S]*?\|>/g, '') // <|...|>
+  s = s.replace(/<\|[\s\S]*?>/g, '') // <|...>
+  s = s.replace(/<[^<>]*?\|>/g, '') // ...|>
+
+  // 3. Lone tool-call open/close tags that survived (no matching pair).
+  s = s.replace(/<\/?\s*(?:tool[_ ]?call|function[_ ]?call|tool[_ ]?use)\s*>/gi, '')
+  s = s.replace(/\[\[\/?\s*(?:tool[_ ]?call|function[_ ]?call|tool[_ ]?use)\s*\]\]/gi, '')
+
+  // 4. ChatML role headers: <|im_start|>assistant, <|start_header_id|>user…
+  //    (mostly covered by step 2, but catch a few common bare forms.)
+  s = s.replace(/^\s*(?:assistant|system|user|tool)\s*:?\s*$/gim, '')
+
+  // 5. Bare function-call fragments: any `call:identifier(...)` / `name(args)`
+  //    that looks like a serialised tool call. Conservative — only strips
+  //    when prefixed by `call:`, `tool_call:`, or `function_call:`.
+  s = s.replace(/\b(?:tool_call|function_call|call)\s*:\s*[\w.$]+\s*\([^)]*\)/gi, '')
+
+  // 6. JSON fragments leaking the structured action_page decision into prose
+  //    e.g. `{"action_page_id":"x"}` or `action_page.action_page_id("…")`.
+  s = s.replace(/\{[^{}]*"action_page[\w]*"[^{}]*\}/gi, '')
+  s = s.replace(/\baction_page\.[\w.]+\s*\([^)]*\)/gi, '')
+
+  // 7. Stray fenced code blocks that occasionally escape into reply.
   s = s.replace(/```[a-z]*\s*[\s\S]*?```/gi, '')
-  // Bracketed placeholder leakage like [Insert Link] / [form link here].
-  s = s.replace(/\[(?:insert\s+)?(?:link|url|form\s+link[^\]]*|action\s+page[^\]]*)\]/gi, '')
-  // Collapse whitespace runs and trim.
+
+  // 8. Bracketed link placeholder leakage like [Insert Link] / [form link here].
+  s = s.replace(
+    /\[(?:insert\s+)?(?:link|url|form\s+link[^\]]*|action\s+page[^\]]*)\]/gi,
+    '',
+  )
+
+  // 9. Collapse whitespace runs and trim.
   s = s.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim()
+
   return s
 }
 
