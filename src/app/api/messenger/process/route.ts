@@ -41,8 +41,37 @@ export const dynamic = 'force-dynamic'
 export const maxDuration = 300
 
 const MAX_ATTEMPTS = 3
+// Rate-limit (429) errors get a softer cap so a transient burst against
+// OpenAI/Anthropic or Meta doesn't drop the message after three minutes.
+// Each retry reschedules with jittered backoff (see isRateLimitError below).
+const MAX_RATE_LIMIT_ATTEMPTS = 10
 const HISTORY_LIMIT = 20
-const BATCH_SIZE = 5
+const BATCH_SIZE = 3
+
+// Recognise rate-limit errors from any of the upstream APIs the worker calls:
+//   - Meta Graph: `Graph 429: ...`
+//   - OpenAI / Anthropic SDKs: messages like `429 status code (no body)` or
+//     `Rate limit reached` / `Too Many Requests` / `rate_limit_exceeded`
+// Anything matching counts as a soft failure: the job is requeued with a
+// longer, jittered backoff and does NOT consume a normal attempt slot.
+function isRateLimitError(msg: string): boolean {
+  const m = msg.toLowerCase()
+  return (
+    m.includes('429') ||
+    m.includes('rate limit') ||
+    m.includes('rate_limit') ||
+    m.includes('too many requests') ||
+    m.includes('overloaded')
+  )
+}
+
+// Backoff for rate-limited retries: 30s, 45s, 67s, 100s, ... capped at 5 min,
+// with ±25% jitter so concurrent workers don't synchronize their retries.
+function rateLimitBackoffMs(attempt: number): number {
+  const base = Math.min(30_000 * Math.pow(1.5, Math.max(0, attempt - 1)), 300_000)
+  const jitter = base * (Math.random() * 0.5 - 0.25)
+  return Math.floor(base + jitter)
+}
 const RUNNING_STALE_MS = 5 * 60 * 1000
 const CLASSIFY_EVERY = 4
 // Stop claiming new batches once this much wall-clock has elapsed in the
@@ -1039,17 +1068,34 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
 
     await markDone(admin, job.id, 'done', null)
   } catch (err) {
-    const attempts = job.attempts + 1
-    const failed = attempts >= MAX_ATTEMPTS
     const msg = err instanceof Error ? err.message : String(err)
-    console.error('[messenger.worker] job error', job.id, msg)
+    const rateLimited = isRateLimitError(msg)
+    const attempts = job.attempts + 1
+    // Rate-limit errors get a higher cap and longer jittered backoff. Other
+    // errors keep the original 3-attempt cap with linear backoff so genuine
+    // bugs still surface quickly.
+    const cap = rateLimited ? MAX_RATE_LIMIT_ATTEMPTS : MAX_ATTEMPTS
+    const failed = attempts >= cap
+    const backoffMs = rateLimited
+      ? rateLimitBackoffMs(attempts)
+      : Math.min(60_000 * attempts, 300_000)
+    if (rateLimited) {
+      console.warn('[messenger.worker] rate-limited, requeuing', job.id, {
+        attempts,
+        cap,
+        backoffMs,
+        msg: msg.slice(0, 200),
+      })
+    } else {
+      console.error('[messenger.worker] job error', job.id, msg)
+    }
     await admin
       .from('messenger_jobs')
       .update({
         status: failed ? 'failed' : 'queued',
         attempts,
         last_error: msg.slice(0, 1000),
-        scheduled_at: new Date(Date.now() + Math.min(60_000 * attempts, 300_000)).toISOString(),
+        scheduled_at: new Date(Date.now() + backoffMs).toISOString(),
         finished_at: failed ? new Date().toISOString() : null,
         started_at: null,
       })

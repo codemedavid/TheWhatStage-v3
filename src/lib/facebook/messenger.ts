@@ -10,21 +10,69 @@ const SUBSCRIBED_FIELDS = [
   'message_template_status_update',
 ].join(',')
 
+// Retry transient Graph failures (429 throttling, 5xx) before bubbling up to
+// the worker. The worker has its own rate-limit-aware requeue path, so these
+// inline retries exist purely to absorb short blips without burning a job
+// attempt. Cap retries low — a sustained 429 should still surface so the
+// outer requeue with longer backoff can take over.
+const GRAPH_MAX_RETRIES = 2
+const GRAPH_BASE_DELAY_MS = 500
+
+function shouldRetryGraph(status: number): boolean {
+  return status === 429 || (status >= 500 && status < 600)
+}
+
+function graphRetryDelayMs(attempt: number, retryAfter: string | null): number {
+  if (retryAfter) {
+    const secs = Number(retryAfter)
+    if (Number.isFinite(secs) && secs > 0) return Math.min(secs * 1000, 10_000)
+  }
+  const base = GRAPH_BASE_DELAY_MS * Math.pow(3, attempt)
+  const jitter = base * (Math.random() * 0.5 - 0.25)
+  return Math.floor(base + jitter)
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms))
+}
+
 async function postJson<T>(url: string, body: Record<string, unknown>): Promise<T> {
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(body),
-  })
-  const text = await res.text()
-  if (!res.ok) throw new Error(`Graph ${res.status}: ${text}`)
-  return JSON.parse(text) as T
+  let lastStatus = 0
+  let lastText = ''
+  for (let attempt = 0; attempt <= GRAPH_MAX_RETRIES; attempt++) {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    const text = await res.text()
+    if (res.ok) return JSON.parse(text) as T
+    lastStatus = res.status
+    lastText = text
+    if (attempt < GRAPH_MAX_RETRIES && shouldRetryGraph(res.status)) {
+      await sleep(graphRetryDelayMs(attempt, res.headers.get('retry-after')))
+      continue
+    }
+    break
+  }
+  throw new Error(`Graph ${lastStatus}: ${lastText}`)
 }
 
 async function getJson<T>(url: string): Promise<T> {
-  const res = await fetch(url)
-  if (!res.ok) throw new Error(`Graph ${res.status}: ${await res.text()}`)
-  return (await res.json()) as T
+  let lastStatus = 0
+  let lastText = ''
+  for (let attempt = 0; attempt <= GRAPH_MAX_RETRIES; attempt++) {
+    const res = await fetch(url)
+    if (res.ok) return (await res.json()) as T
+    lastStatus = res.status
+    lastText = await res.text()
+    if (attempt < GRAPH_MAX_RETRIES && shouldRetryGraph(res.status)) {
+      await sleep(graphRetryDelayMs(attempt, res.headers.get('retry-after')))
+      continue
+    }
+    break
+  }
+  throw new Error(`Graph ${lastStatus}: ${lastText}`)
 }
 
 /**
