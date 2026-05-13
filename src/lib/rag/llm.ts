@@ -20,6 +20,11 @@ export class HfRouterLlm {
     this.client = new OpenAI({
       apiKey: opts?.token ?? ragConfig.hfToken,
       baseURL: opts?.baseURL ?? ragConfig.hfRouterBaseUrl,
+      // SDK auto-retries 429/5xx with exponential backoff and honors
+      // Retry-After. Default is 2 — bump it so transient bursts don't
+      // bubble up as worker job failures.
+      maxRetries: 5,
+      timeout: 60_000,
     });
     this.model = opts?.model ?? ragConfig.llmModel;
   }
