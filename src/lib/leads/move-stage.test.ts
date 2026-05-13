@@ -43,4 +43,33 @@ describe('moveLeadToStage', () => {
     })
     expect(ok).toBe(false)
   })
+
+  it('passes reason as-is when matchedSignals is empty', async () => {
+    const admin = makeAdmin(true)
+    await moveLeadToStage(admin, {
+      leadId: 'lead-1',
+      toStageId: 'stage-1',
+      source: 'bot-deep',
+      reason: 'manual override',
+      matchedSignals: [],
+    })
+    expect((admin.rpc as ReturnType<typeof vi.fn>).mock.calls[0]).toMatchObject([
+      'set_lead_stage',
+      expect.objectContaining({ p_reason: 'manual override' }),
+    ])
+  })
+
+  it('returns false when the RPC returns an error', async () => {
+    const admin = {
+      rpc: vi.fn().mockResolvedValue({ data: null, error: { message: 'denied' } }),
+    } as unknown as Parameters<typeof moveLeadToStage>[0]
+    const ok = await moveLeadToStage(admin, {
+      leadId: 'lead-1',
+      toStageId: 'stage-1',
+      source: 'bot-deep',
+      reason: 'r',
+      matchedSignals: [],
+    })
+    expect(ok).toBe(false)
+  })
 })
