@@ -116,6 +116,15 @@ export function OutcomeCard({
             <option key={s.id} value={s.id}>{s.name}</option>
           ))}
         </select>
+        {stages.length === 0 && (
+          <p className="text-[11px] text-[#B45309]">
+            No pipeline stages yet.{' '}
+            <a href="/dashboard/leads/stages" className="underline" target="_blank" rel="noreferrer">
+              Set up stages
+            </a>{' '}
+            to route this outcome.
+          </p>
+        )}
       </div>
 
       {/* Messenger text */}

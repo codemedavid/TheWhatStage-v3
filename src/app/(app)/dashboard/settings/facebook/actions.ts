@@ -100,6 +100,7 @@ export async function savePagesForm(formData: FormData): Promise<void> {
   }
 
   revalidatePath(SETTINGS_PATH)
+  redirect(SETTINGS_PATH)
 }
 
 export async function disconnectForm(): Promise<void> {

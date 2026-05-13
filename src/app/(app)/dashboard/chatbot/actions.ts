@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
-import { upsertChatbotConfig } from '@/lib/chatbot/config'
+import { setPrimaryActionPageId, upsertChatbotConfig } from '@/lib/chatbot/config'
 
 function entries(formData: FormData, key: string): string[] {
   return formData
@@ -36,4 +36,35 @@ export async function saveChatbotConfig(formData: FormData): Promise<void> {
   })
 
   revalidatePath('/dashboard/chatbot')
+}
+
+/**
+ * Server action: set or clear the chatbot's primary goal action page.
+ * Callable from the chatbot settings page, the action-pages list, and the
+ * published-banner. Pass null to clear.
+ */
+export async function setPrimaryActionPage(
+  actionPageId: string | null,
+): Promise<void> {
+  const supabase = await createClient()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) redirect('/login')
+
+  if (actionPageId) {
+    const { data: page } = await supabase
+      .from('action_pages')
+      .select('id, status')
+      .eq('id', actionPageId)
+      .eq('user_id', user.id)
+      .maybeSingle<{ id: string; status: string }>()
+    if (!page) throw new Error('action page not found')
+    if (page.status !== 'published') throw new Error('action page not published')
+  }
+
+  await setPrimaryActionPageId(supabase, user.id, actionPageId)
+
+  revalidatePath('/dashboard/chatbot')
+  revalidatePath('/dashboard/action-pages')
 }

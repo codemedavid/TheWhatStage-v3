@@ -7,6 +7,7 @@ import {
   retrieve,
 } from '@/lib/rag'
 import { getChatbotConfig } from './config'
+import { loadPrimaryGoalInstruction } from './primary-goal'
 import { selectMediaForReply, type SelectedMediaAsset } from '@/lib/media/selector'
 
 export type AnswerHistory = { role: 'user' | 'assistant'; content: string }[]
@@ -62,16 +63,27 @@ export async function answer(
 ): Promise<AnswerResult> {
   const baseConfig = await getChatbotConfig(supabase, userId)
   const cp = options.campaignPersona
+
+  // Resolve the primary goal block: campaign funnelInstruction wins; otherwise
+  // fall back to the chatbot's configured primary action page.
+  const campaignGoal = cp?.funnelInstruction?.trim()
+  const chatbotGoal = campaignGoal
+    ? null
+    : await loadPrimaryGoalInstruction(supabase, userId)
+  const funnelInstruction = campaignGoal || chatbotGoal || undefined
+
   const config = cp
     ? {
         ...baseConfig,
         ...(cp.persona ? { persona: cp.persona } : {}),
         doRules: [...baseConfig.doRules, ...(cp.doRules ?? [])],
         dontRules: [...baseConfig.dontRules, ...(cp.dontRules ?? [])],
-        ...(cp.funnelInstruction ? { funnelInstruction: cp.funnelInstruction } : {}),
+        ...(funnelInstruction ? { funnelInstruction } : {}),
         ...(cp.instructions !== undefined ? { instructions: cp.instructions } : {}),
       }
-    : baseConfig
+    : funnelInstruction
+      ? { ...baseConfig, funnelInstruction }
+      : baseConfig
 
   const embedder = createEmbedder()
   const reranker = createReranker()

@@ -5,7 +5,6 @@ import { decryptToken } from '@/lib/facebook/crypto'
 import {
   fetchMessengerProfile,
   sendMessengerImage,
-  sendMessengerReaction,
   sendMessengerSenderAction,
 } from '@/lib/facebook/messenger'
 import { sendOutbound, sendProductRecommendation } from '@/lib/messenger/outbound'
@@ -410,28 +409,11 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
     }
 
     if (thread.auto_reply_enabled && !thread.controlled_by_run_id) {
-      // Best-effort presence signals before we spend time generating a reply:
-      //   1. React to the inbound message (Page Reactions) so the user sees
-      //      a visible "got it" acknowledgment even if generation is slow.
-      //   2. Send typing_on so the typing bubble is visible while the LLM
-      //      runs. typing_on auto-clears after ~20s or when the next message
-      //      is sent, so no explicit typing_off is needed after the reply.
-      // Both are wrapped in try/catch — a failed presence signal must never
-      // block the actual reply (Page Reactions in particular can be gated).
-      if (inboundFbId) {
-        try {
-          await sendMessengerReaction({
-            pageAccessToken: pageToken,
-            recipientPsid: thread.psid,
-            messageId: inboundFbId,
-            reaction: 'like',
-          })
-        } catch (e) {
-          console.warn('[messenger.worker] reaction send failed', {
-            err: e instanceof Error ? e.message : String(e),
-          })
-        }
-      }
+      // Best-effort presence signal: typing_on shows the typing bubble while
+      // the LLM runs, auto-clearing after ~20s or on the next outbound, so no
+      // explicit typing_off is needed. Page Reactions used to live here but
+      // Meta has effectively gated the API (#100 "invalid or not present" on
+      // every call) and each failed attempt burns against the page rate limit.
       try {
         await sendMessengerSenderAction({
           pageAccessToken: pageToken,

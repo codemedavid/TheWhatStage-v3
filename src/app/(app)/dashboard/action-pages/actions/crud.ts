@@ -126,10 +126,10 @@ export async function updateActionPage(formData: FormData): Promise<void> {
 
   const { data: existing } = await supabase
     .from('action_pages')
-    .select('slug, kind')
+    .select('slug, kind, status, title')
     .eq('id', parsed.data.id)
     .eq('user_id', userId)
-    .maybeSingle<{ slug: string; kind: string }>()
+    .maybeSingle<{ slug: string; kind: string; status: 'draft' | 'published' | 'archived'; title: string }>()
 
   const update: Record<string, unknown> = {
     title: parsed.data.title,
@@ -176,7 +176,70 @@ export async function updateActionPage(formData: FormData): Promise<void> {
   if (existing?.slug && existing.slug !== parsed.data.slug) {
     updateTag(actionPageSlugTag(existing.slug))
   }
-  redirect(`/dashboard/action-pages/${parsed.data.id}?saved=1`)
+  // Detect transitions touching the chatbot's primary goal:
+  //   - non-published -> published: maybe auto-assign or offer/switch banner
+  //   - published -> non-published: clear stale primary_action_page_id if it
+  //     points to this page (keeps settings dropdown and DB consistent)
+  let primaryGoalRedirect: 'offer' | 'switch' | null = null
+  const becamePublished =
+    !!existing && existing.status !== 'published' && parsed.data.status === 'published'
+  const leftPublished =
+    !!existing && existing.status === 'published' && parsed.data.status !== 'published'
+
+  if (becamePublished) {
+    const { data: cfg } = await supabase
+      .from('chatbot_configs')
+      .select('primary_action_page_id')
+      .eq('user_id', userId)
+      .maybeSingle<{ primary_action_page_id: string | null }>()
+    const currentGoalId = cfg?.primary_action_page_id ?? null
+
+    if (currentGoalId === parsed.data.id) {
+      // Already the goal — nothing to do.
+    } else if (currentGoalId === null) {
+      const { count } = await supabase
+        .from('action_pages')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_id', userId)
+        .eq('status', 'published')
+        .neq('id', parsed.data.id)
+      if ((count ?? 0) === 0) {
+        await supabase
+          .from('chatbot_configs')
+          .upsert(
+            { user_id: userId, primary_action_page_id: parsed.data.id },
+            { onConflict: 'user_id' },
+          )
+        revalidatePath('/dashboard/chatbot')
+        revalidatePath('/dashboard/action-pages')
+      } else {
+        primaryGoalRedirect = 'offer'
+      }
+    } else {
+      primaryGoalRedirect = 'switch'
+    }
+  } else if (leftPublished) {
+    const { data: cfg } = await supabase
+      .from('chatbot_configs')
+      .select('primary_action_page_id')
+      .eq('user_id', userId)
+      .maybeSingle<{ primary_action_page_id: string | null }>()
+    if (cfg?.primary_action_page_id === parsed.data.id) {
+      await supabase
+        .from('chatbot_configs')
+        .update({ primary_action_page_id: null })
+        .eq('user_id', userId)
+      revalidatePath('/dashboard/chatbot')
+      revalidatePath('/dashboard/action-pages')
+    }
+  }
+
+  const params = new URLSearchParams({ saved: '1' })
+  if (primaryGoalRedirect) {
+    params.set('just_published', '1')
+    params.set('offer_primary', primaryGoalRedirect)
+  }
+  redirect(`/dashboard/action-pages/${parsed.data.id}?${params.toString()}`)
 }
 
 export async function deleteActionPage(formData: FormData): Promise<void> {
