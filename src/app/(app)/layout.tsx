@@ -4,6 +4,8 @@ import { getSession } from '@/lib/auth/get-session'
 import { createClient } from '@/lib/supabase/server'
 import { Sidebar } from './_components/sidebar'
 import { Topbar } from './_components/topbar'
+import { SuggestionsToast } from './dashboard/leads/_components/SuggestionsToast.client'
+import { countPendingSuggestions } from './dashboard/leads/actions/suggestions'
 
 export default function AppLayout({
   children,
@@ -21,6 +23,7 @@ export default function AppLayout({
         </Suspense>
         <main className="flex-1 px-8 py-6 min-w-0">{children}</main>
       </div>
+      <SuggestionsToast />
     </div>
   )
 }
@@ -43,11 +46,18 @@ async function SidebarWithSession() {
       .eq('connection_id', conn.id)
     hasFacebookPage = (count ?? 0) > 0
   }
+  let pendingSuggestionCount = 0
+  try {
+    pendingSuggestionCount = await countPendingSuggestions()
+  } catch {
+    // transient failure — leave count at 0
+  }
   return (
     <Sidebar
       userInitial={initial}
       userName={session.fullName || 'Account'}
       hasFacebookPage={hasFacebookPage}
+      pendingSuggestionCount={pendingSuggestionCount}
     />
   )
 }

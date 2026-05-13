@@ -189,7 +189,13 @@ export function Sidebar({
   userInitial = 'D',
   userName = 'David',
   hasFacebookPage = false,
-}: { userInitial?: string; userName?: string; hasFacebookPage?: boolean } = {}) {
+  pendingSuggestionCount = 0,
+}: {
+  userInitial?: string
+  userName?: string
+  hasFacebookPage?: boolean
+  pendingSuggestionCount?: number
+} = {}) {
   const visibleItems = items.filter((item) => !item.requiresFacebookPage || hasFacebookPage)
   const pathname = usePathname() ?? '/dashboard'
   const [collapsed, setCollapsed] = useState(false)
@@ -259,7 +265,14 @@ export function Sidebar({
                 onClick={closeMobile}
               >
                 <Icon name={item.icon} />
-                <span className="ws-nav-label">{item.label}</span>
+                <span className="ws-nav-label flex items-center gap-1.5">
+                  {item.label}
+                  {item.href === '/dashboard/leads' && pendingSuggestionCount > 0 && (
+                    <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-blue-600 px-1 text-[10px] font-semibold text-white">
+                      {pendingSuggestionCount}
+                    </span>
+                  )}
+                </span>
               </Link>
             )
           })}
