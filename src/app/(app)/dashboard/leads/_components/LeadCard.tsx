@@ -3,6 +3,7 @@ import { useEffect, useState, useTransition } from 'react'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import type { LeadRow } from '../_lib/queries'
+import { parseMatchedSignals } from '../_lib/queries'
 
 const STALE_AFTER_DAYS = 7
 
@@ -46,6 +47,7 @@ export function LeadCard({ lead, onClick }: { lead: LeadRow; onClick: () => void
 
   const age = daysSince(lead.updated_at)
   const stale = age >= STALE_AFTER_DAYS
+  const { matched, freeReason } = parseMatchedSignals(lead.latest_auto_move?.reason)
 
   return (
     <div
@@ -185,6 +187,45 @@ export function LeadCard({ lead, onClick }: { lead: LeadRow; onClick: () => void
             />
             {age === 0 ? 'today' : `${age}d`}
           </span>
+        </div>
+      )}
+
+      {matched.length > 0 && (
+        <div className="group/why absolute bottom-2 right-2">
+          <button
+            className="text-[10px] leading-none hover:text-gray-700"
+            style={{ color: 'var(--lead-faint)' }}
+            aria-label="Why is this lead here?"
+            onClick={(e) => e.stopPropagation()}
+          >
+            ?
+          </button>
+          <div
+            className="pointer-events-none absolute bottom-5 right-0 z-10 hidden w-56 rounded-lg p-2 text-[11px] shadow-md group-hover/why:block"
+            style={{
+              background: 'var(--lead-surface)',
+              border: '1px solid var(--lead-line)',
+              color: 'var(--lead-body)',
+            }}
+          >
+            <div className="font-medium" style={{ color: 'var(--lead-ink)' }}>
+              Why this stage
+            </div>
+            <ul className="mt-1 list-disc pl-4">
+              {matched.map((signal) => (
+                <li key={signal}>{signal}</li>
+              ))}
+            </ul>
+            {freeReason && (
+              <div className="mt-1" style={{ color: 'var(--lead-faint)' }}>
+                {freeReason}
+              </div>
+            )}
+            <div className="mt-1 text-[10px]" style={{ color: 'var(--lead-faint)' }}>
+              source: {lead.latest_auto_move?.source} ·{' '}
+              {lead.latest_auto_move?.confidence ?? '—'}
+            </div>
+          </div>
         </div>
       )}
     </div>

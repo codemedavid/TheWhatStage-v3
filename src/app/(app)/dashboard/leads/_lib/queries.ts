@@ -259,6 +259,16 @@ export type CampaignOption = {
   weight: number
 }
 
+export function parseMatchedSignals(reason: string | null | undefined): { matched: string[]; freeReason: string } {
+  if (!reason) return { matched: [], freeReason: '' }
+  const m = reason.match(/^matched:\s*([^—]+?)\s*—\s*(.*)$/)
+  if (!m) return { matched: [], freeReason: reason }
+  return {
+    matched: m[1].split(',').map((x) => x.trim()).filter(Boolean),
+    freeReason: m[2],
+  }
+}
+
 export async function fetchCampaignOptions(
   supabase: SupabaseClient,
   userId: string,
