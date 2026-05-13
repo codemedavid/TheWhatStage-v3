@@ -18,6 +18,7 @@
 import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { runDormantSweepForAllUsers } from '@/lib/leads/dormant-sweeper'
+import { runSuggestionHousekeeping } from '@/lib/leads/suggestion-housekeeping'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
@@ -33,5 +34,6 @@ export async function GET(req: Request) {
   }
   const admin = createAdminClient()
   const moved = await runDormantSweepForAllUsers(admin)
-  return NextResponse.json({ ok: true, moved })
+  const housekeeping = await runSuggestionHousekeeping(admin)
+  return NextResponse.json({ ok: true, moved, housekeeping })
 }
