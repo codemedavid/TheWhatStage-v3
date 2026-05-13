@@ -1,11 +1,12 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useTransition } from 'react'
 import { getUpgradePreview, applyUpgradeAction } from '../../actions/upgrade'
 
 type Plan = Awaited<ReturnType<typeof getUpgradePreview>>
 
 export function UpgradePreviewModal({ onClose }: { onClose: () => void }) {
   const [plan, setPlan] = useState<Plan | null>(null)
+  const [isPending, startTransition] = useTransition()
   useEffect(() => { getUpgradePreview().then(setPlan) }, [])
 
   if (!plan) return null
@@ -57,10 +58,11 @@ export function UpgradePreviewModal({ onClose }: { onClose: () => void }) {
         <div className="mt-6 flex justify-end gap-2">
           <button className="rounded border px-3 py-1.5 text-sm" onClick={onClose}>Cancel</button>
           <button
-            className="rounded bg-amber-900 px-3 py-1.5 text-sm text-white"
-            onClick={() => applyUpgradeAction().then(onClose)}
+            className="rounded bg-amber-900 px-3 py-1.5 text-sm text-white disabled:opacity-60"
+            disabled={isPending}
+            onClick={() => startTransition(() => applyUpgradeAction().then(onClose))}
           >
-            Apply upgrade
+            {isPending ? 'Upgrading…' : 'Apply upgrade'}
           </button>
         </div>
       </div>
