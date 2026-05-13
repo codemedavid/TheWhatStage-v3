@@ -12,7 +12,7 @@ describe('moveLeadToStage', () => {
     const ok = await moveLeadToStage(admin, {
       leadId: 'lead-1',
       toStageId: 'stage-1',
-      source: 'bot-deep',
+      source: 'deep_classifier',
       confidence: 'medium',
       reason: 'asked price',
       matchedSignals: ['asked price', 'asked schedule'],
@@ -24,7 +24,7 @@ describe('moveLeadToStage', () => {
       expect.objectContaining({
         p_lead_id: 'lead-1',
         p_to_stage_id: 'stage-1',
-        p_source: 'bot-deep',
+        p_source: 'deep_classifier',
         p_confidence: 'medium',
         p_reason: 'matched: asked price, asked schedule — asked price',
         p_thread_id: 't-1',
@@ -37,7 +37,7 @@ describe('moveLeadToStage', () => {
     const ok = await moveLeadToStage(admin, {
       leadId: 'lead-1',
       toStageId: 'stage-1',
-      source: 'bot-deep',
+      source: 'deep_classifier',
       reason: 'r',
       matchedSignals: [],
     })
@@ -49,7 +49,7 @@ describe('moveLeadToStage', () => {
     await moveLeadToStage(admin, {
       leadId: 'lead-1',
       toStageId: 'stage-1',
-      source: 'bot-deep',
+      source: 'deep_classifier',
       reason: 'manual override',
       matchedSignals: [],
     })
@@ -66,7 +66,7 @@ describe('moveLeadToStage', () => {
     const ok = await moveLeadToStage(admin, {
       leadId: 'lead-1',
       toStageId: 'stage-1',
-      source: 'bot-deep',
+      source: 'deep_classifier',
       reason: 'r',
       matchedSignals: [],
     })

@@ -161,7 +161,7 @@ export async function runDeepReclassify(args: RunDeepReclassifyArgs): Promise<vo
     await moveLeadToStage(admin, {
       leadId,
       toStageId: decision.to_stage_id,
-      source: 'bot-deep',
+      source: 'deep_classifier',
       reason: decision.reason.slice(0, 500),
       matchedSignals: decision.matched_signals,
       confidence: decision.confidence,
