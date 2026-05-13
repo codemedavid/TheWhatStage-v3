@@ -4,11 +4,10 @@ import { listPendingSuggestions, acceptSuggestion, rejectSuggestion } from '../.
 
 type RawSuggestion = Awaited<ReturnType<typeof listPendingSuggestions>>[number]
 type SuggestionRow = Omit<RawSuggestion, 'pipeline_stages'> & {
-  pipeline_stages: { name: string } | { name: string }[] | null
+  pipeline_stages: { name: string }
 }
 
 function getStageName(s: SuggestionRow): string {
-  if (!s.pipeline_stages) return s.stage_id
   if (Array.isArray(s.pipeline_stages)) return s.pipeline_stages[0]?.name ?? s.stage_id
   return s.pipeline_stages.name
 }

@@ -15,7 +15,7 @@ export async function listPendingSuggestions() {
   const admin = createAdminClient()
   const { data } = await admin
     .from('pipeline_stage_suggestions')
-    .select('id, stage_id, field, current_value, proposed_value, reason, created_at, pipeline_stages(name)')
+    .select('id, stage_id, field, current_value, proposed_value, reason, created_at, pipeline_stages!inner(name)')
     .eq('user_id', userId)
     .eq('status', 'pending')
     .order('created_at', { ascending: false })
@@ -33,6 +33,11 @@ export async function acceptSuggestion(id: string) {
     .eq('user_id', userId)
     .maybeSingle()
   if (!sug) throw new Error('suggestion not found')
+
+  const ALLOWED_FIELDS = ['description', 'entry_signals', 'exit_signals', 'required_fields'] as const
+  if (!ALLOWED_FIELDS.includes(sug.field as (typeof ALLOWED_FIELDS)[number])) {
+    throw new Error(`Invalid field: ${sug.field}`)
+  }
 
   await admin
     .from('pipeline_stages')
