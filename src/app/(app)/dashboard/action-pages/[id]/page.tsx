@@ -1,6 +1,7 @@
 import { notFound, redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { fetchActionPage, fetchPipelineStages, fetchActionPageOptions } from '../_lib/queries'
+import { seedDefaultStagesIfEmpty } from '../../leads/_lib/seed'
 import { EditActionPageShell } from '../_components/EditActionPageShell'
 
 export default async function ActionPageEditor({
@@ -22,6 +23,8 @@ export default async function ActionPageEditor({
     data: { user },
   } = await supabase.auth.getUser()
   if (!user) redirect('/login')
+
+  await seedDefaultStagesIfEmpty(supabase, user.id)
 
   const [page, stages, actionPages] = await Promise.all([
     fetchActionPage(supabase, user.id, id),

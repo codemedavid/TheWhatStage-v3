@@ -134,6 +134,20 @@ export function PipelineRulesEditor({
                     </option>
                   ))}
                 </select>
+                {stages.length === 0 && (
+                  <p className="mt-1 text-[11px] text-[#B45309]">
+                    No pipeline stages yet.{' '}
+                    <a
+                      href="/dashboard/leads/stages"
+                      className="underline"
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Set up stages
+                    </a>
+                    .
+                  </p>
+                )}
               </label>
               <label className="block">
                 <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-[#6B7280]">
