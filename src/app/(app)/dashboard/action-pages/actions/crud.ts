@@ -176,11 +176,17 @@ export async function updateActionPage(formData: FormData): Promise<void> {
   if (existing?.slug && existing.slug !== parsed.data.slug) {
     updateTag(actionPageSlugTag(existing.slug))
   }
-  // Detect first-time draft -> published transition. Either silently auto-assign
-  // as the chatbot's primary goal (no other published pages), or pass query
-  // params so the editor renders a confirm banner.
+  // Detect transitions touching the chatbot's primary goal:
+  //   - non-published -> published: maybe auto-assign or offer/switch banner
+  //   - published -> non-published: clear stale primary_action_page_id if it
+  //     points to this page (keeps settings dropdown and DB consistent)
   let primaryGoalRedirect: 'offer' | 'switch' | null = null
-  if (existing && existing.status === 'draft' && parsed.data.status === 'published') {
+  const becamePublished =
+    !!existing && existing.status !== 'published' && parsed.data.status === 'published'
+  const leftPublished =
+    !!existing && existing.status === 'published' && parsed.data.status !== 'published'
+
+  if (becamePublished) {
     const { data: cfg } = await supabase
       .from('chatbot_configs')
       .select('primary_action_page_id')
@@ -211,6 +217,20 @@ export async function updateActionPage(formData: FormData): Promise<void> {
       }
     } else {
       primaryGoalRedirect = 'switch'
+    }
+  } else if (leftPublished) {
+    const { data: cfg } = await supabase
+      .from('chatbot_configs')
+      .select('primary_action_page_id')
+      .eq('user_id', userId)
+      .maybeSingle<{ primary_action_page_id: string | null }>()
+    if (cfg?.primary_action_page_id === parsed.data.id) {
+      await supabase
+        .from('chatbot_configs')
+        .update({ primary_action_page_id: null })
+        .eq('user_id', userId)
+      revalidatePath('/dashboard/chatbot')
+      revalidatePath('/dashboard/action-pages')
     }
   }
 
