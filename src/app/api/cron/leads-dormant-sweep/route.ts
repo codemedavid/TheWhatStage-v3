@@ -32,8 +32,14 @@ export async function GET(req: Request) {
       return new NextResponse('Unauthorized', { status: 401 })
     }
   }
-  const admin = createAdminClient()
-  const moved = await runDormantSweepForAllUsers(admin)
-  const housekeeping = await runSuggestionHousekeeping(admin)
-  return NextResponse.json({ ok: true, moved, housekeeping })
+
+  try {
+    const admin = createAdminClient()
+    const moved = await runDormantSweepForAllUsers(admin)
+    const housekeeping = await runSuggestionHousekeeping(admin)
+    return NextResponse.json({ ok: true, moved, housekeeping })
+  } catch (err) {
+    console.error('[cron.leads-dormant-sweep] crashed', { err: (err as Error).message })
+    return NextResponse.json({ ok: false, err: (err as Error).message }, { status: 500 })
+  }
 }
