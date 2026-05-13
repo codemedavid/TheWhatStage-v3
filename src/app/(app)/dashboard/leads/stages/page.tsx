@@ -6,6 +6,7 @@ import { seedDefaultStagesIfEmpty } from '../_lib/seed'
 import { needsStageUpgrade } from '@/lib/leads/upgrade'
 import { StageManager } from '../_components/StageManager'
 import { UpgradeBanner } from './_components/UpgradeBanner'
+import { StageSuggestionsPanel } from './_components/StageSuggestionsPanel'
 
 export default async function StagesPage() {
   const supabase = await createClient()
@@ -18,6 +19,7 @@ export default async function StagesPage() {
     <div className="p-6 space-y-4">
       <h1 className="text-2xl font-semibold">Pipeline stages</h1>
       {showBanner && <UpgradeBanner />}
+      <StageSuggestionsPanel />
       <StageManager stages={stages} />
     </div>
   )
