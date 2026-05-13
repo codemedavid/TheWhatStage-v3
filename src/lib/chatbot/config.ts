@@ -31,6 +31,7 @@ export type ChatbotConfigRow = {
   active_template_id: string | null
   personality_source: string
   recommendation_rules: unknown
+  primary_action_page_id: string | null
   created_at: string
   updated_at: string
 }
@@ -42,6 +43,7 @@ export type ChatbotConfig = ChatbotPersona & {
   activeTemplateId: string | null
   personalitySource: 'custom' | 'template'
   recommendationRules: RecommendationRulesMap
+  primaryActionPageId: string | null
   updatedAt: string
 }
 
@@ -53,6 +55,7 @@ export const DEFAULT_CHATBOT_CONFIG: ChatbotConfig = {
   activeTemplateId: null,
   personalitySource: 'custom',
   recommendationRules: DEFAULT_RECOMMENDATION_RULES,
+  primaryActionPageId: null,
   updatedAt: '',
 }
 
@@ -112,6 +115,7 @@ export function rowToConfig(row: ChatbotConfigRow): ChatbotConfig {
     activeTemplateId: row.active_template_id ?? null,
     personalitySource: (row.personality_source as ChatbotConfig['personalitySource']) ?? 'custom',
     recommendationRules: parseRecommendationRules(row.recommendation_rules),
+    primaryActionPageId: row.primary_action_page_id ?? null,
     updatedAt: row.updated_at ?? '',
   }
 }
@@ -168,4 +172,18 @@ export async function upsertChatbotConfig(
 function clamp(n: number, lo: number, hi: number): number {
   if (!Number.isFinite(n)) return lo
   return Math.max(lo, Math.min(hi, n))
+}
+
+export async function setPrimaryActionPageId(
+  supabase: SupabaseClient,
+  userId: string,
+  actionPageId: string | null,
+): Promise<void> {
+  const { error } = await supabase
+    .from('chatbot_configs')
+    .upsert(
+      { user_id: userId, primary_action_page_id: actionPageId },
+      { onConflict: 'user_id' },
+    )
+  if (error) throw new Error(`setPrimaryActionPageId: ${error.message}`)
 }
