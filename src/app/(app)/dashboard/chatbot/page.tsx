@@ -6,6 +6,7 @@ import { fetchMediaAssets, fetchMediaFolders } from '@/app/(app)/dashboard/media
 import { ConfigForm } from './_components/ConfigForm'
 import { TestChat } from './_components/TestChat'
 import { PersonalityTemplates } from './_components/PersonalityTemplates'
+import { PrimaryGoalSection, type PrimaryGoalOption } from './_components/PrimaryGoalSection'
 import type { PersonalityTemplate } from '@/lib/chatbot/personality/types'
 import './chatbot.css'
 
@@ -36,6 +37,12 @@ export default async function ChatbotPage() {
     ctaLabel: (p.cta_label as string | null) ?? '',
   }))
 
+  const goalOptions: PrimaryGoalOption[] = actionPages.map((p) => ({
+    id: p.id,
+    title: p.title,
+    slug: p.slug,
+  }))
+
   const activeTemplate = config.activeTemplateId
     ? (templates.find((t) => t.id === config.activeTemplateId) ?? null)
     : null
@@ -48,6 +55,10 @@ export default async function ChatbotPage() {
             templates={templates}
             activeTemplate={activeTemplate as PersonalityTemplate | null}
             activeAdoptionId={latestAdoption?.id ?? null}
+          />
+          <PrimaryGoalSection
+            current={config.primaryActionPageId ?? null}
+            options={goalOptions}
           />
           <ConfigForm
             key={config.updatedAt}
