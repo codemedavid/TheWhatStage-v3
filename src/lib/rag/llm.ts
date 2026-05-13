@@ -18,8 +18,8 @@ export class HfRouterLlm {
 
   constructor(opts?: { token?: string; model?: string; baseURL?: string }) {
     this.client = new OpenAI({
-      apiKey: opts?.token ?? ragConfig.hfToken,
-      baseURL: opts?.baseURL ?? ragConfig.hfRouterBaseUrl,
+      apiKey: opts?.token ?? ragConfig.llmApiKey,
+      baseURL: opts?.baseURL ?? ragConfig.llmBaseUrl,
       // SDK auto-retries 429/5xx with exponential backoff and honors
       // Retry-After. Default is 2 — bump it so transient bursts don't
       // bubble up as worker job failures.

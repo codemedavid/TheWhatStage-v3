@@ -16,6 +16,13 @@ export const ragConfig = {
   classifierModel:
     process.env.RAG_CLASSIFIER_MODEL ?? 'meta-llama/Llama-3.1-8B-Instruct:groq',
   hfRouterBaseUrl: process.env.RAG_HF_ROUTER_URL ?? 'https://router.huggingface.co/v1',
+  // LLM client (chat + classifier) is OpenAI-compatible. Defaults to the HF
+  // router for backward compatibility; override to point at OpenRouter etc.
+  llmBaseUrl:
+    process.env.RAG_LLM_BASE_URL ??
+    process.env.RAG_HF_ROUTER_URL ??
+    'https://router.huggingface.co/v1',
+  llmApiKey: process.env.RAG_LLM_API_KEY ?? process.env.HF_TOKEN ?? '',
   embedProvider: process.env.RAG_EMBED_PROVIDER ?? 'auto',
   rerankProvider: process.env.RAG_RERANK_PROVIDER ?? 'hf-inference',
 
