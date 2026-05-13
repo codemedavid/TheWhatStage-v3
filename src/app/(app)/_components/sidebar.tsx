@@ -26,14 +26,16 @@ type IconName =
   | 'templates'
   | 'payments'
 
-const items: { href: string; label: string; icon: IconName }[] = [
+type NavItem = { href: string; label: string; icon: IconName; requiresFacebookPage?: boolean }
+
+const items: NavItem[] = [
   { href: '/dashboard', label: 'Overview', icon: 'overview' },
   { href: '/dashboard/leads', label: 'Leads', icon: 'leads' },
   { href: '/dashboard/knowledge', label: 'Knowledge', icon: 'knowledge' },
   { href: '/dashboard/chatbot', label: 'Chatbot', icon: 'chatbot' },
   { href: '/dashboard/action-pages', label: 'Action Pages', icon: 'actions' },
-  { href: '/dashboard/agent', label: 'Agent', icon: 'agent' },
-  { href: '/dashboard/templates', label: 'Templates', icon: 'templates' },
+  { href: '/dashboard/agent', label: 'Agent', icon: 'agent', requiresFacebookPage: true },
+  { href: '/dashboard/templates', label: 'Templates', icon: 'templates', requiresFacebookPage: true },
   { href: '/dashboard/payment-methods', label: 'Payment methods', icon: 'payments' },
   { href: '/dashboard/reminders', label: 'Reminders', icon: 'reminders' },
   { href: '/dashboard/media', label: 'Media', icon: 'media' },
@@ -183,7 +185,12 @@ function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
   )
 }
 
-export function Sidebar({ userInitial = 'D', userName = 'David' }: { userInitial?: string; userName?: string } = {}) {
+export function Sidebar({
+  userInitial = 'D',
+  userName = 'David',
+  hasFacebookPage = false,
+}: { userInitial?: string; userName?: string; hasFacebookPage?: boolean } = {}) {
+  const visibleItems = items.filter((item) => !item.requiresFacebookPage || hasFacebookPage)
   const pathname = usePathname() ?? '/dashboard'
   const [collapsed, setCollapsed] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -238,7 +245,7 @@ export function Sidebar({ userInitial = 'D', userName = 'David' }: { userInitial
 
         <div className="ws-nav-section-label">Workspace</div>
         <nav className="ws-nav">
-          {items.map((item) => {
+          {visibleItems.map((item) => {
             const active =
               item.href === '/dashboard'
                 ? pathname === '/dashboard'

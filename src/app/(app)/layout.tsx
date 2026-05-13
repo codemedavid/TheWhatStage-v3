@@ -1,6 +1,7 @@
 import { Suspense } from 'react'
 import { redirect } from 'next/navigation'
 import { getSession } from '@/lib/auth/get-session'
+import { createClient } from '@/lib/supabase/server'
 import { Sidebar } from './_components/sidebar'
 import { Topbar } from './_components/topbar'
 
@@ -28,7 +29,27 @@ async function SidebarWithSession() {
   const session = await getSession()
   if (!session) redirect('/login')
   const initial = (session.fullName || 'A').trim().charAt(0).toUpperCase() || 'A'
-  return <Sidebar userInitial={initial} userName={session.fullName || 'Account'} />
+  const supabase = await createClient()
+  const { data: conn } = await supabase
+    .from('facebook_connections')
+    .select('id')
+    .eq('user_id', session.userId)
+    .maybeSingle()
+  let hasFacebookPage = false
+  if (conn) {
+    const { count } = await supabase
+      .from('facebook_pages')
+      .select('id', { count: 'exact', head: true })
+      .eq('connection_id', conn.id)
+    hasFacebookPage = (count ?? 0) > 0
+  }
+  return (
+    <Sidebar
+      userInitial={initial}
+      userName={session.fullName || 'Account'}
+      hasFacebookPage={hasFacebookPage}
+    />
+  )
 }
 
 async function TopbarWithSession() {
