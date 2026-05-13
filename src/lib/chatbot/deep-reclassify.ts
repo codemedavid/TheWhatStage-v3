@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { HfRouterLlm } from '@/lib/rag'
 import type { LlmMessage } from '@/lib/rag/llm'
 import { ragConfig } from '@/lib/rag/config'
+import { moveLeadToStage } from '@/lib/leads/move-stage'
 
 type LlmLike = { complete: (messages: LlmMessage[], opts?: { temperature?: number; maxTokens?: number; responseFormat?: 'json_object' }) => Promise<string> }
 
@@ -78,11 +79,46 @@ interface DeepContext {
   pages: PageRow[]
 }
 
-interface DeepDecision {
+export type MoveType =
+  | 'adjacent_forward'
+  | 'skip_ahead'
+  | 'into_terminal'
+  | 'into_objection'
+  | 'out_of_objection'
+  | 'backward'
+
+export function classifyMoveType(
+  stages: ReadonlyArray<{ id: string; kind: string; position: number }>,
+  fromId: string,
+  toId: string,
+): MoveType | null {
+  const from = stages.find((s) => s.id === fromId)
+  const to = stages.find((s) => s.id === toId)
+  if (!from || !to) return null
+  if (to.kind === 'won' || to.kind === 'lost') return 'into_terminal'
+  if (to.kind === 'objection') return 'into_objection'
+  if (from.kind === 'objection') return 'out_of_objection'
+  if (to.position === from.position + 1) return 'adjacent_forward'
+  if (to.position > from.position) return 'skip_ahead'
+  return 'backward'
+}
+
+export type DeepDecision = {
   to_stage_id: string
-  confidence: 'high'
+  move_type: MoveType
+  confidence: 'low' | 'medium' | 'high'
+  matched_signals: string[]
   reason: string
 }
+
+const VALID_MOVE_TYPES = new Set<MoveType>([
+  'adjacent_forward',
+  'skip_ahead',
+  'into_terminal',
+  'into_objection',
+  'out_of_objection',
+  'backward',
+])
 
 // ---------------------------------------------------------------------------
 // Public entry point — never throws
@@ -111,22 +147,27 @@ export async function runDeepReclassify(args: RunDeepReclassifyArgs): Promise<vo
     // Unknown-stage skip
     if (!ctx.stages.some((s) => s.id === decision.to_stage_id)) return
 
-    const idempotencyKey = `deep:${threadId}:${leadId}:${windowIndex}`
-    const { error } = await admin.rpc('set_lead_stage', {
-      p_lead_id: leadId,
-      p_to_stage_id: decision.to_stage_id,
-      p_source: 'deep_classifier',
-      p_reason: decision.reason.slice(0, 500),
-      p_idempotency_key: idempotencyKey,
-      p_expected_version: null,
-      p_confidence: 'high',
-      p_thread_id: threadId,
-    })
+    const structuralMoveType = classifyMoveType(ctx.stages, ctx.lead.stage_id, decision.to_stage_id)
+    if (!structuralMoveType) return
 
-    if (error) {
-      console.error('[deep-reclassify] set_lead_stage error', (error as { message?: string }).message ?? error)
-      return
+    if (structuralMoveType !== decision.move_type) {
+      console.warn('[deep-reclassify] move_type mismatch — trusting structural', {
+        llm: decision.move_type,
+        structural: structuralMoveType,
+      })
     }
+
+    const idempotencyKey = `deep:${threadId}:${leadId}:${windowIndex}`
+    await moveLeadToStage(admin, {
+      leadId,
+      toStageId: decision.to_stage_id,
+      source: 'bot-deep',
+      reason: decision.reason.slice(0, 500),
+      matchedSignals: decision.matched_signals,
+      confidence: decision.confidence,
+      idempotencyKey,
+      threadId,
+    })
 
     console.log('[deep-reclassify] applied', {
       leadId,
@@ -319,26 +360,45 @@ function buildUserBlock(ctx: DeepContext): string {
 }
 
 // ---------------------------------------------------------------------------
-// Decision coercion — only accepts high confidence
+// Decision coercion — tiered confidence gating
 // ---------------------------------------------------------------------------
 
-function coerceDecision(raw: string): DeepDecision | null {
+export function coerceDecision(raw: string): DeepDecision | null {
+  let parsed: unknown
   try {
-    const parsed: unknown = JSON.parse(raw)
-    if (!parsed || typeof parsed !== 'object') return null
-    const p = parsed as { stage_change?: unknown }
-    const sc = p.stage_change
-    if (!sc || typeof sc !== 'object') return null
-    const s = sc as { to_stage_id?: unknown; confidence?: unknown; reason?: unknown }
-    if (
-      typeof s.to_stage_id !== 'string' ||
-      typeof s.reason !== 'string' ||
-      s.confidence !== 'high'
-    ) {
-      return null
-    }
-    return { to_stage_id: s.to_stage_id, confidence: 'high', reason: s.reason }
+    parsed = JSON.parse(raw)
   } catch {
     return null
   }
+  if (!parsed || typeof parsed !== 'object') return null
+  const p = parsed as { stage_change?: unknown }
+  const sc = p.stage_change
+  if (!sc || typeof sc !== 'object') return null
+  const s = sc as Record<string, unknown>
+
+  if (typeof s.to_stage_id !== 'string') return null
+  if (typeof s.reason !== 'string') return null
+  if (!Array.isArray(s.matched_signals)) return null
+  const matched = s.matched_signals.filter((x): x is string => typeof x === 'string')
+  if (matched.length === 0) return null
+
+  if (typeof s.move_type !== 'string' || !VALID_MOVE_TYPES.has(s.move_type as MoveType)) return null
+  const moveType = s.move_type as MoveType
+
+  if (s.confidence !== 'low' && s.confidence !== 'medium' && s.confidence !== 'high') return null
+  const confidence = s.confidence
+
+  const allowsMedium =
+    moveType === 'adjacent_forward' ||
+    moveType === 'into_objection' ||
+    moveType === 'out_of_objection'
+
+  if (confidence === 'low') return null
+  if (confidence === 'medium' && !allowsMedium) return null
+
+  if (moveType === 'backward') {
+    if (!/regress|moved? back|un-?confirmed|reverted/i.test(s.reason as string)) return null
+  }
+
+  return { to_stage_id: s.to_stage_id, move_type: moveType, confidence, matched_signals: matched, reason: s.reason as string }
 }

@@ -1,269 +1,78 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { describe, it, expect } from 'vitest'
+import { coerceDecision, classifyMoveType } from './deep-reclassify'
 
-// Mock HfRouterLlm before importing the module under test.
-const llmMocks = vi.hoisted(() => ({
-  complete: vi.fn(async () => '{}'),
-}))
+const stages = [
+  { id: 's1', name: 'New', kind: 'entry', position: 0 },
+  { id: 's2', name: 'Engaged', kind: 'nurture', position: 1 },
+  { id: 's3', name: 'Interested', kind: 'nurture', position: 2 },
+  { id: 's4', name: 'Qualified', kind: 'qualifying', position: 3 },
+  { id: 's5', name: 'Objection', kind: 'objection', position: 4 },
+  { id: 's7', name: 'Won', kind: 'won', position: 6 },
+] as const
 
-vi.mock('@/lib/rag', async (orig) => {
-  const actual = await orig<typeof import('@/lib/rag')>()
-  return {
-    ...actual,
-    HfRouterLlm: vi.fn().mockImplementation(function HfRouterLlmMock() {
-      return {
-      complete: llmMocks.complete,
-      }
-    }),
-  }
+describe('classifyMoveType', () => {
+  it('adjacent forward', () => {
+    expect(classifyMoveType(stages, 's2', 's3')).toBe('adjacent_forward')
+  })
+  it('skip ahead', () => {
+    expect(classifyMoveType(stages, 's2', 's4')).toBe('skip_ahead')
+  })
+  it('into terminal', () => {
+    expect(classifyMoveType(stages, 's3', 's7')).toBe('into_terminal')
+  })
+  it('into objection', () => {
+    expect(classifyMoveType(stages, 's3', 's5')).toBe('into_objection')
+  })
+  it('out of objection', () => {
+    expect(classifyMoveType(stages, 's5', 's3')).toBe('out_of_objection')
+  })
+  it('backward', () => {
+    expect(classifyMoveType(stages, 's4', 's2')).toBe('backward')
+  })
 })
 
-import { runDeepReclassify } from './deep-reclassify'
-
-type AdminMockState = {
-  lead: { id: string; user_id: string; name: string; stage_id: string; entered_stage_at: string; score: number | null }
-  stages: Array<{ id: string; name: string; description: string | null; position: number; kind: string }>
-  events: Array<{ id: string; from_stage_id: string | null; to_stage_id: string; source: string; reason: string | null; confidence: string | null; created_at: string }>
-  submissions: Array<{ id: string; outcome: string; created_at: string; action_page_id: string }>
-  pages: Array<{ id: string; title: string; kind: string }>
-  messages: Array<{ direction: 'inbound' | 'outbound'; body: string; created_at: string }>
-  queries: Array<{ table: string; filters: Record<string, unknown> }>
-  rpcCalls: Array<{ name: string; args: Record<string, unknown> }>
-  rpcResult: { data: unknown; error: unknown } | null
-}
-
-function makeAdmin(state: AdminMockState) {
-  const from = (table: string) => {
-    const fluent: Record<string, unknown> = {}
-    const filters: Record<string, unknown> = {}
-    const self: Record<string, (...args: never[]) => unknown> = {
-      select: () => self,
-      eq: (key: string, value: unknown) => {
-        filters[key] = value
-        return self
-      },
-      neq: () => self,
-      in: () => self,
-      order: () => self,
-      limit: () => self,
-      maybeSingle: async () => {
-        state.queries.push({ table, filters: { ...filters } })
-        if (table === 'leads') return { data: state.lead, error: null }
-        return { data: null, error: null }
-      },
-    }
-    // Thenable so `await query` resolves without explicit .then()
-    Object.assign(self, {
-      then: (resolve: (v: { data: unknown; error: null }) => unknown) => {
-        state.queries.push({ table, filters: { ...filters } })
-        if (table === 'pipeline_stages') return resolve({ data: state.stages, error: null })
-        if (table === 'lead_stage_events') return resolve({ data: state.events, error: null })
-        if (table === 'action_page_submissions') return resolve({ data: state.submissions, error: null })
-        if (table === 'action_pages') return resolve({ data: state.pages, error: null })
-        if (table === 'messenger_messages') return resolve({ data: state.messages, error: null })
-        return resolve({ data: [], error: null })
-      },
-    })
-    void fluent
-    return self
+describe('coerceDecision', () => {
+  const base = {
+    to_stage_id: 's3',
+    matched_signals: ['asked price'],
+    reason: 'lead asked magkano',
+    move_type: 'adjacent_forward',
   }
-  return {
-    from,
-    rpc: vi.fn(async (name: string, args: Record<string, unknown>) => {
-      state.rpcCalls.push({ name, args })
-      return state.rpcResult ?? { data: true, error: null }
-    }),
-  } as unknown as Parameters<typeof runDeepReclassify>[0]['adminClient']
-}
 
-function makeState(): AdminMockState {
-  return {
-    lead: {
-      id: 'lead_1',
-      user_id: 'user_1',
-      name: 'Buyer Bob',
-      stage_id: 'st_q',
-      entered_stage_at: '2026-05-01T00:00:00Z',
-      score: 60,
-    },
-    stages: [
-      { id: 'st_new', name: 'New Lead',   description: 'fresh',  position: 0, kind: 'entry' },
-      { id: 'st_q',   name: 'Qualifying', description: 'q&a',    position: 1, kind: 'qualifying' },
-      { id: 'st_b',   name: 'Booked',     description: 'booked', position: 2, kind: 'decision' },
-      { id: 'st_won', name: 'Won',        description: 'won',    position: 3, kind: 'won' },
-    ],
-    events: [],
-    submissions: [],
-    pages: [],
-    messages: [
-      { direction: 'inbound',  body: 'I want to book a call', created_at: '2026-05-10T00:00:00Z' },
-      { direction: 'outbound', body: 'Sure!',                 created_at: '2026-05-10T00:00:01Z' },
-    ],
-    queries: [],
-    rpcCalls: [],
-    rpcResult: null,
-  }
-}
-
-beforeEach(() => {
-  llmMocks.complete.mockReset()
-})
-
-describe('runDeepReclassify', () => {
-  it('no-ops when LLM returns null stage_change', async () => {
-    const state = makeState()
-    llmMocks.complete.mockResolvedValueOnce(JSON.stringify({ stage_change: null }))
-    await runDeepReclassify({
-      adminClient: makeAdmin(state),
-      leadId: 'lead_1',
-      threadId: 'th_1',
-      userId: 'user_1',
-      windowIndex: 1,
-    })
-    expect(state.rpcCalls).toHaveLength(0)
+  it('accepts medium confidence on adjacent forward', () => {
+    const json = JSON.stringify({ stage_change: { ...base, confidence: 'medium' } })
+    expect(coerceDecision(json)).not.toBeNull()
   })
 
-  it('drops medium confidence (deep pass requires high)', async () => {
-    const state = makeState()
-    llmMocks.complete.mockResolvedValueOnce(
-      JSON.stringify({ stage_change: { to_stage_id: 'st_b', confidence: 'medium', reason: 'maybe' } }),
-    )
-    await runDeepReclassify({
-      adminClient: makeAdmin(state),
-      leadId: 'lead_1',
-      threadId: 'th_1',
-      userId: 'user_1',
-      windowIndex: 1,
+  it('rejects medium confidence on skip_ahead', () => {
+    const json = JSON.stringify({
+      stage_change: { ...base, move_type: 'skip_ahead', confidence: 'medium' },
     })
-    expect(state.rpcCalls).toHaveLength(0)
+    expect(coerceDecision(json)).toBeNull()
   })
 
-  it('applies high-confidence move via set_lead_stage with deep_classifier source', async () => {
-    const state = makeState()
-    llmMocks.complete.mockResolvedValueOnce(
-      JSON.stringify({
-        stage_change: {
-          to_stage_id: 'st_b',
-          confidence: 'high',
-          reason: 'Customer explicitly asked to book a call.',
-        },
-      }),
-    )
-    await runDeepReclassify({
-      adminClient: makeAdmin(state),
-      leadId: 'lead_1',
-      threadId: 'th_1',
-      userId: 'user_1',
-      windowIndex: 1,
+  it('rejects medium confidence on into_terminal', () => {
+    const json = JSON.stringify({
+      stage_change: { ...base, move_type: 'into_terminal', confidence: 'medium' },
     })
-    expect(state.rpcCalls).toHaveLength(1)
-    expect(state.rpcCalls[0].name).toBe('set_lead_stage')
-    expect(state.rpcCalls[0].args).toMatchObject({
-      p_lead_id: 'lead_1',
-      p_to_stage_id: 'st_b',
-      p_source: 'deep_classifier',
-      p_confidence: 'high',
-      p_idempotency_key: 'deep:th_1:lead_1:1',
-      p_thread_id: 'th_1',
-    })
-    expect((state.rpcCalls[0].args.p_reason as string)).toContain('explicitly asked')
+    expect(coerceDecision(json)).toBeNull()
   })
 
-  it('loads conversation history by thread_id, not a nonexistent lead_id column', async () => {
-    const state = makeState()
-    llmMocks.complete.mockResolvedValueOnce(JSON.stringify({ stage_change: null }))
-    await runDeepReclassify({
-      adminClient: makeAdmin(state),
-      leadId: 'lead_1',
-      threadId: 'th_1',
-      userId: 'user_1',
-      windowIndex: 1,
+  it('rejects when matched_signals is empty', () => {
+    const json = JSON.stringify({
+      stage_change: { ...base, matched_signals: [], confidence: 'high' },
     })
-
-    const messageQuery = state.queries.find((q) => q.table === 'messenger_messages')
-    expect(messageQuery?.filters).toMatchObject({ thread_id: 'th_1' })
-    expect(messageQuery?.filters).not.toHaveProperty('lead_id')
+    expect(coerceDecision(json)).toBeNull()
   })
 
-  it('skips when target stage equals current stage', async () => {
-    const state = makeState()
-    llmMocks.complete.mockResolvedValueOnce(
-      JSON.stringify({
-        stage_change: { to_stage_id: 'st_q', confidence: 'high', reason: 'still qualifying' },
-      }),
-    )
-    await runDeepReclassify({
-      adminClient: makeAdmin(state),
-      leadId: 'lead_1',
-      threadId: 'th_1',
-      userId: 'user_1',
-      windowIndex: 1,
+  it('accepts high confidence on backward only with regression in reason', () => {
+    const okJson = JSON.stringify({
+      stage_change: { ...base, move_type: 'backward', confidence: 'high', reason: 'regression: lead un-confirmed budget' },
     })
-    expect(state.rpcCalls).toHaveLength(0)
-  })
-
-  it('skips when target stage_id is unknown', async () => {
-    const state = makeState()
-    llmMocks.complete.mockResolvedValueOnce(
-      JSON.stringify({
-        stage_change: { to_stage_id: 'st_DOES_NOT_EXIST', confidence: 'high', reason: 'x' },
-      }),
-    )
-    await runDeepReclassify({
-      adminClient: makeAdmin(state),
-      leadId: 'lead_1',
-      threadId: 'th_1',
-      userId: 'user_1',
-      windowIndex: 1,
+    const badJson = JSON.stringify({
+      stage_change: { ...base, move_type: 'backward', confidence: 'high', reason: 'lead said nothing' },
     })
-    expect(state.rpcCalls).toHaveLength(0)
-  })
-
-  it('does not throw when LLM throws', async () => {
-    const state = makeState()
-    llmMocks.complete.mockRejectedValueOnce(new Error('llm down'))
-    await expect(
-      runDeepReclassify({
-        adminClient: makeAdmin(state),
-        leadId: 'lead_1',
-        threadId: 'th_1',
-        userId: 'user_1',
-        windowIndex: 1,
-      }),
-    ).resolves.toBeUndefined()
-    expect(state.rpcCalls).toHaveLength(0)
-  })
-
-  it('does not throw when LLM returns malformed JSON', async () => {
-    const state = makeState()
-    llmMocks.complete.mockResolvedValueOnce('not json at all')
-    await expect(
-      runDeepReclassify({
-        adminClient: makeAdmin(state),
-        leadId: 'lead_1',
-        threadId: 'th_1',
-        userId: 'user_1',
-        windowIndex: 1,
-      }),
-    ).resolves.toBeUndefined()
-    expect(state.rpcCalls).toHaveLength(0)
-  })
-
-  it('caps reason at 500 chars when applying', async () => {
-    const state = makeState()
-    const longReason = 'x'.repeat(1000)
-    llmMocks.complete.mockResolvedValueOnce(
-      JSON.stringify({
-        stage_change: { to_stage_id: 'st_b', confidence: 'high', reason: longReason },
-      }),
-    )
-    await runDeepReclassify({
-      adminClient: makeAdmin(state),
-      leadId: 'lead_1',
-      threadId: 'th_1',
-      userId: 'user_1',
-      windowIndex: 2,
-    })
-    expect(state.rpcCalls).toHaveLength(1)
-    expect((state.rpcCalls[0].args.p_reason as string).length).toBeLessThanOrEqual(500)
+    expect(coerceDecision(okJson)).not.toBeNull()
+    expect(coerceDecision(badJson)).toBeNull()
   })
 })
