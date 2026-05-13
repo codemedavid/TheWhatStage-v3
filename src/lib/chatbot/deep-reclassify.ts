@@ -265,14 +265,14 @@ function buildSystemPrompt(ctx: DeepContext): string {
     '"reason": string' +
     '} | null}\n\n' +
     'Rules for move_type:\n' +
-    '  - adjacent_forward: target position is current position + 1 (or current is Objection and target is the lead\'s prior stage).\n' +
+    '  - adjacent_forward: target position is exactly current position + 1. SPECIAL CASE: if current kind=objection, target can be the stage the lead occupied immediately before entering Objection (visible in prior stage transitions).\n' +
     '  - skip_ahead: target position is more than 1 greater than current.\n' +
     '  - into_terminal: target is Won or Lost (kind=won|lost).\n' +
     '  - into_objection: target kind=objection.\n' +
     '  - out_of_objection: current kind=objection and target is non-objection.\n' +
     '  - backward: target position is lower than current and not an objection move.\n\n' +
     'Return null when no move is warranted.\n' +
-    'matched_signals MUST list which specific enter_when signals you observed (verbatim short phrases).\n' +
+    'matched_signals MUST list the exact text of enter_when signals you observed, copied verbatim from the stage list above. Do not paraphrase, shorten, or condense.\n' +
     'If no enter_when signal is observed, return null.\n\n' +
     `Current stage: id=${ctx.lead.stage_id}` +
     (currentStage ? ` name="${currentStage.name}" kind=${currentStage.kind}` : '') +
