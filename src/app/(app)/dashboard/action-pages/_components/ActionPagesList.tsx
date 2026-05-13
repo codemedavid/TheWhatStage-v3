@@ -1,8 +1,9 @@
 'use client'
 
 import Link from 'next/link'
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useTransition } from 'react'
 import type { ActionPageListItem } from '../_lib/queries'
+import { setPrimaryActionPage } from '../../chatbot/actions'
 
 type StatusFilter = 'all' | 'published' | 'draft' | 'archived'
 type ViewMode = 'table' | 'grid'
@@ -22,7 +23,13 @@ function kindMeta(kind: string) {
   return KIND_META[kind] ?? { label: kind, tint: '#6B6960', icon: 'actions' as const }
 }
 
-export function ActionPagesList({ pages }: { pages: ActionPageListItem[] }) {
+export function ActionPagesList({
+  pages,
+  primaryActionPageId,
+}: {
+  pages: ActionPageListItem[]
+  primaryActionPageId: string | null
+}) {
   const [filter, setFilter] = useState<StatusFilter>('all')
   const [query, setQuery] = useState('')
   const [view, setView] = useState<ViewMode>('table')
@@ -174,18 +181,24 @@ export function ActionPagesList({ pages }: { pages: ActionPageListItem[] }) {
         ) : view === 'grid' ? (
           <div className="apl-grid">
             {filtered.map((p) => (
-              <PageCard key={p.id} p={p} />
+              <PageCard key={p.id} p={p} primaryActionPageId={primaryActionPageId} />
             ))}
           </div>
         ) : (
-          <PageTable pages={filtered} />
+          <PageTable pages={filtered} primaryActionPageId={primaryActionPageId} />
         )}
       </div>
     </div>
   )
 }
 
-function PageTable({ pages }: { pages: ActionPageListItem[] }) {
+function PageTable({
+  pages,
+  primaryActionPageId,
+}: {
+  pages: ActionPageListItem[]
+  primaryActionPageId: string | null
+}) {
   return (
     <div className="apl-table">
       <div className="apl-th">
@@ -199,6 +212,7 @@ function PageTable({ pages }: { pages: ActionPageListItem[] }) {
       {pages.map((p) => {
         const meta = kindMeta(p.kind)
         const updated = new Date(p.updated_at)
+        const isPrimary = p.id === primaryActionPageId
         return (
           <Link
             key={p.id}
@@ -208,7 +222,12 @@ function PageTable({ pages }: { pages: ActionPageListItem[] }) {
             <div className="apl-col-title">
               <KindGlyph tint={meta.tint} icon={meta.icon} />
               <div style={{ minWidth: 0 }}>
-                <div className="apl-title">{p.title}</div>
+                <div className="apl-title">
+                  {p.title}
+                  {isPrimary && (
+                    <span className="apl-badge apl-badge-primary">Primary goal</span>
+                  )}
+                </div>
                 <div className="apl-slug">/a/{p.slug}</div>
               </div>
             </div>
@@ -231,7 +250,8 @@ function PageTable({ pages }: { pages: ActionPageListItem[] }) {
               <span className="apl-rel">{relTime(updated)}</span>
               <span className="apl-abs">{updated.toLocaleDateString()}</span>
             </div>
-            <div className="apl-col-actions">
+            <div className="apl-col-actions" onClick={(e) => e.preventDefault()}>
+              <PrimaryGoalControl page={p} isPrimary={isPrimary} />
               <span className="apl-chev">
                 <ChevRightIcon />
               </span>
@@ -243,32 +263,87 @@ function PageTable({ pages }: { pages: ActionPageListItem[] }) {
   )
 }
 
-function PageCard({ p }: { p: ActionPageListItem }) {
+function PageCard({
+  p,
+  primaryActionPageId,
+}: {
+  p: ActionPageListItem
+  primaryActionPageId: string | null
+}) {
   const meta = kindMeta(p.kind)
   const updated = new Date(p.updated_at)
+  const isPrimary = p.id === primaryActionPageId
   return (
-    <Link href={`/dashboard/action-pages/${p.id}/submissions`} className="apl-card">
-      <div className="apl-card-top">
-        <KindGlyph tint={meta.tint} icon={meta.icon} size={32} />
-        <StatusPill status={p.status} />
+    <div className="apl-card-wrap">
+      <Link href={`/dashboard/action-pages/${p.id}/submissions`} className="apl-card">
+        <div className="apl-card-top">
+          <KindGlyph tint={meta.tint} icon={meta.icon} size={32} />
+          <StatusPill status={p.status} />
+        </div>
+        <div className="apl-card-title">
+          {p.title}
+          {isPrimary && (
+            <span className="apl-badge apl-badge-primary">Primary goal</span>
+          )}
+        </div>
+        <div className="apl-card-slug">/a/{p.slug}</div>
+        <div className="apl-card-meta">
+          <div>
+            <div className="apl-card-num">{p.submission_count}</div>
+            <div className="apl-card-lbl">Submissions</div>
+          </div>
+          <div>
+            <div className="apl-card-num">{meta.label}</div>
+            <div className="apl-card-lbl">Kind</div>
+          </div>
+          <div>
+            <div className="apl-card-num">{relTime(updated)}</div>
+            <div className="apl-card-lbl">Updated</div>
+          </div>
+        </div>
+      </Link>
+      <div className="apl-card-actions">
+        <PrimaryGoalControl page={p} isPrimary={isPrimary} />
       </div>
-      <div className="apl-card-title">{p.title}</div>
-      <div className="apl-card-slug">/a/{p.slug}</div>
-      <div className="apl-card-meta">
-        <div>
-          <div className="apl-card-num">{p.submission_count}</div>
-          <div className="apl-card-lbl">Submissions</div>
-        </div>
-        <div>
-          <div className="apl-card-num">{meta.label}</div>
-          <div className="apl-card-lbl">Kind</div>
-        </div>
-        <div>
-          <div className="apl-card-num">{relTime(updated)}</div>
-          <div className="apl-card-lbl">Updated</div>
-        </div>
-      </div>
-    </Link>
+    </div>
+  )
+}
+
+function PrimaryGoalControl({
+  page,
+  isPrimary,
+}: {
+  page: ActionPageListItem
+  isPrimary: boolean
+}) {
+  const [pending, startTransition] = useTransition()
+  if (page.status !== 'published') {
+    return (
+      <button
+        type="button"
+        className="apl-row-btn"
+        disabled
+        title="Publish to use as primary goal"
+      >
+        Set as primary goal
+      </button>
+    )
+  }
+  return (
+    <button
+      type="button"
+      className="apl-row-btn"
+      disabled={pending}
+      onClick={(e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        startTransition(async () => {
+          await setPrimaryActionPage(isPrimary ? null : page.id)
+        })
+      }}
+    >
+      {isPrimary ? 'Clear primary goal' : 'Set as primary goal'}
+    </button>
   )
 }
 

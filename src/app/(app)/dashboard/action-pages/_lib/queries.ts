@@ -206,3 +206,16 @@ export async function fetchActionPageOptions(
     status: p.status as ActionPageRow['status'],
   }))
 }
+
+export async function fetchPrimaryActionPageId(
+  supabase: SupabaseClient,
+  userId: string,
+): Promise<string | null> {
+  const { data, error } = await supabase
+    .from('chatbot_configs')
+    .select('primary_action_page_id')
+    .eq('user_id', userId)
+    .maybeSingle<{ primary_action_page_id: string | null }>()
+  if (error) throw new Error(`fetchPrimaryActionPageId: ${error.message}`)
+  return data?.primary_action_page_id ?? null
+}

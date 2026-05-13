@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation'
 import { Suspense } from 'react'
 import { createClient } from '@/lib/supabase/server'
-import { fetchActionPages } from './_lib/queries'
+import { fetchActionPages, fetchPrimaryActionPageId } from './_lib/queries'
 import { ActionPagesList } from './_components/ActionPagesList'
 
 export default async function ActionPagesIndex() {
@@ -30,5 +30,6 @@ async function List() {
   if (!user) redirect('/login')
 
   const pages = await fetchActionPages(supabase, user.id)
-  return <ActionPagesList pages={pages} />
+  const primaryId = await fetchPrimaryActionPageId(supabase, user.id)
+  return <ActionPagesList pages={pages} primaryActionPageId={primaryId} />
 }
