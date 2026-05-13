@@ -10,6 +10,7 @@ import { type Embedder } from '../hf-client';
 import { createEmbedder } from '../factory';
 import type { SourceKind } from '../types';
 import type { ParseInput } from '../parsers';
+import { enqueueStageSuggestionJob } from '@/lib/leads/stage-suggester-queue';
 
 export interface EmbedJobRow {
   id: string;
@@ -414,6 +415,17 @@ export async function runJob(
         .update({ status: 'queued', scheduled_at: new Date().toISOString(), started_at: null })
         .eq('id', job.id)
         .eq('status', 'running');
+    }
+
+    // Trigger stage-suggestion analysis after knowledge-base content is indexed.
+    // media_asset embeddings don't affect stage signals, so we skip them.
+    if (kind !== 'media_asset' && doneRows?.length) {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await enqueueStageSuggestionJob(client as any, job.user_id);
+      } catch (err) {
+        console.warn('[embed-job] failed to enqueue stage suggestion', { err });
+      }
     }
 
     log.info('embed_job.done', { jobId: job.id, sourceId, ...result.diff });
