@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { StageBrief } from './classify'
-import { stageInstruction, stageList } from './classify'
+import { sanitizeReply, stageInstruction, stageList } from './classify'
 
 const stages: StageBrief[] = [
   { id: 'st_new', name: 'New Lead',    description: 'fresh',    position: 0, kind: 'entry' },
@@ -66,5 +66,40 @@ describe('stageInstruction (hierarchy block)', () => {
     expect(out).toContain('[0 · entry] New Lead')
     // st_q is current — should have [CURRENT]
     expect(out).toMatch(/\[1 · qualifying\] Qualifying\s*\[CURRENT\]/)
+  })
+})
+
+describe('sanitizeReply', () => {
+  it('strips the malformed <|tool_call>...<tool_call|> artifact seen in production', () => {
+    const raw = '<|tool_call>call:action_page.action_page_id("WhatStage")<tool_call|>'
+    expect(sanitizeReply(raw)).toBe('')
+  })
+
+  it('strips well-formed tool-call wrappers but keeps surrounding text', () => {
+    const raw = 'Salamat! <tool_call>call:action_page.action_page_id("X")</tool_call> Heto na.'
+    const out = sanitizeReply(raw)
+    expect(out).not.toMatch(/tool_call/i)
+    expect(out).not.toMatch(/call:action_page/i)
+    expect(out).toContain('Salamat!')
+    expect(out).toContain('Heto na.')
+  })
+
+  it('strips fenced code blocks and bracketed link placeholders', () => {
+    const raw = 'Sure thing 👇 [Insert Link]\n```json\n{"action_page": "x"}\n```'
+    const out = sanitizeReply(raw)
+    expect(out).not.toMatch(/```/)
+    expect(out).not.toMatch(/\[insert link\]/i)
+    expect(out).toContain('Sure thing')
+  })
+
+  it('strips ChatML control tokens like <|im_start|>assistant', () => {
+    const raw = '<|im_start|>assistant\nHello there<|im_end|>'
+    const out = sanitizeReply(raw)
+    expect(out).not.toMatch(/<\|/)
+    expect(out).toContain('Hello there')
+  })
+
+  it('passes a normal reply through unchanged (apart from trim)', () => {
+    expect(sanitizeReply('  Hello, kumusta? 👋  ')).toBe('Hello, kumusta? 👋')
   })
 })

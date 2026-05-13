@@ -191,7 +191,7 @@ export async function answerWithClassification(
       recommend_product?: unknown
       recommend_property?: unknown
     }
-    if (typeof r.reply === 'string') text = r.reply.trim()
+    if (typeof r.reply === 'string') text = sanitizeReply(r.reply)
     stageChange = coerceStageChange(r.stage_change, stages, currentStageId)
     actionPage = coerceActionPage(r.action_page, actionPages)
     if (recommendRules && options.activeCatalogPageId) {
@@ -224,7 +224,7 @@ export async function answerWithClassification(
       ],
       { temperature: config.temperature, maxTokens: 1500 },
     )
-    text = fallback.trim()
+    text = sanitizeReply(fallback)
     stageChange = null
     actionPage = null
     productRecommendation = null
@@ -410,7 +410,8 @@ export function stageInstruction(
     (hasRecommendProperty ? ' and deciding whether to recommend a specific property listing' : '') +
     '. Output a single JSON object with this exact shape and NOTHING ELSE:\n' +
     schema +
-    '\n`reply` is what the customer sees — write it in the same persona/rules above. ' +
+    '\nABSOLUTELY FORBIDDEN inside `reply` (any of these will be stripped and may produce an empty message): tool-call syntax of any kind, function-call notation, control tokens, role headers, XML-ish tags. NEVER write things like `<|tool_call>...<tool_call|>`, `<tool_call>`, `</tool_call>`, `call:action_page.action_page_id(...)`, `function_call:...`, ```json blocks, or any `<|...|>` token. To trigger an action page you set the structured `action_page` field — never describe the call in prose.\n' +
+    '`reply` is what the customer sees — write it in the same persona/rules above. ' +
     '`stage_change` is null when the lead should stay in the current stage. ' +
     'Only use stage_ids from the list. Pick the stage whose name AND description best match the customer\'s intent in the latest message + conversation history.\n\n' +
     hierarchyBlock +
@@ -531,6 +532,39 @@ function formatHistory(history: AnswerHistory): string {
   return history
     .map((m) => `${m.role === 'assistant' ? 'Bot' : 'Customer'}: ${m.content}`)
     .join('\n')
+}
+
+/**
+ * Strip control-token / tool-call artifacts the LLM occasionally leaks into
+ * `reply`. A real customer must never see strings like
+ *   <|tool_call>call:action_page.action_page_id("WhatStage")<tool_call|>
+ * which a model emitted once when it confused our JSON-only contract with a
+ * tool-calling format. Also strips ChatML-style role headers and code fences.
+ *
+ * Conservative: removes known artifact patterns, collapses the resulting
+ * whitespace, then trims. If the entire reply was an artifact, returns ''.
+ * The caller already short-circuits empty replies.
+ */
+export function sanitizeReply(raw: string): string {
+  let s = raw
+  // ChatML / Llama-style control tokens, including the malformed
+  // `<|tool_call>...<tool_call|>` pair we observed in production.
+  s = s.replace(/<\|[^>]*?\|>/g, '')
+  s = s.replace(/<\|[^|]*?>/g, '')
+  s = s.replace(/<[^>]*?\|>/g, '')
+  // Tool-call XML-ish wrappers (open + close, in either order).
+  s = s.replace(/<\/?\s*tool[_ ]?call\s*>/gi, '')
+  s = s.replace(/<\/?\s*function[_ ]?call\s*>/gi, '')
+  // Bare `call:foo.bar("x")` style fragments left behind on a line.
+  s = s.replace(/^\s*call\s*:\s*[\w.]+\s*\([^)]*\)\s*$/gim, '')
+  s = s.replace(/\bcall\s*:\s*action_page\.[\w.]+\s*\([^)]*\)/gi, '')
+  // Stray fenced JSON / code blocks that occasionally escape into reply.
+  s = s.replace(/```[a-z]*\s*[\s\S]*?```/gi, '')
+  // Bracketed placeholder leakage like [Insert Link] / [form link here].
+  s = s.replace(/\[(?:insert\s+)?(?:link|url|form\s+link[^\]]*|action\s+page[^\]]*)\]/gi, '')
+  // Collapse whitespace runs and trim.
+  s = s.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim()
+  return s
 }
 
 function parseJson(raw: string): unknown {
