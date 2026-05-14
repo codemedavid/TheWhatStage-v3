@@ -13,9 +13,9 @@ function daysSince(iso: string): number {
 }
 
 function formatValue(v: number): string {
-  if (v >= 1_000_000) return `$${(v / 1_000_000).toFixed(v % 1_000_000 ? 1 : 0)}M`
-  if (v >= 1_000) return `$${(v / 1_000).toFixed(v % 1_000 ? 1 : 0)}k`
-  return `$${v.toLocaleString()}`
+  if (v >= 1_000_000) return `₱${(v / 1_000_000).toFixed(v % 1_000_000 ? 1 : 0)}M`
+  if (v >= 1_000) return `₱${(v / 1_000).toFixed(v % 1_000 ? 1 : 0)}k`
+  return `₱${v.toLocaleString()}`
 }
 
 function initials(name: string): string {

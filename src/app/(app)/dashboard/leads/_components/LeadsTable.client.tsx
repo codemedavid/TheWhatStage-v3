@@ -6,9 +6,9 @@ import type { LeadRow, StageRow, FieldDefRow, CampaignOption } from '../_lib/que
 
 function formatValue(v: number | null): string {
   if (v === null) return ''
-  if (v >= 1_000_000) return `$${(v / 1_000_000).toFixed(v % 1_000_000 ? 1 : 0)}M`
-  if (v >= 1_000) return `$${(v / 1_000).toFixed(v % 1_000 ? 1 : 0)}k`
-  return `$${v.toLocaleString()}`
+  if (v >= 1_000_000) return `₱${(v / 1_000_000).toFixed(v % 1_000_000 ? 1 : 0)}M`
+  if (v >= 1_000) return `₱${(v / 1_000).toFixed(v % 1_000 ? 1 : 0)}k`
+  return `₱${v.toLocaleString()}`
 }
 
 export function LeadsTableClient({

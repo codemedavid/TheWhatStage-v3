@@ -358,7 +358,7 @@ export function LeadDrawer({
                   type="number"
                   value={form.estimated_value === null ? '' : String(form.estimated_value)}
                   onChange={(v) => set('estimated_value', v === '' ? null : Number(v))}
-                  prefix="$"
+                  prefix="₱"
                 />
               </Field>
             </div>
