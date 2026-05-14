@@ -17,9 +17,18 @@ export class HfRouterLlm {
   private model: string;
 
   constructor(opts?: { token?: string; model?: string; baseURL?: string }) {
+    const apiKey = opts?.token ?? ragConfig.llmApiKey;
+    const baseURL = opts?.baseURL ?? ragConfig.llmBaseUrl;
+    if (!apiKey) {
+      throw new Error(
+        `[rag.llm] no API key configured for ${baseURL}. Set RAG_LLM_API_KEY ` +
+          `(or HF_TOKEN if using the HF router) and restart the dev server — ` +
+          `Next.js only reads .env.local at startup.`,
+      );
+    }
     this.client = new OpenAI({
-      apiKey: opts?.token ?? ragConfig.llmApiKey,
-      baseURL: opts?.baseURL ?? ragConfig.llmBaseUrl,
+      apiKey,
+      baseURL,
       // SDK auto-retries 429/5xx with exponential backoff and honors
       // Retry-After. Default is 2 — bump it so transient bursts don't
       // bubble up as worker job failures.
