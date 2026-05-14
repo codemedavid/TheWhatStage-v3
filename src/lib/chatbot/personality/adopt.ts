@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { z } from 'zod'
 import { HfRouterLlm } from '@/lib/rag/llm'
+import { ragConfig } from '@/lib/rag/config'
 import type { PersonalityTemplate, GeneratedPersonalityConfig } from './types'
 
 // ---------------------------------------------------------------------------
@@ -253,16 +254,42 @@ export async function adaptPersonality(
   template: PersonalityTemplate,
   ctx: BusinessContext,
 ): Promise<GeneratedPersonalityConfig> {
-  const llm = new HfRouterLlm()
+  // Pin the adopt-template flow to OpenRouter explicitly. We cannot rely on
+  // ambient HfRouterLlm defaults because in some environments RAG_LLM_BASE_URL
+  // is unset and the SDK falls back to the HF router with the wrong key.
+  const baseURL = ragConfig.openrouterBaseUrl
+  // Read raw env to avoid the HF_TOKEN fallback baked into ragConfig.llmApiKey
+  // — sending an HF token to OpenRouter is exactly the 401 we are debugging.
+  const token = process.env.RAG_LLM_API_KEY || ragConfig.openrouterApiKey
+  if (!token) {
+    throw new Error(
+      'Personality adoption needs an OpenRouter key. Set RAG_LLM_API_KEY ' +
+        '(preferred) or OPENROUTER_API_KEY in your environment, then redeploy.',
+    )
+  }
+  const llm = new HfRouterLlm({ baseURL, token })
   const prompt = buildAdaptationPrompt(template, ctx)
 
-  const raw = await llm.complete(
-    [
-      { role: 'system', content: prompt },
-      { role: 'user', content: 'Generate the adapted persona JSON now.' },
-    ],
-    { temperature: 0.5, maxTokens: 2400, responseFormat: 'json_object' },
-  )
+  let raw: string
+  try {
+    raw = await llm.complete(
+      [
+        { role: 'system', content: prompt },
+        { role: 'user', content: 'Generate the adapted persona JSON now.' },
+      ],
+      { temperature: 0.5, maxTokens: 2400, responseFormat: 'json_object' },
+    )
+  } catch (err: unknown) {
+    const e = err as { status?: number; message?: string }
+    if (e?.status === 401) {
+      throw new Error(
+        `OpenRouter rejected the adopt-template request (401 Missing/Invalid Authentication). ` +
+          `Verify RAG_LLM_API_KEY is a valid OpenRouter key and that ` +
+          `RAG_LLM_BASE_URL=${baseURL} is reachable. Original: ${e.message ?? 'no message'}`,
+      )
+    }
+    throw err
+  }
 
   let parsed: unknown
   try {
