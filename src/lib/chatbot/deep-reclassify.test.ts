@@ -82,15 +82,27 @@ describe('coerceDecision', () => {
     expect(coerceDecision(json)).toBeNull()
   })
 
-  it('accepts high confidence on backward only with regression in reason', () => {
-    const okJson = JSON.stringify({
-      stage_change: { ...base, move_type: 'backward', confidence: 'high', reason: 'regression: lead un-confirmed budget' },
+  it('accepts high confidence on backward without an English-keyword reason regex', () => {
+    // We dropped the /regress|moved? back|un-?confirmed|reverted/i check —
+    // it was English-only and silently rejected every Tagalog backward
+    // decision ("kinansel niya", "ayaw na", "nag-change mind ako"). The
+    // high-confidence requirement (still enforced) plus the prompt's
+    // hierarchy rules are the discipline.
+    const tagalogJson = JSON.stringify({
+      stage_change: { ...base, move_type: 'backward', confidence: 'high', reason: 'kinansel niya ang booking' },
     })
-    const badJson = JSON.stringify({
-      stage_change: { ...base, move_type: 'backward', confidence: 'high', reason: 'lead said nothing' },
+    const englishJson = JSON.stringify({
+      stage_change: { ...base, move_type: 'backward', confidence: 'high', reason: 'customer changed their mind' },
     })
-    expect(coerceDecision(okJson)).not.toBeNull()
-    expect(coerceDecision(badJson)).toBeNull()
+    expect(coerceDecision(tagalogJson)).not.toBeNull()
+    expect(coerceDecision(englishJson)).not.toBeNull()
+  })
+
+  it('rejects backward at non-high confidence', () => {
+    const json = JSON.stringify({
+      stage_change: { ...base, move_type: 'backward', confidence: 'medium', reason: 'customer changed their mind' },
+    })
+    expect(coerceDecision(json)).toBeNull()
   })
 })
 

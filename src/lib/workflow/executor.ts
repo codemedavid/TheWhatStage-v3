@@ -501,7 +501,7 @@ async function handleClassifyAndRoute(
 
     const { data: stagesData } = await admin
       .from('pipeline_stages')
-      .select('id, name, description, position, kind')
+      .select('id, name, description, position, kind, entry_signals, exit_signals')
       .eq('user_id', ctx.run.user_id)
       .order('position', { ascending: true })
 

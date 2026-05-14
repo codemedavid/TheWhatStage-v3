@@ -150,23 +150,29 @@ export async function runDeepReclassify(args: RunDeepReclassifyArgs): Promise<vo
     const structuralMoveType = classifyMoveType(ctx.stages, ctx.lead.stage_id, decision.to_stage_id)
     if (!structuralMoveType) return
 
+    // Trust the structural classification. The LLM's `move_type` is a hint —
+    // we re-derive it from stage positions/kinds and use that as the canonical
+    // type going forward. Previously a mismatch + medium confidence aborted
+    // the move, but that threw away correct decisions whenever the model
+    // mis-labeled an otherwise valid forward move.
     if (structuralMoveType !== decision.move_type) {
-      const structuralAllowsMedium =
-        structuralMoveType === 'adjacent_forward' ||
-        structuralMoveType === 'into_objection' ||
-        structuralMoveType === 'out_of_objection'
-      if (decision.confidence === 'medium' && !structuralAllowsMedium) {
-        console.warn('[deep-reclassify] move_type mismatch + insufficient confidence — aborting', {
-          llm: decision.move_type,
-          structural: structuralMoveType,
-          confidence: decision.confidence,
-        })
-        return
-      }
       console.warn('[deep-reclassify] move_type mismatch — trusting structural', {
         llm: decision.move_type,
         structural: structuralMoveType,
       })
+    }
+
+    // Re-validate confidence against the STRUCTURAL move type now that we've
+    // resolved any LLM mislabel. Mirror the tier in `coerceDecision`.
+    const structuralAllowsMedium =
+      structuralMoveType === 'adjacent_forward' ||
+      structuralMoveType === 'into_objection' ||
+      structuralMoveType === 'out_of_objection'
+    if (decision.confidence === 'medium' && !structuralAllowsMedium) {
+      console.warn('[deep-reclassify] medium confidence not allowed for structural move type', {
+        structural: structuralMoveType,
+      })
+      return
     }
 
     const idempotencyKey = `deep:${threadId}:${leadId}:${windowIndex}`
@@ -299,12 +305,18 @@ function buildSystemPrompt(ctx: DeepContext): string {
 
   const stageListText = ctx.stages
     .map((s) => {
-      const entry = (s.entry_signals ?? []).map((sig) => `    • ${sig}`).join('\n')
-      const exit = (s.exit_signals ?? []).map((sig) => `    • ${sig}`).join('\n')
+      const entrySignals = (s.entry_signals ?? []).filter((x) => !!x?.trim())
+      const exitSignals = (s.exit_signals ?? []).filter((x) => !!x?.trim())
+      const entry = entrySignals.map((sig) => `    • ${sig}`).join('\n')
+      const exit = exitSignals.map((sig) => `    • ${sig}`).join('\n')
+      const entryBlock =
+        entrySignals.length > 0
+          ? `  enter_when (any one — paraphrase OK):\n${entry}\n`
+          : '  enter_when: (no explicit signals — infer from name + description above)\n'
       return (
         `- id=${s.id} name="${s.name}" kind=${s.kind} pos=${s.position}\n` +
         (s.description ? `  description: ${s.description}\n` : '') +
-        (entry ? `  enter_when (≥1 must be observed):\n${entry}\n` : '') +
+        entryBlock +
         (exit ? `  leave_when:\n${exit}` : '')
       )
     })
@@ -314,8 +326,8 @@ function buildSystemPrompt(ctx: DeepContext): string {
     'You are a deep sales-pipeline classifier. ' +
     'Analyse the full conversation history, form submissions, and prior stage transitions ' +
     'to decide whether this lead should move to a different pipeline stage.\n\n' +
-    'Each stage has explicit ENTER signals — ≥1 must be observed in the lead\'s behaviour ' +
-    'before you can move them in. The conversation may be in English, Tagalog, Taglish, or any language.\n\n' +
+    'PRIMARY GOAL: keep the lead moving forward. Default to moving forward (with appropriate confidence) when the customer has produced any new buying signal since the last stage transition. Return null only when nothing has changed.\n\n' +
+    'The conversation may be in English, Tagalog, Taglish, or any language. Treat "enter when" signals as canonical examples of the intent that triggers a move — paraphrases, translations, and equivalent intents all count. Do not require literal keyword matches.\n\n' +
     'Output JSON only, matching this schema exactly:\n' +
     '{"stage_change": {' +
     '"to_stage_id": string, ' +
@@ -331,9 +343,13 @@ function buildSystemPrompt(ctx: DeepContext): string {
     '  - into_objection: target kind=objection.\n' +
     '  - out_of_objection: current kind=objection and target is non-objection.\n' +
     '  - backward: target position is lower than current and not an objection move.\n\n' +
-    'Return null when no move is warranted.\n' +
-    'matched_signals MUST list the exact text of enter_when signals you observed, copied verbatim from the stage list above. Do not paraphrase, shorten, or condense.\n' +
-    'If no enter_when signal is observed, return null.\n\n' +
+    'matched_signals — the audit trail. Each entry should be a short paraphrase of an enter_when signal you observed (a gist is fine — do NOT copy verbatim, do NOT invent quotes). Aim for 1–3 entries. If a stage has no enter_when list, infer from its name + description and write a phrase like "(inferred from description) explicit buying intent".\n' +
+    'If you cannot point to ANY observed signal — even paraphrased — return null. Otherwise prefer a move with appropriate confidence.\n\n' +
+    'CONFIDENCE CALIBRATION:\n' +
+    '- high   = the LATEST customer turn contains an explicit, direct match for the destination stage\'s enter signal or name. One clear quote is enough.\n' +
+    '- medium = destination is the clear best fit across the last 2–3 customer turns combined.\n' +
+    '- low    = implicit, indirect, or ambiguous signal. (Note: the system will drop `low` decisions — but pick honest `low` over inflating to `medium`.)\n' +
+    'For backward moves: confidence MUST be "high" AND `reason` MUST cite an explicit disengage signal (in any language: "not interested", "ayaw na", "hindi na po ituloy", "kinansel ko na", "changed my mind").\n\n' +
     `Current stage: id=${ctx.lead.stage_id}` +
     (currentStage ? ` name="${currentStage.name}" kind=${currentStage.kind}` : '') +
     '\n\n' +
@@ -398,7 +414,12 @@ export function coerceDecision(raw: string): DeepDecision | null {
   if (typeof s.to_stage_id !== 'string') return null
   if (typeof s.reason !== 'string') return null
   if (!Array.isArray(s.matched_signals)) return null
-  const matched = s.matched_signals.filter((x): x is string => typeof x === 'string')
+  const matched = s.matched_signals
+    .map((x) => (typeof x === 'string' ? x.trim() : ''))
+    .filter((x): x is string => x.length > 0)
+  // Empty matched_signals stays a hard reject — it's our hallucination guard.
+  // But we no longer require verbatim copies from the stage list; the prompt
+  // now asks for a short gist (paraphrase OK) plus an in-message quote.
   if (matched.length === 0) return null
 
   if (typeof s.move_type !== 'string' || !VALID_MOVE_TYPES.has(s.move_type as MoveType)) return null
@@ -415,9 +436,13 @@ export function coerceDecision(raw: string): DeepDecision | null {
   if (confidence === 'low') return null
   if (confidence === 'medium' && !allowsMedium) return null
 
-  if (moveType === 'backward') {
-    if (!/regress|moved? back|un-?confirmed|reverted/i.test(s.reason as string)) return null
-  }
+  // Backward moves still require high confidence (enforced above by the
+  // tier rule), but we no longer require an English regex on `reason` — the
+  // previous /regress|moved? back|un-?confirmed|reverted/i check silently
+  // dropped every Tagalog/Taglish backward decision ("kinansel niya",
+  // "ayaw na", "nag-change mind"). The prompt's hierarchy rules + the
+  // high-confidence requirement are the discipline. Operator-side review
+  // catches false positives.
 
   return { to_stage_id: s.to_stage_id, move_type: moveType, confidence, matched_signals: matched, reason: s.reason as string }
 }

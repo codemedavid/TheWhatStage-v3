@@ -776,8 +776,9 @@ describe('POST /api/messenger/process', () => {
       pendingDeepFlag = false
     })
 
-    it('invokes runDeepReclassify when inbound count is 10 and flag is on', async () => {
-      pendingInboundCount = 10
+    // Cadence: fire at the 3rd inbound, then every 5 inbound thereafter (3, 8, 13, 18, ...).
+    it('invokes runDeepReclassify at the 3rd inbound when flag is on', async () => {
+      pendingInboundCount = 3
       pendingDeepFlag = true
       const { admin } = makeWorkerAdminMock()
       mocks.admin = admin
@@ -786,9 +787,22 @@ describe('POST /api/messenger/process', () => {
       expect(deepMocks.runDeepReclassify).toHaveBeenCalledTimes(1)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const arg = (deepMocks.runDeepReclassify.mock.calls as any)[0][0] as Record<string, unknown>
-      expect(arg.windowIndex).toBe(1)
+      // windowIndex is now the raw inbound count (used as the idempotency
+      // discriminator — uniqueness is what matters, not the historical
+      // floor-by-10 semantics).
+      expect(arg.windowIndex).toBe(3)
       expect(arg.threadId).toBeTruthy()
       expect(arg.leadId).toBeTruthy()
+    })
+
+    it('invokes runDeepReclassify at the 8th inbound (3 + 5)', async () => {
+      pendingInboundCount = 8
+      pendingDeepFlag = true
+      const { admin } = makeWorkerAdminMock()
+      mocks.admin = admin
+      await POST(makeWorkerRequest() as Parameters<typeof POST>[0])
+      await new Promise((r) => setTimeout(r, 10))
+      expect(deepMocks.runDeepReclassify).toHaveBeenCalledTimes(1)
     })
 
     it('does not invoke when inbound count is 5', async () => {
@@ -801,8 +815,8 @@ describe('POST /api/messenger/process', () => {
       expect(deepMocks.runDeepReclassify).not.toHaveBeenCalled()
     })
 
-    it('does not invoke when flag is off, even at multiples of 10', async () => {
-      pendingInboundCount = 20
+    it('does not invoke when flag is off, even on a firing tick', async () => {
+      pendingInboundCount = 18
       pendingDeepFlag = false
       const { admin } = makeWorkerAdminMock()
       mocks.admin = admin
@@ -812,7 +826,7 @@ describe('POST /api/messenger/process', () => {
     })
 
     it('reply path completes when runDeepReclassify throws', async () => {
-      pendingInboundCount = 10
+      pendingInboundCount = 3
       pendingDeepFlag = true
       deepMocks.runDeepReclassify.mockRejectedValueOnce(new Error('boom'))
       const { admin } = makeWorkerAdminMock()

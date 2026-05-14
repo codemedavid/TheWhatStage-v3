@@ -25,6 +25,10 @@ export interface StageBrief {
   position: number
   /** Pipeline-stage semantic kind. Drives hierarchy reasoning in the prompt. */
   kind: 'entry' | 'qualifying' | 'nurture' | 'decision' | 'won' | 'lost' | 'dormant'
+  /** Entry signals shown to the classifier. Optional — older call sites omit them. */
+  entry_signals?: string[] | null
+  /** Exit signals shown to the classifier. Optional — older call sites omit them. */
+  exit_signals?: string[] | null
 }
 
 export interface StageChange {
@@ -251,23 +255,39 @@ export async function classifyOnly(
   const llm = new HfRouterLlm({ model: ragConfig.classifierModel })
   const system =
     'You classify which pipeline stage a sales lead belongs to based on the conversation. ' +
+    'The conversation may be in English, Tagalog, Taglish, or any language. ' +
     'Output JSON only, matching this schema exactly: ' +
     '{"stage_change": {"to_stage_id": string, "confidence": "low"|"medium"|"high", "reason": string} | null}. ' +
-    'Return null when the lead should stay in the current stage. ' +
-    'Use only stage_ids from the provided list.\n\n' +
+    'Only use stage_ids from the list below.\n\n' +
+    'PRIMARY GOAL: keep the lead moving forward. Default to moving forward (with lower confidence) when the customer added any new buying signal. ' +
+    'Return null only when the latest message is pure greeting / off-topic / adds nothing new.\n\n' +
+    'STAGE HIERARCHY:\n' +
+    '- Each stage may list "enter when" signals — paraphrases, Tagalog equivalents, and equivalent intents all count. Do not require literal keyword matches.\n' +
+    '- `entry`-kind stages exist to be EXITED — leave them as soon as the customer sends any meaningful inbound.\n' +
+    '- Forward moves are encouraged; adjacent-forward is the default. Skip-ahead is allowed when the message clearly fits a later stage.\n' +
+    '- Backward moves require confidence="high" AND an explicit disqualifying signal (e.g. "not interested", "ayaw na", "hindi na po ituloy").\n\n' +
+    'CONFIDENCE CALIBRATION:\n' +
+    '- high   = latest message contains an explicit, direct match for the destination stage (e.g. "interested po", "magkano?", "book na ako", "ayaw na").\n' +
+    '- medium = destination is the clear best fit across the last 2–3 customer turns.\n' +
+    '- low    = implicit, indirect, or ambiguous signal. Still useful — the system accepts low for one-step-forward moves. Do NOT inflate to medium just to feel safer.\n\n' +
+    'EXAMPLES (Tagalog/Taglish):\n' +
+    '- "Hi po interested po ako, magkano po?" → move to Interested-equivalent, confidence high.\n' +
+    '- "Hello po" (currently on entry-kind stage) → move to first nurture stage, confidence medium.\n' +
+    '- "Sige, kunin ko na po. Paano magbayad?" → move to Qualified/Proposal-equivalent, confidence high.\n' +
+    '- "Sorry po, hindi na po ituloy." → move to Lost, confidence high, reason cites disengage.\n\n' +
     stageList(stages, currentStageId)
 
   const userBlock =
     `Conversation so far (most recent last):\n${formatHistory(history)}\n\n` +
     `Latest customer message:\n${latestMessage}\n\n` +
-    `Decide the correct stage_id for this lead, or null if no change.`
+    `Decide the correct stage_id for this lead, or null if no change is warranted.`
 
   const raw = await llm.complete(
     [
       { role: 'system', content: system },
       { role: 'user', content: userBlock },
     ],
-    { temperature: 0, maxTokens: 200, responseFormat: 'json_object' },
+    { temperature: 0, maxTokens: 400, responseFormat: 'json_object' },
   )
   const parsed = parseJson(raw)
   if (!parsed || typeof parsed !== 'object') return null
@@ -276,8 +296,23 @@ export async function classifyOnly(
 
 /**
  * Apply a validated stage change. Returns null when the change was rejected
- * (low confidence, no-op, unknown stage) or the RPC declined it.
- * Never throws — caller can safely fire-and-forget.
+ * (insufficient confidence for the kind of move, no-op, unknown stage) or the
+ * RPC declined it. Never throws — caller can safely fire-and-forget.
+ *
+ * Confidence policy — bias toward forward movement:
+ *   - `high`   accepted for any move.
+ *   - `medium` accepted for any move.
+ *   - `low`    accepted ONLY for adjacent-forward moves (position == current+1)
+ *              and into-objection moves. The classifier is poorly calibrated
+ *              on low/medium, so treating `low` as a hard floor stranded
+ *              clearly-interested leads at "New Lead". We trust the structural
+ *              guardrails (forward-only, single step) for low confidence.
+ *
+ *   - low confidence INTO a terminal (won/lost) or SKIPPING ahead more than
+ *     one position is still rejected — those are the moves where we want a
+ *     stronger signal.
+ *   - backward moves still require non-low confidence AND a disqualifying
+ *     reason (enforced upstream by the prompt's hierarchy rules).
  */
 export async function applyStageChange(
   admin: SupabaseClient,
@@ -288,15 +323,30 @@ export async function applyStageChange(
     fromStageId: string | null
     change: StageChange
     stages: StageBrief[]
+    /** Idempotency suffix — typically the inbound message id. Required to keep
+     *  the audit row + workflow trigger unique per move on a thread. Without
+     *  it, the second move on the same thread silently drops its audit row
+     *  AND its `stage_entered` workflow run (the workflow dispatcher uses the
+     *  idempotency_key as part of its dedup key). */
+    idempotencySuffix?: string | null
   },
 ): Promise<string | null> {
   try {
     const { leadId, threadId, fromStageId, change, stages } = args
-    if (change.confidence === 'low') return null
     if (change.to_stage_id === fromStageId) return null
     if (!stages.some((s) => s.id === change.to_stage_id)) return null
 
-    const idempotencyKey = `classify:${threadId}:${leadId}`
+    if (change.confidence === 'low') {
+      const from = stages.find((s) => s.id === fromStageId)
+      const to = stages.find((s) => s.id === change.to_stage_id)
+      if (!from || !to) return null
+      const isAdjacentForward = to.position === from.position + 1
+      const isIntoObjection = (to.kind as string) === 'objection'
+      if (!isAdjacentForward && !isIntoObjection) return null
+    }
+
+    const suffix = args.idempotencySuffix ?? Date.now().toString(36)
+    const idempotencyKey = `classify:${threadId}:${leadId}:${suffix}`
     const { data, error } = await admin
       .rpc('set_lead_stage', {
         p_lead_id: leadId,
@@ -395,26 +445,50 @@ export function stageInstruction(
   const hierarchyBlock =
     'STAGE HIERARCHY RULES — read carefully:\n' +
     '- Stages are listed in pipeline order. Earlier position = earlier in the customer journey.\n' +
-    '- The stage NAME is first-class evidence. A customer message clearly invoking the destination stage\'s name (e.g. "cancel my booking", "I\'m ready to buy") is direct evidence to move there.\n' +
-    '- Forward moves (later position, or any move into a `won`/`lost` terminal stage) are allowed when the customer\'s intent matches the destination stage\'s description or name.\n' +
+    '- The stage NAME is first-class evidence. A customer message clearly invoking the destination stage\'s name (e.g. "cancel my booking", "I\'m ready to buy", "interested po") is direct evidence to move there.\n' +
+    '- Each stage may list "enter when" signals. Treat them as canonical examples of what triggers a move INTO that stage — paraphrases, translations (Tagalog/Taglish/English), and equivalent intents all count. Do not require literal keyword matches.\n' +
+    '- Forward moves (later position, or any move into a `won`/`lost` terminal stage) are allowed AND ENCOURAGED whenever the customer\'s intent matches the destination stage\'s name, description, or enter signals. Adjacent-forward moves (one step forward) are the default — pick them generously.\n' +
+    '- Skip-ahead moves (more than one step forward) are allowed when the latest message clearly fits a later stage (e.g. first inbound is already a pricing question → skip "Engaged" straight to "Interested").\n' +
     '- Backward moves (earlier position) require BOTH:\n' +
     '    (a) `confidence` = "high", AND\n' +
-    '    (b) `reason` MUST cite an explicit disqualifying signal — e.g. customer cancelled, said "not interested", changed their mind, asked to be removed from the funnel.\n' +
+    '    (b) `reason` MUST cite an explicit disqualifying signal — e.g. customer cancelled, said "not interested" / "ayaw na" / "hindi na po ituloy", changed their mind, asked to be removed from the funnel.\n' +
     '- Never move backward on tone alone. A frustrated message is not a backward signal unless the customer explicitly disengages.\n' +
-    '- If the lead is on the right stage, return `stage_change: null`.'
+    '- `entry`-kind stages exist to be EXITED. The moment the customer sends a meaningful inbound message, leave the entry stage — never linger there.\n' +
+    '- If the lead is genuinely already on the right stage and the latest message adds no new signal, return `stage_change: null`. Otherwise prefer a move.'
+
+  const calibrationBlock =
+    'CONFIDENCE CALIBRATION — anchor to evidence, not feeling:\n' +
+    '- `high`   = the LATEST customer message contains a direct, explicit match for the destination stage\'s name or enter signals (e.g. "interested po", "magkano?", "book na ako", "ayaw na"). One clean quote is enough.\n' +
+    '- `medium` = the destination is the best fit when you read the LAST 2–3 customer turns combined (asked about price + asked about delivery + asked when available → Interested). No single sentence is decisive, but the pattern is.\n' +
+    '- `low`    = you are guessing, the signal is implicit, or two stages are close to equally plausible. The system still accepts `low` for one-step-forward moves and into-Objection moves, so do NOT inflate to medium just to be safe. When unsure but the customer clearly engaged, pick `low` adjacent-forward over `null`.\n' +
+    'Default UPWARD when in doubt between `low` and `medium`. Default to MOVE (forward, possibly low) rather than `null` whenever the customer added new information.'
+
+  const examplesBlock =
+    'EXAMPLES — Filipino Messenger:\n' +
+    '- Customer (currently New Lead): "Hi po interested po ako, magkano po yung small?"\n' +
+    '  → stage_change to "Interested" / closest equivalent, confidence "high", reason "explicit interest + pricing question".\n' +
+    '- Customer (currently New Lead): "Hello po"\n' +
+    '  → stage_change to "Engaged" / first nurture stage, confidence "medium", reason "first inbound greeting — exit entry stage". NEVER stay on an entry-kind stage after the first inbound.\n' +
+    '- Customer (currently Interested): "Sige, kunin ko na po, paano magbayad?"\n' +
+    '  → stage_change to "Qualified" / "Proposal" / closest forward stage, confidence "high", reason "commit + asks how to pay".\n' +
+    '- Customer (currently Interested): "Ay mahal naman po, may discount po ba?"\n' +
+    '  → stage_change to "Objection" if available, confidence "high", reason "price objection".\n' +
+    '- Customer (currently Interested): "Sorry po, hindi na po ituloy."\n' +
+    '  → stage_change to "Lost", confidence "high", reason "customer changed mind — explicit disengage".'
 
   return (
-    'You are also responsible for classifying the lead\'s pipeline stage' +
-    (hasActionPages ? ' and deciding whether to attach an action page button to your reply' : '') +
-    (hasRecommend ? ' and deciding whether to recommend a specific product' : '') +
-    (hasRecommendProperty ? ' and deciding whether to recommend a specific property listing' : '') +
-    '. Output a single JSON object with this exact shape and NOTHING ELSE:\n' +
+    '## STAGE CLASSIFICATION — PRIMARY TASK\n' +
+    'You are responsible for classifying the lead\'s pipeline stage on every turn. This is the most important structured output in your response. Your job is to keep the lead moving forward through the funnel — when in doubt between moving forward and staying, MOVE FORWARD with lower confidence rather than return null.\n\n' +
+    'Output a single JSON object with this exact shape and NOTHING ELSE:\n' +
     schema +
     '\nABSOLUTELY FORBIDDEN inside `reply` (any of these will be stripped and may produce an empty message): tool-call syntax of any kind, function-call notation, control tokens, role headers, XML-ish tags. NEVER write things like `<|tool_call>...<tool_call|>`, `<tool_call>`, `</tool_call>`, `call:action_page.action_page_id(...)`, `function_call:...`, ```json blocks, or any `<|...|>` token. To trigger an action page you set the structured `action_page` field — never describe the call in prose.\n' +
     '`reply` is what the customer sees — write it in the same persona/rules above. ' +
-    '`stage_change` is null when the lead should stay in the current stage. ' +
-    'Only use stage_ids from the list. Pick the stage whose name AND description best match the customer\'s intent in the latest message + conversation history.\n\n' +
+    'Only use stage_ids from the list below. Pick the stage whose name, description, and enter signals best match the customer\'s intent in the latest message + conversation history.\n\n' +
     hierarchyBlock +
+    '\n\n' +
+    calibrationBlock +
+    '\n\n' +
+    examplesBlock +
     '\n\n' +
     stageList(stages, currentStageId) +
     apSection +
@@ -518,10 +592,16 @@ export function stageList(stages: StageBrief[], currentStageId: string | null): 
   const lines = ordered.map((s) => {
     const cur = s.id === currentStageId ? '  [CURRENT]' : ''
     const desc = (s.description ?? '').trim() || '(no description)'
+    const entry = (s.entry_signals ?? []).filter((x) => !!x?.trim())
+    const exit = (s.exit_signals ?? []).filter((x) => !!x?.trim())
+    const entryLine = entry.length > 0 ? `\n  enter when:\n${entry.map((e) => `    • ${e}`).join('\n')}` : ''
+    const exitLine = exit.length > 0 ? `\n  leave when:\n${exit.map((e) => `    • ${e}`).join('\n')}` : ''
     return (
       `- [${s.position} · ${s.kind}] ${s.name}${cur}\n` +
       `  id: ${s.id}\n` +
-      `  description: ${desc}`
+      `  description: ${desc}` +
+      entryLine +
+      exitLine
     )
   })
   return `Pipeline stages (in order — earlier first):\n${lines.join('\n')}`

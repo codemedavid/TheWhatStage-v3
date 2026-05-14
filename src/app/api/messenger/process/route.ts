@@ -1010,10 +1010,15 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
           fromStageId: currentStageId,
           change: stageChange,
           stages,
+          idempotencySuffix: job.inbound_msg_id,
         })
       }
 
-      // Layer 2: deep re-evaluation every 10 inbound messages. Fire-and-forget.
+      // Layer 2: deep re-evaluation. Fire-and-forget.
+      // Cadence: fire at the 3rd inbound, then every 5 inbound thereafter.
+      // The previous % 10 schedule was too sparse for Filipino SMB Messenger
+      // conversations — many deals close in fewer than 8 messages, so the
+      // deep pass never ran on the relevant traffic.
       if (thread.lead_id && stages.length > 0) {
         const leadId = thread.lead_id
         void (async () => {
@@ -1021,8 +1026,9 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
             const enabled = await isDeepReclassifyEnabled(admin, thread.user_id)
             if (!enabled) return
             const inboundCount = await countInboundMessages(admin, thread.id)
-            if (inboundCount === 0 || inboundCount % 10 !== 0) return
-            const windowIndex = Math.floor(inboundCount / 10)
+            const shouldFire = inboundCount === 3 || (inboundCount > 3 && (inboundCount - 3) % 5 === 0)
+            if (!shouldFire) return
+            const windowIndex = inboundCount
             await runDeepReclassify({
               adminClient: admin,
               leadId,
@@ -1049,6 +1055,7 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
               fromStageId: currentStageId,
               change,
               stages,
+              idempotencySuffix: job.inbound_msg_id,
             })
           }
         } catch (e) {
@@ -1275,7 +1282,7 @@ async function loadStageContext(
 ): Promise<{ stages: StageBrief[]; currentStageId: string | null }> {
   const { data: stagesData } = await admin
     .from('pipeline_stages')
-    .select('id, name, description, position, kind')
+    .select('id, name, description, position, kind, entry_signals, exit_signals')
     .eq('user_id', userId)
     .order('position', { ascending: true })
   const stages = (stagesData ?? []) as StageBrief[]

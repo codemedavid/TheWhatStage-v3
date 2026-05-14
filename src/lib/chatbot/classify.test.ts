@@ -1,6 +1,16 @@
-import { describe, expect, it } from 'vitest'
-import type { StageBrief } from './classify'
-import { sanitizeReply, stageInstruction, stageList } from './classify'
+import { describe, expect, it, vi } from 'vitest'
+import type { StageBrief, StageChange } from './classify'
+import { applyStageChange, sanitizeReply, stageInstruction, stageList } from './classify'
+
+// applyStageChange creates a fresh admin client after a successful move so
+// it can fire `dispatchStageEntered`. The real implementation pulls Supabase
+// env vars; in tests we don't have them, so stub both.
+vi.mock('@/lib/supabase/admin', () => ({
+  createAdminClient: () => ({}),
+}))
+vi.mock('@/lib/workflow/dispatcher', () => ({
+  dispatchStageEntered: vi.fn(async () => undefined),
+}))
 
 const stages: StageBrief[] = [
   { id: 'st_new', name: 'New Lead',    description: 'fresh',    position: 0, kind: 'entry' },
@@ -66,6 +76,158 @@ describe('stageInstruction (hierarchy block)', () => {
     expect(out).toContain('[0 · entry] New Lead')
     // st_q is current — should have [CURRENT]
     expect(out).toMatch(/\[1 · qualifying\] Qualifying\s*\[CURRENT\]/)
+  })
+})
+
+describe('stageList renders entry signals', () => {
+  it('renders entry signals when present so the live classifier can read them', () => {
+    const withSignals: StageBrief[] = [
+      {
+        id: 'st_int',
+        name: 'Interested',
+        description: 'evaluating',
+        position: 1,
+        kind: 'nurture',
+        entry_signals: ['says "interested po"', 'asks magkano'],
+        exit_signals: ['commits to buy'],
+      },
+    ]
+    const out = stageList(withSignals, null)
+    expect(out).toContain('enter when:')
+    expect(out).toContain('says "interested po"')
+    expect(out).toContain('asks magkano')
+    expect(out).toContain('leave when:')
+    expect(out).toContain('commits to buy')
+  })
+
+  it('omits the enter-when block when entry_signals is empty or missing', () => {
+    const out = stageList(stages, null)
+    // Default stages array has no entry_signals → no enter-when block.
+    expect(out).not.toContain('enter when:')
+  })
+})
+
+describe('stageInstruction includes calibration + Tagalog few-shots', () => {
+  it('includes the confidence calibration block', () => {
+    const out = stageInstruction(stages, null, [], null, null)
+    expect(out).toContain('CONFIDENCE CALIBRATION')
+    expect(out).toContain('`low`')
+    expect(out).toContain('`medium`')
+    expect(out).toContain('`high`')
+  })
+
+  it('biases toward forward movement and away from null', () => {
+    const out = stageInstruction(stages, null, [], null, null)
+    expect(out).toMatch(/keep the lead moving forward/i)
+    expect(out).toMatch(/move forward.*rather than.*null/i)
+  })
+
+  it('includes Tagalog/Taglish examples', () => {
+    const out = stageInstruction(stages, null, [], null, null)
+    expect(out).toContain('interested po')
+    expect(out).toContain('magkano')
+    expect(out).toContain('ayaw na')
+  })
+
+  it('flags entry-kind stages as exit-on-first-inbound', () => {
+    const out = stageInstruction(stages, null, [], null, null)
+    expect(out).toMatch(/entry.*exit/i)
+  })
+})
+
+describe('applyStageChange confidence gate', () => {
+  const testStages: StageBrief[] = [
+    { id: 'new',   name: 'New',        description: '', position: 0, kind: 'entry' },
+    { id: 'eng',   name: 'Engaged',    description: '', position: 1, kind: 'nurture' },
+    { id: 'int',   name: 'Interested', description: '', position: 2, kind: 'nurture' },
+    { id: 'qual',  name: 'Qualified',  description: '', position: 3, kind: 'qualifying' },
+    { id: 'obj',   name: 'Objection',  description: '', position: 4, kind: 'objection' as 'nurture' /* kind union */ },
+    { id: 'won',   name: 'Won',        description: '', position: 5, kind: 'won' },
+  ]
+
+  function fakeAdmin(captured: { args: Record<string, unknown> | null }) {
+    return {
+      rpc: vi.fn(async (_name: string, args: Record<string, unknown>) => {
+        captured.args = args
+        return { data: true, error: null }
+      }),
+    } as unknown as Parameters<typeof applyStageChange>[0]
+  }
+
+  it('accepts low confidence for adjacent-forward moves', async () => {
+    const captured = { args: null as Record<string, unknown> | null }
+    const change: StageChange = { to_stage_id: 'eng', confidence: 'low', reason: 'said hello' }
+    const result = await applyStageChange(fakeAdmin(captured), {
+      leadId: 'L', userId: 'U', threadId: 'T', fromStageId: 'new', change, stages: testStages,
+      idempotencySuffix: 'msg1',
+    })
+    expect(result).toBe('L')
+    expect(captured.args?.p_confidence).toBe('low')
+  })
+
+  it('rejects low confidence for skip-ahead moves', async () => {
+    const captured = { args: null as Record<string, unknown> | null }
+    const change: StageChange = { to_stage_id: 'qual', confidence: 'low', reason: 'maybe?' }
+    const result = await applyStageChange(fakeAdmin(captured), {
+      leadId: 'L', userId: 'U', threadId: 'T', fromStageId: 'new', change, stages: testStages,
+      idempotencySuffix: 'msg1',
+    })
+    expect(result).toBeNull()
+    expect(captured.args).toBeNull()
+  })
+
+  it('rejects low confidence into terminal stages', async () => {
+    const captured = { args: null as Record<string, unknown> | null }
+    const change: StageChange = { to_stage_id: 'won', confidence: 'low', reason: 'maybe paid?' }
+    const result = await applyStageChange(fakeAdmin(captured), {
+      leadId: 'L', userId: 'U', threadId: 'T', fromStageId: 'qual', change, stages: testStages,
+      idempotencySuffix: 'msg1',
+    })
+    expect(result).toBeNull()
+  })
+
+  it('accepts low confidence into objection (objection is a side-track)', async () => {
+    const captured = { args: null as Record<string, unknown> | null }
+    const objStages = [
+      ...testStages.slice(0, 4),
+      { ...testStages[4], kind: 'objection' as unknown as StageBrief['kind'] },
+      testStages[5],
+    ]
+    const change: StageChange = { to_stage_id: 'obj', confidence: 'low', reason: 'maybe an objection' }
+    const result = await applyStageChange(fakeAdmin(captured), {
+      leadId: 'L', userId: 'U', threadId: 'T', fromStageId: 'int', change, stages: objStages,
+      idempotencySuffix: 'msg1',
+    })
+    expect(result).toBe('L')
+  })
+
+  it('accepts medium and high for any allowed move', async () => {
+    for (const conf of ['medium', 'high'] as const) {
+      const captured = { args: null as Record<string, unknown> | null }
+      const change: StageChange = { to_stage_id: 'qual', confidence: conf, reason: 'r' }
+      const result = await applyStageChange(fakeAdmin(captured), {
+        leadId: 'L', userId: 'U', threadId: 'T', fromStageId: 'new', change, stages: testStages,
+        idempotencySuffix: 'msg1',
+      })
+      expect(result).toBe('L')
+    }
+  })
+
+  it('includes idempotencySuffix in the idempotency key — different messages = different keys', async () => {
+    const captured1 = { args: null as Record<string, unknown> | null }
+    const captured2 = { args: null as Record<string, unknown> | null }
+    const change: StageChange = { to_stage_id: 'eng', confidence: 'medium', reason: 'r' }
+    await applyStageChange(fakeAdmin(captured1), {
+      leadId: 'L', userId: 'U', threadId: 'T', fromStageId: 'new', change, stages: testStages,
+      idempotencySuffix: 'msgA',
+    })
+    await applyStageChange(fakeAdmin(captured2), {
+      leadId: 'L', userId: 'U', threadId: 'T', fromStageId: 'new', change, stages: testStages,
+      idempotencySuffix: 'msgB',
+    })
+    expect(captured1.args?.p_idempotency_key).toBe('classify:T:L:msgA')
+    expect(captured2.args?.p_idempotency_key).toBe('classify:T:L:msgB')
+    expect(captured1.args?.p_idempotency_key).not.toBe(captured2.args?.p_idempotency_key)
   })
 })
 
