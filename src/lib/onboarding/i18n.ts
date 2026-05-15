@@ -114,6 +114,24 @@ export const dict = {
   'personality.saving':        { tl: 'Sini-generate ng AI…',            en: 'AI is drafting…' },
   'personality.error':         { tl: 'May error. Subukan ulit o i-skip.', en: 'Could not save. Retry or skip.' },
   'personality.error.no_basics': { tl: 'Punan muna ang business basics step.', en: 'Fill in business basics first.' },
+
+  'goal.heading':         { tl: 'Ano ang pangunahing goal mo?', en: "What's your #1 goal right now?" },
+  'goal.subheading':      { tl: 'Gagawa kami ng action page para sa iyo. Pwede mong baguhin maya-maya.', en: "We'll spin up an action page for you. You can change this later." },
+  'goal.kind.form':       { tl: 'Magkolekta ng inquiries',    en: 'Collect inquiries' },
+  'goal.kind.booking':    { tl: 'Mag-book ng appointments',   en: 'Book appointments' },
+  'goal.kind.qualification':{ tl: 'Mag-qualify ng leads',     en: 'Qualify leads' },
+  'goal.kind.sales':      { tl: 'Magbenta ng product / service', en: 'Sell a product or service' },
+  'goal.kind.catalog':    { tl: 'Magbenta ng mga products (online store)', en: 'Sell products online' },
+  'goal.kind.realestate': { tl: 'Mag-showcase ng property',   en: 'Showcase a property' },
+  'goal.kind.form.blurb':       { tl: 'Form para sa quick inquiry — pangalan, contact, message.', en: 'A simple form for name, contact, and a quick message.' },
+  'goal.kind.booking.blurb':    { tl: 'Online calendar para pumili ng slot.', en: 'Online calendar so leads can pick a slot.' },
+  'goal.kind.qualification.blurb': { tl: 'Short quiz para mag-score ng leads.', en: 'Short quiz that scores incoming leads.' },
+  'goal.kind.sales.blurb':      { tl: 'Sales page na may price, features, at form.', en: 'Sales page with price, features, and an inline form.' },
+  'goal.kind.catalog.blurb':    { tl: 'Listing ng mga products na may cart at checkout.', en: 'Product listing with cart and checkout.' },
+  'goal.kind.realestate.blurb': { tl: 'Property listing na may photos at financing.', en: 'Property listing with photos and financing.' },
+  'goal.save':            { tl: 'I-save at gumawa ng page', en: 'Save and create page' },
+  'goal.saving':          { tl: 'Ginagawa…',                  en: 'Creating…' },
+  'goal.error':           { tl: 'May error sa pag-save.',     en: 'Could not save.' },
 } as const
 
 export type DictKey = keyof typeof dict

@@ -12,6 +12,7 @@ import {
   saveBusinessBasicsToState,
   getBusinessBasics,
 } from '@/lib/onboarding/state'
+import { isActionPageKind, KIND_REGISTRY, type ActionPageKind } from '@/lib/action-pages/kinds'
 import { BusinessBasicsSchema } from '@/lib/onboarding/business-basics'
 import { LANG_COOKIE } from '@/lib/onboarding/i18n'
 import { ONBOARDING_STEPS, type OnboardingLang, type OnboardingStep } from '@/lib/onboarding/types'
@@ -330,6 +331,71 @@ export async function savePersonalityAction(
 
   await markStep('personality')
   redirect('/onboarding/goal')
+}
+
+export type GoalStepError = 'invalid_kind' | 'save_failed'
+export type GoalFormState = { error?: GoalStepError }
+
+function uniqueSlug(seed: string): string {
+  const base = seed
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40) || 'page'
+  return `${base}-${Math.random().toString(36).slice(2, 8)}`
+}
+
+export async function saveGoalAction(
+  _prev: GoalFormState | undefined,
+  formData: FormData,
+): Promise<GoalFormState> {
+  const raw = formData.get('kind')
+  if (!isActionPageKind(raw)) return { error: 'invalid_kind' }
+  const kind: ActionPageKind = raw
+
+  const { createClient } = await import('@/lib/supabase/server')
+  const supabase = await createClient()
+  const { data: auth } = await supabase.auth.getUser()
+  if (!auth.user) return { error: 'save_failed' }
+
+  const meta = KIND_REGISTRY[kind]
+  const basics = await getBusinessBasics()
+  const title = basics ? `${basics.name} — ${meta.label}` : meta.label
+  const slug = uniqueSlug(basics?.name ?? meta.label)
+
+  const { data: page, error: insertErr } = await supabase
+    .from('action_pages')
+    .insert({
+      user_id: auth.user.id,
+      kind,
+      slug,
+      title,
+      description: meta.blurb,
+      status: meta.defaultStatusOnCreate,
+      config: meta.defaultConfig,
+      pipeline_rules: meta.defaultPipelineRules,
+      notification_template: { text: meta.defaultNotificationText },
+      bot_send_instructions: meta.defaultBotSendInstructions,
+      cta_label: meta.defaultCtaLabel,
+    })
+    .select('id')
+    .single()
+  if (insertErr || !page) {
+    console.error('[saveGoalAction] insert action_page', insertErr)
+    return { error: 'save_failed' }
+  }
+
+  const { error: upsertErr } = await supabase.from('chatbot_configs').upsert(
+    { user_id: auth.user.id, primary_action_page_id: page.id },
+    { onConflict: 'user_id' },
+  )
+  if (upsertErr) {
+    console.error('[saveGoalAction] upsert chatbot_configs', upsertErr)
+    return { error: 'save_failed' }
+  }
+
+  await markStep('goal')
+  redirect('/onboarding/goal-content')
 }
 
 function escapeHtml(s: string): string {
