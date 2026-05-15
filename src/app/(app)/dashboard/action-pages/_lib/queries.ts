@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { ActionPageKind } from '@/lib/action-pages/kinds'
 import type { PipelineRule } from './schemas'
+import { createAdminClient } from '@/lib/supabase/admin'
 
 export interface ActionPageRow {
   id: string
@@ -166,10 +167,11 @@ export interface PipelineStageOption {
 }
 
 export async function fetchPipelineStages(
-  supabase: SupabaseClient,
+  _supabase: SupabaseClient,
   userId: string,
 ): Promise<PipelineStageOption[]> {
-  const { data, error } = await supabase
+  const admin = createAdminClient()
+  const { data, error } = await admin
     .from('pipeline_stages')
     .select('id, name, kind, position')
     .eq('user_id', userId)

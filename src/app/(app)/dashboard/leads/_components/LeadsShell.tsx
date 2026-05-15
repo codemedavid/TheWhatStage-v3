@@ -46,6 +46,7 @@ export function LeadsShell({ children }: { children: ReactNode }) {
     <div
       data-leads-root
       data-theme={theme}
+      suppressHydrationWarning
       className="min-h-[calc(100vh-3rem)] -mx-8 -my-6 px-8 py-6"
     >
       <ThemeContext.Provider value={{ theme, setTheme }}>
@@ -61,6 +62,7 @@ export function ThemeToggle() {
   return (
     <button
       type="button"
+      suppressHydrationWarning
       aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
       onClick={() => setTheme(isDark ? 'light' : 'dark')}
       className="lead-focus inline-flex h-8 w-8 items-center justify-center rounded-full transition-colors"
@@ -72,12 +74,12 @@ export function ThemeToggle() {
       onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
     >
       {isDark ? (
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <svg suppressHydrationWarning width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
           <circle cx="12" cy="12" r="4" />
           <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
         </svg>
       ) : (
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <svg suppressHydrationWarning width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
           <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z" />
         </svg>
       )}
