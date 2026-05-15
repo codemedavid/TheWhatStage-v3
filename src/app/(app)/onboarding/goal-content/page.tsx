@@ -4,6 +4,11 @@ import { getOnboardingLang } from '@/lib/onboarding/lang'
 import { getPrimaryActionPage } from '@/lib/onboarding/state'
 import { t } from '@/lib/onboarding/i18n'
 import { isActionPageKind } from '@/lib/action-pages/kinds'
+import { CatalogContent } from './CatalogContent'
+import { SalesContent } from './SalesContent'
+import { BookingContent } from './BookingContent'
+import { RealestateContent } from './RealestateContent'
+import { FormFieldsContent } from './FormFieldsContent'
 
 export const dynamic = 'force-dynamic'
 
@@ -28,7 +33,15 @@ export default async function GoalContentPage() {
     <WizardShell lang={lang} step="goal_content">
       <h1 className="text-2xl font-semibold text-zinc-900">{t('goal_content.heading', lang)}</h1>
       <p className="mt-1 text-sm text-zinc-600">{t('goal_content.subheading', lang)}</p>
-      <p className="mt-6 text-sm text-zinc-500">[Placeholder — kind={page.kind}. Per-kind forms follow in next task.]</p>
+      <div className="mt-6">
+        {page.kind === 'catalog' && <CatalogContent lang={lang} pageId={page.id} />}
+        {page.kind === 'sales' && <SalesContent lang={lang} pageId={page.id} config={page.config} />}
+        {page.kind === 'booking' && <BookingContent lang={lang} pageId={page.id} config={page.config} />}
+        {page.kind === 'realestate' && <RealestateContent lang={lang} pageId={page.id} />}
+        {(page.kind === 'form' || page.kind === 'qualification') && (
+          <FormFieldsContent lang={lang} pageId={page.id} kind={page.kind} config={page.config} />
+        )}
+      </div>
     </WizardShell>
   )
 }

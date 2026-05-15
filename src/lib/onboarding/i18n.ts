@@ -139,6 +139,35 @@ export const dict = {
   'goal_content.saving':        { tl: 'Sini-save…',                   en: 'Saving…' },
   'goal_content.error.no_goal': { tl: 'Pumili muna ng goal step.',    en: 'Pick a goal first.' },
   'goal_content.error.save':    { tl: 'May error. Subukan ulit.',     en: 'Could not save. Try again.' },
+
+  'gc.catalog.heading':   { tl: 'Magdagdag ng 1-3 products', en: 'Add 1–3 products' },
+  'gc.catalog.add':       { tl: '+ Magdagdag ng product',   en: '+ Add product' },
+  'gc.product.title_ph':  { tl: 'Pangalan ng product',      en: 'Product name' },
+  'gc.product.price_ph':  { tl: 'Presyo (PHP, optional)',   en: 'Price (PHP, optional)' },
+  'gc.product.summary_ph':{ tl: 'Short na description',     en: 'Short description' },
+  'gc.product.remove':    { tl: 'Tanggalin',                en: 'Remove' },
+
+  'gc.sales.heading':     { tl: 'Mga detalye ng product mo', en: 'Your product details' },
+  'gc.sales.name':        { tl: 'Pangalan ng product',      en: 'Product name' },
+  'gc.sales.headline':    { tl: 'Headline (optional)',      en: 'Headline (optional)' },
+  'gc.sales.description': { tl: 'Description (optional)',   en: 'Description (optional)' },
+  'gc.sales.price':       { tl: 'Presyo (PHP, optional)',   en: 'Price (PHP, optional)' },
+
+  'gc.booking.heading':   { tl: 'I-confirm ang duration', en: 'Confirm appointment duration' },
+  'gc.booking.duration':  { tl: 'Tagal (minutes)',           en: 'Duration (minutes)' },
+  'gc.booking.note':      { tl: 'Default hours: Mon-Fri 9am-5pm. Babaguhin mo ito sa booking editor maya-maya.', en: 'Default hours: Mon-Fri 9am-5pm. You can adjust this in the booking editor later.' },
+
+  'gc.realestate.heading': { tl: 'Magdagdag ng property',   en: 'Add a property' },
+  'gc.realestate.title':   { tl: 'Pamagat / kategorya',     en: 'Title / type' },
+  'gc.realestate.price':   { tl: 'Presyo (PHP, optional)',  en: 'Price (PHP, optional)' },
+  'gc.realestate.location':{ tl: 'Lokasyon',                en: 'Location' },
+
+  'gc.form.heading':         { tl: 'I-confirm ang form fields',         en: 'Confirm form fields' },
+  'gc.form.subheading':      { tl: 'Inisuhestiyon ng AI base sa info mo.', en: 'AI suggested these from your info.' },
+  'gc.qualification.heading':{ tl: 'I-confirm ang mga qualification questions', en: 'Confirm qualifying questions' },
+  'gc.form.add_field':       { tl: '+ Magdagdag ng field',  en: '+ Add field' },
+  'gc.form.label_ph':        { tl: 'Label ng field',        en: 'Field label' },
+  'gc.form.error.generation':{ tl: 'Hindi nag-generate ang AI. Subukan ulit o i-skip.', en: 'AI failed. Retry or skip.' },
 } as const
 
 export type DictKey = keyof typeof dict

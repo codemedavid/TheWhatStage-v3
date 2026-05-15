@@ -20,6 +20,7 @@ import { nextStepRoute } from '@/lib/onboarding/steps'
 import { generateKnowledge, type GeneratedKnowledge } from '@/lib/onboarding/ai/knowledge'
 import { generateFaqs, type GeneratedFaqs } from '@/lib/onboarding/ai/faqs'
 import { generatePersonality, VIBE_PRESETS, type VibePreset } from '@/lib/onboarding/ai/personality'
+import { generateFormFields, type SuggestedBlock } from '@/lib/onboarding/ai/form-fields'
 
 function isStep(value: unknown): value is OnboardingStep {
   return typeof value === 'string' && (ONBOARDING_STEPS as readonly string[]).includes(value)
@@ -604,4 +605,25 @@ export async function saveFormFieldsAction(
   }
   await markStep('goal_content')
   redirect('/onboarding/flow')
+}
+
+export async function generateFormFieldsAction(kind: 'form' | 'qualification'): Promise<
+  | { ok: true; blocks: SuggestedBlock[] }
+  | { ok: false; error: 'no_basics' | 'generation_failed' }
+> {
+  const basics = await getBusinessBasics()
+  if (!basics) return { ok: false, error: 'no_basics' }
+  try {
+    const { createClient } = await import('@/lib/supabase/server')
+    const supabase = await createClient()
+    const { data: auth } = await supabase.auth.getUser()
+    if (!auth.user) return { ok: false, error: 'generation_failed' }
+    const { data: state } = await supabase.from('onboarding_state').select('ui_language').eq('profile_id', auth.user.id).maybeSingle()
+    const lang = state?.ui_language === 'en' ? 'en' : 'tl'
+    const { blocks } = await generateFormFields({ basics, kind, lang })
+    return { ok: true, blocks }
+  } catch (err) {
+    console.error('[generateFormFieldsAction]', err)
+    return { ok: false, error: 'generation_failed' }
+  }
 }
