@@ -4,6 +4,7 @@ import DashboardClient, {
   type DashStats,
   type RecentSubmission,
 } from './_components/DashboardClient'
+import { LaunchChecklist } from './_components/LaunchChecklist'
 
 export default async function DashboardPage() {
   const session = await getSession()
@@ -114,13 +115,18 @@ export default async function DashboardPage() {
   }))
 
   return (
-    <DashboardClient
-      userName={userName}
-      hasPersonality={hasPersonality}
-      hasActiveActionPages={hasActiveActionPages}
-      hasFacebook={hasFacebook}
-      stats={stats}
-      recentSubmissions={recentSubmissions}
-    />
+    <>
+      <div className="mx-auto max-w-[1200px] px-4 pt-4">
+        <LaunchChecklist />
+      </div>
+      <DashboardClient
+        userName={userName}
+        hasPersonality={hasPersonality}
+        hasActiveActionPages={hasActiveActionPages}
+        hasFacebook={hasFacebook}
+        stats={stats}
+        recentSubmissions={recentSubmissions}
+      />
+    </>
   )
 }
