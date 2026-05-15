@@ -65,6 +65,21 @@ export const dict = {
   'business.tone.calm':         { tl: 'Calm',         en: 'Calm' },
   'business.save':          { tl: 'I-save at magpatuloy', en: 'Save and continue' },
   'business.saving':        { tl: 'Sini-save…',          en: 'Saving…' },
+
+  'knowledge.heading':         { tl: 'Knowledge base ng business mo', en: 'Your business knowledge base' },
+  'knowledge.subheading':      { tl: 'Sinulat ng AI based sa info mo. Pwede mong i-edit bago i-save.', en: 'AI drafted these from your answers. Edit anything before saving.' },
+  'knowledge.section_title_ph':{ tl: 'Pamagat ng section',           en: 'Section title' },
+  'knowledge.section_body_ph': { tl: 'Detalye…',                      en: 'Details…' },
+  'knowledge.remove':          { tl: 'Tanggalin',                     en: 'Remove' },
+  'knowledge.add_section':     { tl: '+ Magdagdag ng section',        en: '+ Add section' },
+  'knowledge.save':            { tl: 'I-save ang knowledge',          en: 'Save knowledge' },
+  'knowledge.saving':          { tl: 'Sini-save…',                    en: 'Saving…' },
+  'knowledge.regenerate':      { tl: 'Mag-generate ulit',             en: 'Regenerate' },
+  'knowledge.error':           { tl: 'May error sa pag-save. Subukan ulit.', en: 'Could not save. Try again.' },
+  'knowledge.error.no_basics': { tl: 'Punan muna ang business basics step.', en: 'Fill in business basics first.' },
+  'knowledge.error.generation':{ tl: 'Hindi nag-generate ang AI. Subukan ulit o i-skip.', en: "AI couldn't generate. Retry or skip." },
+  'knowledge.generating':      { tl: 'Sini-sulat ng AI…',             en: 'AI is drafting…' },
+  'knowledge.retry':           { tl: 'Subukan ulit',                  en: 'Retry' },
 } as const
 
 export type DictKey = keyof typeof dict
