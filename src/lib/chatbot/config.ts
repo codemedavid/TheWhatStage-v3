@@ -51,7 +51,7 @@ export const DEFAULT_CHATBOT_CONFIG: ChatbotConfig = {
   ...DEFAULT_CHATBOT_PERSONA,
   temperature: 0.4,
   maxContext: 12,
-  autoClassifyEnabled: false,
+  autoClassifyEnabled: true,
   activeTemplateId: null,
   personalitySource: 'custom',
   recommendationRules: DEFAULT_RECOMMENDATION_RULES,
