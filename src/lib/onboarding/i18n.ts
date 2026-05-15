@@ -80,6 +80,22 @@ export const dict = {
   'knowledge.error.generation':{ tl: 'Hindi nag-generate ang AI. Subukan ulit o i-skip.', en: "AI couldn't generate. Retry or skip." },
   'knowledge.generating':      { tl: 'Sini-sulat ng AI…',             en: 'AI is drafting…' },
   'knowledge.retry':           { tl: 'Subukan ulit',                  en: 'Retry' },
+
+  'faqs.heading':         { tl: 'Mga FAQ ng business mo', en: 'Your FAQs' },
+  'faqs.subheading':      { tl: 'Pinili ng AI base sa info mo. Alisin ang ayaw mo at magdagdag ng sarili.', en: "AI picked these from your info. Uncheck what you don't want and add your own." },
+  'faqs.suggestion_label':{ tl: 'Mga suhestiyon',         en: 'AI suggestions' },
+  'faqs.custom_label':    { tl: 'Idagdag mo pa',          en: 'Add your own' },
+  'faqs.add':             { tl: '+ Magdagdag ng FAQ',     en: '+ Add FAQ' },
+  'faqs.question_ph':     { tl: 'Tanong',                 en: 'Question' },
+  'faqs.answer_ph':       { tl: 'Sagot',                  en: 'Answer' },
+  'faqs.remove':          { tl: 'Tanggalin',              en: 'Remove' },
+  'faqs.save':            { tl: 'I-save ang mga FAQ',     en: 'Save FAQs' },
+  'faqs.saving':          { tl: 'Sini-save…',             en: 'Saving…' },
+  'faqs.regenerate':      { tl: 'Mag-generate ulit',      en: 'Regenerate' },
+  'faqs.generating':      { tl: 'Sini-sulat ng AI…',      en: 'AI is drafting…' },
+  'faqs.error':           { tl: 'May error. Subukan ulit.', en: 'Could not save. Try again.' },
+  'faqs.error.no_basics': { tl: 'Punan muna ang business basics step.', en: 'Fill in business basics first.' },
+  'faqs.error.generation':{ tl: 'Hindi nag-generate ang AI. Subukan ulit o i-skip.', en: "AI couldn't generate. Retry or skip." },
 } as const
 
 export type DictKey = keyof typeof dict
