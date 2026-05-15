@@ -168,6 +168,21 @@ export const dict = {
   'gc.form.add_field':       { tl: '+ Magdagdag ng field',  en: '+ Add field' },
   'gc.form.label_ph':        { tl: 'Label ng field',        en: 'Field label' },
   'gc.form.error.generation':{ tl: 'Hindi nag-generate ang AI. Subukan ulit o i-skip.', en: 'AI failed. Retry or skip.' },
+
+  'flow.heading':         { tl: 'Daloy ng usapan',         en: 'Conversation flow' },
+  'flow.subheading':      { tl: 'I-describe sa simpleng salita kung paano dapat mag-usap ang bot mo. Gagawa ng AI ng instructions + rules.', en: 'Describe in plain words how your bot should flow with customers. AI turns this into send-instructions + rules.' },
+  'flow.description.label': { tl: 'Halimbawa, "Tinatanong nila ang presyo, sinasagot ko, tinatanong ko kung gusto mag-book."', en: 'e.g. "They ask about price, I answer, then I ask if they want to book."' },
+  'flow.description.ph':  { tl: 'Sulatin mo dito…',          en: 'Type here…' },
+  'flow.generate':        { tl: 'Mag-generate ng instructions', en: 'Generate instructions' },
+  'flow.generating':      { tl: 'Sini-generate ng AI…',      en: 'AI is drafting…' },
+  'flow.preview.bot_instructions': { tl: 'Kailan ipapadala ang action page', en: 'When to send the action page' },
+  'flow.preview.rules':            { tl: 'Recommendation rules',           en: 'Recommendation rules' },
+  'flow.preview.slots':            { tl: 'Slots na kailangang confirm-in', en: 'Slots to confirm first' },
+  'flow.save':            { tl: 'I-save at tapusin',         en: 'Save and finish' },
+  'flow.saving':          { tl: 'Sini-save…',                 en: 'Saving…' },
+  'flow.error.no_goal':   { tl: 'Pumili muna ng goal.',       en: 'Pick a goal first.' },
+  'flow.error.generation':{ tl: 'Hindi nag-generate ang AI. Subukan ulit o i-skip.', en: 'AI failed. Retry or skip.' },
+  'flow.error.save':      { tl: 'May error sa pag-save.',     en: 'Could not save.' },
 } as const
 
 export type DictKey = keyof typeof dict

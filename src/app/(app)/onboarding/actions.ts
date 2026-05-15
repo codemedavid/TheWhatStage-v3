@@ -21,6 +21,8 @@ import { generateKnowledge, type GeneratedKnowledge } from '@/lib/onboarding/ai/
 import { generateFaqs, type GeneratedFaqs } from '@/lib/onboarding/ai/faqs'
 import { generatePersonality, VIBE_PRESETS, type VibePreset } from '@/lib/onboarding/ai/personality'
 import { generateFormFields, type SuggestedBlock } from '@/lib/onboarding/ai/form-fields'
+import { generateBotInstructions, type GeneratedBotInstructions } from '@/lib/onboarding/ai/bot-instructions'
+import { getPrimaryActionPage } from '@/lib/onboarding/state'
 
 function isStep(value: unknown): value is OnboardingStep {
   return typeof value === 'string' && (ONBOARDING_STEPS as readonly string[]).includes(value)
@@ -626,4 +628,124 @@ export async function generateFormFieldsAction(kind: 'form' | 'qualification'): 
     console.error('[generateFormFieldsAction]', err)
     return { ok: false, error: 'generation_failed' }
   }
+}
+
+const FlowPayloadSchema = z.object({
+  flow_description: z.string().trim().min(20).max(2000),
+})
+
+export type FlowStepError = 'no_goal' | 'no_basics' | 'generation_failed' | 'save_failed'
+
+export async function generateFlowAction(
+  formData: FormData,
+): Promise<
+  | { ok: true; data: GeneratedBotInstructions; pageId: string }
+  | { ok: false; error: FlowStepError }
+> {
+  const parsed = FlowPayloadSchema.safeParse({ flow_description: formData.get('flow_description') })
+  if (!parsed.success) return { ok: false, error: 'save_failed' }
+
+  const basics = await getBusinessBasics()
+  if (!basics) return { ok: false, error: 'no_basics' }
+  const page = await getPrimaryActionPage()
+  if (!page) return { ok: false, error: 'no_goal' }
+
+  const { createClient } = await import('@/lib/supabase/server')
+  const supabase = await createClient()
+  const { data: auth } = await supabase.auth.getUser()
+  if (!auth.user) return { ok: false, error: 'generation_failed' }
+
+  const { data: state } = await supabase.from('onboarding_state').select('ui_language').eq('profile_id', auth.user.id).maybeSingle()
+  const lang = state?.ui_language === 'en' ? 'en' : 'tl'
+
+  await supabase.from('onboarding_state').update({ flow_description: parsed.data.flow_description }).eq('profile_id', auth.user.id)
+
+  const cfg = (page.config as Record<string, unknown> | null) ?? {}
+  const cta = cfg.cta as { primary_label?: string } | undefined
+  const ctaLabel = cta?.primary_label ?? page.title
+
+  try {
+    const data = await generateBotInstructions({
+      basics,
+      goal: page.kind as ActionPageKind,
+      action_page: { title: page.title, cta_label: ctaLabel },
+      flow_description: parsed.data.flow_description,
+      lang,
+    })
+    return { ok: true, data, pageId: page.id }
+  } catch (err) {
+    console.error('[generateFlowAction]', err)
+    return { ok: false, error: 'generation_failed' }
+  }
+}
+
+const SaveFlowSchema = z.object({
+  pageId: z.string().uuid(),
+  bot_send_instructions: z.string().trim().min(10).max(2000),
+  recommendation_rules: z.string().trim().min(10).max(2000),
+  required_slots: z.array(z.string().trim().min(1).max(60)).max(10),
+  confidence_threshold: z.number().min(0).max(1),
+})
+
+export async function saveFlowAction(
+  _prev: { error?: FlowStepError } | undefined,
+  formData: FormData,
+): Promise<{ error?: FlowStepError }> {
+  const slotsRaw = formData.get('required_slots_json')
+  let slots: string[] = []
+  try { slots = JSON.parse(String(slotsRaw ?? '[]')) } catch { /* keep empty */ }
+
+  const parsed = SaveFlowSchema.safeParse({
+    pageId: formData.get('page_id'),
+    bot_send_instructions: formData.get('bot_send_instructions'),
+    recommendation_rules: formData.get('recommendation_rules'),
+    required_slots: slots,
+    confidence_threshold: Number(formData.get('confidence_threshold') ?? 0.55),
+  })
+  if (!parsed.success) return { error: 'save_failed' }
+
+  const { createClient } = await import('@/lib/supabase/server')
+  const supabase = await createClient()
+  const { data: auth } = await supabase.auth.getUser()
+  if (!auth.user) return { error: 'save_failed' }
+
+  const { error: pageErr } = await supabase
+    .from('action_pages')
+    .update({ bot_send_instructions: parsed.data.bot_send_instructions })
+    .eq('id', parsed.data.pageId)
+    .eq('user_id', auth.user.id)
+  if (pageErr) {
+    console.error('[saveFlowAction] action_pages', pageErr)
+    return { error: 'save_failed' }
+  }
+
+  const { data: cfgRow } = await supabase
+    .from('chatbot_configs')
+    .select('recommendation_rules')
+    .eq('user_id', auth.user.id)
+    .maybeSingle()
+  const existing = (cfgRow?.recommendation_rules as Record<string, unknown> | null) ?? {}
+  const per = (existing.perActionPage as Record<string, unknown> | undefined) ?? {}
+  const next = {
+    defaultConfidenceThreshold: (existing.defaultConfidenceThreshold as number | undefined) ?? 0.55,
+    perActionPage: {
+      ...per,
+      [parsed.data.pageId]: {
+        rules: parsed.data.recommendation_rules,
+        requiredSlots: parsed.data.required_slots,
+        confidenceThreshold: parsed.data.confidence_threshold,
+      },
+    },
+  }
+
+  const { error: cfgErr } = await supabase
+    .from('chatbot_configs')
+    .upsert({ user_id: auth.user.id, recommendation_rules: next }, { onConflict: 'user_id' })
+  if (cfgErr) {
+    console.error('[saveFlowAction] chatbot_configs', cfgErr)
+    return { error: 'save_failed' }
+  }
+
+  await markStep('flow')
+  redirect('/onboarding/done')
 }
