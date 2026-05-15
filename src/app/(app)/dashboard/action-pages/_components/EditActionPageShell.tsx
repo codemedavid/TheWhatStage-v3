@@ -14,6 +14,9 @@ import { PipelineRulesEditor } from './PipelineRulesEditor'
 import { CatalogShell } from '../_kinds/catalog/CatalogShell'
 import { RealestateShell } from '../_kinds/realestate/RealestateShell'
 import { TriggerGuard } from './TriggerGuard'
+import { TriggerField } from './TriggerField'
+import { DraftSaveModal } from './DraftSaveModal'
+import { useDraftGate } from './useDraftGate'
 
 type StepId = 'general' | 'configuration' | 'workflow' | 'share'
 
@@ -122,6 +125,7 @@ function EditActionPageShellInner({
   )
   const [showPreview, setShowPreview] = useState(true)
   const formRef = useRef<HTMLFormElement | null>(null)
+  const draftGate = useDraftGate({ status, setStatus })
 
   const accent = (liveConfig as { theme?: { accent_color?: string } })?.theme
     ?.accent_color
@@ -324,11 +328,10 @@ function EditActionPageShellInner({
                       label="When should the bot send this?"
                       help="Plain-language guidance. Bot picks at most one action page per reply, so be specific."
                     >
-                      <textarea
-                        name="bot_send_instructions"
-                        defaultValue={page.bot_send_instructions ?? ''}
+                      <TriggerField
+                        initial={page.bot_send_instructions ?? ''}
+                        defaultText={meta.defaultBotSendInstructions}
                         rows={4}
-                        maxLength={2000}
                         placeholder="Send when the lead asks about pricing, wants a quote, or asks to book a demo."
                         className="ap-textarea"
                       />
@@ -393,7 +396,10 @@ function EditActionPageShellInner({
                   <Chevron dir="left" />
                   {prevStep ? prevStep.label : 'Back'}
                 </button>
-                <SaveButton onSaved={() => markCompleted(step)} />
+                <SaveButton
+                  onSaved={() => markCompleted(step)}
+                  onClick={(e) => draftGate.requestSave(e.currentTarget.form)}
+                />
                 {nextStep && (
                   <button
                     type="button"
@@ -408,6 +414,8 @@ function EditActionPageShellInner({
                 )}
               </div>
             </form>
+
+            <DraftSaveModal {...draftGate.modalProps} />
 
             <DangerZone id={page.id} />
           </div>
@@ -667,14 +675,25 @@ function CtaField({ defaultValue }: { defaultValue: string }) {
   )
 }
 
-function SaveButton({ onSaved }: { onSaved?: () => void }) {
+function SaveButton({
+  onSaved,
+  onClick,
+}: {
+  onSaved?: () => void
+  onClick: (e: React.MouseEvent<HTMLButtonElement>) => void
+}) {
   const { pending } = useFormStatus()
-  // useFormStatus reflects pending state from the surrounding <form>; we mark the step completed when click fires.
+  // type=button — the draft gate decides whether to submit immediately or
+  // open the "Make Live or Keep Draft" modal first. useFormStatus still
+  // reflects pending state once the gate fires requestSubmit().
   return (
     <button
-      type="submit"
+      type="button"
       disabled={pending}
-      onClick={() => onSaved?.()}
+      onClick={(e) => {
+        onSaved?.()
+        onClick(e)
+      }}
       className="ap-btn ap-btn-primary"
     >
       {pending ? 'Saving…' : 'Save changes'}

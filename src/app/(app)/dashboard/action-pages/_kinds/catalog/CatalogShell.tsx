@@ -8,6 +8,10 @@ import type { ActionPageRow } from '../../_lib/queries'
 import { CopyField } from '../../_components/CopyField'
 import { PipelineRulesEditor } from '../../_components/PipelineRulesEditor'
 import { TriggerGuard } from '../../_components/TriggerGuard'
+import { TriggerField } from '../../_components/TriggerField'
+import { DraftSaveModal } from '../../_components/DraftSaveModal'
+import { useDraftGate } from '../../_components/useDraftGate'
+import { KIND_REGISTRY } from '@/lib/action-pages/kinds'
 import CatalogEditor from './Editor'
 
 export function CatalogShell({
@@ -33,6 +37,7 @@ export function CatalogShell({
   const [status, setStatus] = useState<ActionPageRow['status']>(page.status)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsTab, setSettingsTab] = useState<'general' | 'workflow' | 'share'>('general')
+  const draftGate = useDraftGate({ status, setStatus })
 
   useEffect(() => {
     if (settingsOpen) {
@@ -124,7 +129,9 @@ export function CatalogShell({
               >
                 <GearIcon /> Settings
               </button>
-              <SaveButton />
+              <SaveButton
+                onClick={(e) => draftGate.requestSave(e.currentTarget.form)}
+              />
             </div>
           </div>
         </header>
@@ -201,6 +208,7 @@ export function CatalogShell({
           onTabChange={setSettingsTab}
         />
       </form>
+      <DraftSaveModal {...draftGate.modalProps} />
     </div>
   )
 }
@@ -494,11 +502,10 @@ function WorkflowPanel({
             />
           </Field>
           <Field label="Trigger">
-            <textarea
-              name="bot_send_instructions"
-              defaultValue={page.bot_send_instructions ?? ''}
+            <TriggerField
+              initial={page.bot_send_instructions ?? ''}
+              defaultText={KIND_REGISTRY[page.kind].defaultBotSendInstructions}
               rows={4}
-              maxLength={2000}
               placeholder="Send when the lead asks about products, prices, or wants to order."
               className="w-full resize-y rounded-md border border-zinc-200 bg-white px-3 py-2 text-[13px] text-zinc-900 placeholder:text-zinc-400 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
             />
@@ -572,11 +579,16 @@ function Field({
   )
 }
 
-function SaveButton() {
+function SaveButton({
+  onClick,
+}: {
+  onClick: (e: React.MouseEvent<HTMLButtonElement>) => void
+}) {
   const { pending } = useFormStatus()
   return (
     <button
-      type="submit"
+      type="button"
+      onClick={onClick}
       disabled={pending}
       className="inline-flex items-center gap-1.5 rounded-md bg-emerald-600 px-3 py-1.5 text-[12.5px] font-semibold text-white shadow-sm transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
     >

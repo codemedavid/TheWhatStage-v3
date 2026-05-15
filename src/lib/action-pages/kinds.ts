@@ -20,6 +20,10 @@ export interface KindMeta {
   defaultCtaLabel: string
   /** Default `notification_template.text` — Messenger echo sent back after a successful submission. */
   defaultNotificationText: string
+  /** Default `bot_send_instructions` — kind-aware "send when" guidance pre-filled on create. */
+  defaultBotSendInstructions: string
+  /** Default `status` on create. Sales pages stay `'draft'` until product fields are filled. */
+  defaultStatusOnCreate: 'draft' | 'published'
   /**
    * When true, the action-page editor renders the booking follow-up
    * touchpoints section. Currently only booking; realestate joins in Phase 4.
@@ -63,6 +67,9 @@ export const KIND_REGISTRY: Record<ActionPageKind, KindMeta> = {
     defaultCtaLabel: 'Open form',
     defaultNotificationText:
       "Thanks! We got your details and will be in touch shortly.",
+    defaultBotSendInstructions:
+      "Send when the customer agrees to share their details, asks how to sign up, asks to be added to the list / contacted, or says things like 'pa-fill out', 'saan po mag-register', 'paano sumali'. If they've expressed interest but haven't said yes to sharing info yet, confirm with one short question first.",
+    defaultStatusOnCreate: 'published',
   },
   booking: {
     id: 'booking',
@@ -117,6 +124,9 @@ export const KIND_REGISTRY: Record<ActionPageKind, KindMeta> = {
     supportsFollowups: true,
     defaultNotificationText:
       "You're booked! We'll send a reminder before your appointment.",
+    defaultBotSendInstructions:
+      "Send when the customer asks to book, schedule, reserve, or set an appointment, asks about your availability ('kelan po available', 'anong oras', 'pwede ba bukas'), or agrees to set a time after the offer has been discussed. Don't send on a cold first inbound — make sure they've shown interest in meeting first.",
+    defaultStatusOnCreate: 'published',
   },
   qualification: {
     id: 'qualification',
@@ -164,6 +174,9 @@ export const KIND_REGISTRY: Record<ActionPageKind, KindMeta> = {
     defaultCtaLabel: 'Start qualification',
     defaultNotificationText:
       "Thanks for answering! We'll review your responses and follow up shortly.",
+    defaultBotSendInstructions:
+      "Send after the customer has shown interest in the offer but before pricing or booking, when you still need to confirm fit (decision maker, budget, timeline, team size, use case). Don't send on the very first inbound — collect at least one signal of interest first, then use this to qualify them.",
+    defaultStatusOnCreate: 'published',
   },
   sales: {
     id: 'sales',
@@ -218,11 +231,16 @@ export const KIND_REGISTRY: Record<ActionPageKind, KindMeta> = {
     },
     defaultPipelineRules: [
       { outcome: 'submitted', reason: 'Lead submitted via sales page' },
-      { outcome: 'checked_out', reason: 'Sales page checkout' },
     ],
     defaultCtaLabel: 'View offer',
     defaultNotificationText:
       "Thanks for your interest! We'll follow up with the next steps shortly.",
+    defaultBotSendInstructions:
+      "Send when the customer asks what we offer, asks for details, features, inclusions, or pricing of the offer, asks 'paano' / 'how does it work', asks to see the package, or says they want to try it. If they haven't shown any interest yet, qualify with one short question (what they're looking for, their use case) before sending.",
+    // Sales pages render awkwardly with empty product fields, so keep them as
+    // drafts on create. The "Make Live or Keep Draft" modal at save time still
+    // nudges users to publish once they've filled the page in.
+    defaultStatusOnCreate: 'draft',
   },
   catalog: {
     id: 'catalog',
@@ -239,6 +257,9 @@ export const KIND_REGISTRY: Record<ActionPageKind, KindMeta> = {
     defaultCtaLabel: 'Browse catalog',
     defaultNotificationText:
       "Thanks for your order! We'll confirm the details on Messenger shortly.",
+    defaultBotSendInstructions:
+      "Send when the customer asks about a product, asks for the price, asks what we sell, says they're looking for an item, asks about availability or stock, asks for recommendations, or shows buying intent ('pabili po', 'magkano', 'meron ba kayo…', 'do you have…', 'pwede pa-quote', 'patingin ng items'). If they haven't said what they need yet, ask one short clarifying question first.",
+    defaultStatusOnCreate: 'published',
   },
   realestate: {
     id: 'realestate',
@@ -290,6 +311,9 @@ export const KIND_REGISTRY: Record<ActionPageKind, KindMeta> = {
     defaultCtaLabel: 'View property',
     defaultNotificationText:
       "Thanks for your inquiry! We'll reach out about this property shortly.",
+    defaultBotSendInstructions:
+      "Send when the customer asks about a property, asks for the price, specs, location, financing, or floor area, asks 'meron ba kayong [type/location]', says they want to view a unit, or expresses interest in a specific area or property type. If they haven't given a location, budget, or property type yet, ask one of those first.",
+    defaultStatusOnCreate: 'published',
   },
 }
 

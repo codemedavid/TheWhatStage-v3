@@ -51,7 +51,7 @@ export async function createActionPage(formData: FormData): Promise<void> {
       title: parsed.data.title,
       description: parsed.data.description ?? null,
       slug,
-      status: 'draft',
+      status: meta.defaultStatusOnCreate,
       config: meta.defaultConfig,
       pipeline_rules: meta.defaultPipelineRules.map((r) => ({
         outcome: r.outcome,
@@ -60,6 +60,7 @@ export async function createActionPage(formData: FormData): Promise<void> {
       })),
       cta_label: meta.defaultCtaLabel,
       notification_template: { text: meta.defaultNotificationText },
+      bot_send_instructions: meta.defaultBotSendInstructions,
     })
     .select('id')
     .single<{ id: string }>()
