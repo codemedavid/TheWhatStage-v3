@@ -406,3 +406,202 @@ function escapeHtml(s: string): string {
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&#39;')
 }
+
+const SaveCatalogProductsSchema = z.object({
+  products: z
+    .array(
+      z.object({
+        title: z.string().trim().min(1).max(160),
+        price_amount: z.number().nonnegative().nullable(),
+        summary: z.string().trim().max(280).optional(),
+      }),
+    )
+    .max(5),
+})
+
+export async function saveCatalogProductsAction(
+  _prev: { error?: 'save_failed' } | undefined,
+  formData: FormData,
+): Promise<{ error?: 'save_failed' }> {
+  const raw = formData.get('products_json')
+  let parsed: unknown
+  try { parsed = JSON.parse(String(raw ?? '[]')) } catch { return { error: 'save_failed' } }
+  const result = SaveCatalogProductsSchema.safeParse({ products: parsed })
+  if (!result.success) return { error: 'save_failed' }
+
+  const { createClient } = await import('@/lib/supabase/server')
+  const supabase = await createClient()
+  const { data: auth } = await supabase.auth.getUser()
+  if (!auth.user) return { error: 'save_failed' }
+
+  if (result.data.products.length > 0) {
+    const rows = result.data.products.map((p) => ({
+      user_id: auth.user!.id,
+      kind: 'product' as const,
+      status: 'published' as const,
+      title: p.title,
+      slug: `${p.title.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,40) || 'item'}-${Math.random().toString(36).slice(2,7)}`,
+      summary: p.summary ?? null,
+      price_amount: p.price_amount,
+      currency: 'PHP',
+      pricing_model: p.price_amount == null ? 'quote' as const : 'fixed' as const,
+    }))
+    const { error } = await supabase.from('business_items').insert(rows)
+    if (error) {
+      console.error('[saveCatalogProductsAction]', error)
+      return { error: 'save_failed' }
+    }
+  }
+
+  await markStep('goal_content')
+  redirect('/onboarding/flow')
+}
+
+const SaveSalesSchema = z.object({
+  pageId: z.string().uuid(),
+  name: z.string().trim().min(1).max(160),
+  headline: z.string().trim().max(240).optional(),
+  description: z.string().trim().max(4000).optional(),
+  price_amount: z.number().nonnegative().nullable(),
+})
+
+export async function saveSalesContentAction(
+  _prev: { error?: 'save_failed' } | undefined,
+  formData: FormData,
+): Promise<{ error?: 'save_failed' }> {
+  const parsed = SaveSalesSchema.safeParse({
+    pageId: formData.get('page_id'),
+    name: formData.get('name'),
+    headline: formData.get('headline') || undefined,
+    description: formData.get('description') || undefined,
+    price_amount: formData.get('price_amount') ? Number(formData.get('price_amount')) : null,
+  })
+  if (!parsed.success) return { error: 'save_failed' }
+
+  const { createClient } = await import('@/lib/supabase/server')
+  const supabase = await createClient()
+  const { data: page } = await supabase.from('action_pages').select('config').eq('id', parsed.data.pageId).maybeSingle()
+  if (!page) return { error: 'save_failed' }
+  const config = (page.config as Record<string, unknown>) ?? {}
+  const product = { ...(config.product as object ?? {}), name: parsed.data.name, headline: parsed.data.headline ?? '', description: parsed.data.description ?? '' }
+  const price = { ...(config.price as object ?? {}), amount: parsed.data.price_amount }
+  const newConfig = { ...config, product, price }
+
+  const { error } = await supabase.from('action_pages').update({ config: newConfig, status: 'published' }).eq('id', parsed.data.pageId)
+  if (error) {
+    console.error('[saveSalesContentAction]', error)
+    return { error: 'save_failed' }
+  }
+  await markStep('goal_content')
+  redirect('/onboarding/flow')
+}
+
+const SaveBookingSchema = z.object({
+  pageId: z.string().uuid(),
+  duration_min: z.coerce.number().int().min(5).max(480),
+})
+
+export async function saveBookingContentAction(
+  _prev: { error?: 'save_failed' } | undefined,
+  formData: FormData,
+): Promise<{ error?: 'save_failed' }> {
+  const parsed = SaveBookingSchema.safeParse({
+    pageId: formData.get('page_id'),
+    duration_min: formData.get('duration_min'),
+  })
+  if (!parsed.success) return { error: 'save_failed' }
+
+  const { createClient } = await import('@/lib/supabase/server')
+  const supabase = await createClient()
+  const { data: page } = await supabase.from('action_pages').select('config').eq('id', parsed.data.pageId).maybeSingle()
+  if (!page) return { error: 'save_failed' }
+  const config = (page.config as Record<string, unknown>) ?? {}
+  const appointment = { ...(config.appointment as object ?? {}), duration_min: parsed.data.duration_min }
+  const newConfig = { ...config, appointment }
+
+  const { error } = await supabase.from('action_pages').update({ config: newConfig }).eq('id', parsed.data.pageId)
+  if (error) {
+    console.error('[saveBookingContentAction]', error)
+    return { error: 'save_failed' }
+  }
+  await markStep('goal_content')
+  redirect('/onboarding/flow')
+}
+
+const SaveRealestateSchema = z.object({
+  title: z.string().trim().min(1).max(160),
+  price_amount: z.number().nonnegative().nullable(),
+  location: z.string().trim().max(280).optional(),
+})
+
+export async function saveRealestatePropertyAction(
+  _prev: { error?: 'save_failed' } | undefined,
+  formData: FormData,
+): Promise<{ error?: 'save_failed' }> {
+  const parsed = SaveRealestateSchema.safeParse({
+    title: formData.get('title'),
+    price_amount: formData.get('price_amount') ? Number(formData.get('price_amount')) : null,
+    location: formData.get('location') || undefined,
+  })
+  if (!parsed.success) return { error: 'save_failed' }
+
+  const { createClient } = await import('@/lib/supabase/server')
+  const supabase = await createClient()
+  const { data: auth } = await supabase.auth.getUser()
+  if (!auth.user) return { error: 'save_failed' }
+
+  const slug = `${parsed.data.title.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,40) || 'property'}-${Math.random().toString(36).slice(2,7)}`
+
+  const { error } = await supabase.from('business_items').insert({
+    user_id: auth.user.id,
+    kind: 'property' as const,
+    status: 'published' as const,
+    title: parsed.data.title,
+    slug,
+    summary: parsed.data.location ?? null,
+    price_amount: parsed.data.price_amount,
+    currency: 'PHP',
+    pricing_model: parsed.data.price_amount == null ? 'quote' as const : 'fixed' as const,
+  })
+  if (error) {
+    console.error('[saveRealestatePropertyAction]', error)
+    return { error: 'save_failed' }
+  }
+  await markStep('goal_content')
+  redirect('/onboarding/flow')
+}
+
+const SaveFormFieldsSchema = z.object({
+  pageId: z.string().uuid(),
+  blocks_json: z.string(),
+})
+
+export async function saveFormFieldsAction(
+  _prev: { error?: 'save_failed' } | undefined,
+  formData: FormData,
+): Promise<{ error?: 'save_failed' }> {
+  const parsed = SaveFormFieldsSchema.safeParse({
+    pageId: formData.get('page_id'),
+    blocks_json: formData.get('blocks_json'),
+  })
+  if (!parsed.success) return { error: 'save_failed' }
+
+  let blocks: unknown
+  try { blocks = JSON.parse(parsed.data.blocks_json) } catch { return { error: 'save_failed' } }
+  if (!Array.isArray(blocks)) return { error: 'save_failed' }
+
+  const { createClient } = await import('@/lib/supabase/server')
+  const supabase = await createClient()
+  const { data: page } = await supabase.from('action_pages').select('config').eq('id', parsed.data.pageId).maybeSingle()
+  if (!page) return { error: 'save_failed' }
+  const config = (page.config as Record<string, unknown>) ?? {}
+  const newConfig = { ...config, blocks }
+
+  const { error } = await supabase.from('action_pages').update({ config: newConfig }).eq('id', parsed.data.pageId)
+  if (error) {
+    console.error('[saveFormFieldsAction]', error)
+    return { error: 'save_failed' }
+  }
+  await markStep('goal_content')
+  redirect('/onboarding/flow')
+}

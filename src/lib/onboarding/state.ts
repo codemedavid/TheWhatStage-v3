@@ -171,3 +171,29 @@ export async function getBusinessBasics(): Promise<BusinessBasics | null> {
   const r = BusinessBasicsSchema.safeParse(state.business_basics)
   return r.success ? r.data : null
 }
+
+export interface PrimaryActionPageBrief {
+  id: string
+  kind: string
+  title: string
+  config: unknown
+}
+
+export async function getPrimaryActionPage(): Promise<PrimaryActionPageBrief | null> {
+  const supabase = await createClient()
+  const { data: auth } = await supabase.auth.getUser()
+  if (!auth.user) return null
+  const { data: cfg } = await supabase
+    .from('chatbot_configs')
+    .select('primary_action_page_id')
+    .eq('user_id', auth.user.id)
+    .maybeSingle()
+  if (!cfg?.primary_action_page_id) return null
+  const { data: page } = await supabase
+    .from('action_pages')
+    .select('id, kind, title, config')
+    .eq('id', cfg.primary_action_page_id)
+    .maybeSingle()
+  if (!page) return null
+  return { id: page.id, kind: page.kind, title: page.title, config: page.config }
+}

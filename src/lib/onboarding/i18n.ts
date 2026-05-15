@@ -132,6 +132,13 @@ export const dict = {
   'goal.save':            { tl: 'I-save at gumawa ng page', en: 'Save and create page' },
   'goal.saving':          { tl: 'Ginagawa…',                  en: 'Creating…' },
   'goal.error':           { tl: 'May error sa pag-save.',     en: 'Could not save.' },
+
+  'goal_content.heading':       { tl: 'Detalye ng iyong action page', en: 'Fill in your action page' },
+  'goal_content.subheading':    { tl: 'Light na detalye lang — kompleto mo na maya-maya sa editor.', en: "Just the essentials — you can finish later in the editor." },
+  'goal_content.save':          { tl: 'I-save at magpatuloy',        en: 'Save and continue' },
+  'goal_content.saving':        { tl: 'Sini-save…',                   en: 'Saving…' },
+  'goal_content.error.no_goal': { tl: 'Pumili muna ng goal step.',    en: 'Pick a goal first.' },
+  'goal_content.error.save':    { tl: 'May error. Subukan ulit.',     en: 'Could not save. Try again.' },
 } as const
 
 export type DictKey = keyof typeof dict
