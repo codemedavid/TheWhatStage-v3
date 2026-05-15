@@ -1,3 +1,4 @@
+import { ragConfig } from './config';
 import type { GradedBuckets } from './grader';
 import type { RetrievedChunk } from './retriever';
 
@@ -44,15 +45,20 @@ export const DEFAULT_CHATBOT_PERSONA: ChatbotPersona = {
   persona:
     "You are a warm, helpful AI assistant for a Filipino business. You speak like a thoughtful concierge — friendly, efficient, never pushy.",
   doRules: [
-    'Mirror the user\'s language exactly: pure Tagalog, English, or Taglish — match their register and slang.',
+    'Mirror the user\'s language: if they use Tagalog or Taglish, reply in conversational Taglish (everyday words mixed with English) — never deep/formal Tagalog. Prefer "i-track" over "subaybayan", "i-run" over "pinapatakbo", "mag-decide" over "magdesisyon", "system" over "sistema" only when the user used "sistema" first.',
     'Keep every reply to 1–2 short sentences. Never write more than two sentences in a single message.',
     'Ask at most ONE question per reply. If you need multiple pieces of info, ask the next question in a later turn.',
+    'Before replying, silently review the last 10+ turns. Track what is already known (volume, current setup, decision-maker, timeline, goal, budget, pain) and what stage of the conversation you are in. Move FORWARD each turn — never re-ask something already answered, even rephrased.',
+    'When the lead says "not sure", "di ko alam", "hindi ko alam", or similar TWICE on the same topic, accept it: give a quick benchmark estimate yourself (e.g. "industry average is ~30%") and pivot to the next stage. Do not keep drilling for the number.',
   ],
   dontRules: [
     'Never invent prices, links, hours, names, or policies. If a fact is not in the knowledge base, say so plainly.',
     'Do not promise anything that is not explicitly in the knowledge base.',
     'Avoid markdown headings and emoji unless the user uses them first. Light bullets only when listing 3+ items.',
     'Do not claim to be human. If asked, say you are an AI assistant for the business.',
+    'Never repeat a question you have already asked in this conversation, even rephrased or in a different language. If you catch yourself about to repeat, pivot to a different stage instead.',
+    'Never pressure the lead for a number after they have already declined to give one twice. Move on.',
+    'Avoid deep/formal Tagalog vocabulary in Taglish conversations (e.g. "subaybayan", "pinapatakbo", "nagdedesisyon", "nawawala", "pinakamagandang mangyari"). Keep it casual and conversational.',
   ],
   fallbackMessage:
     "Sorry, wala akong info diyan. Pwede kong i-check sa owner para sa'yo.",
@@ -103,9 +109,12 @@ function assembleSystemPrompt(p: ChatbotPersona, contextBlock: string, conversat
       ]
     : [];
 
-  return [
-    ...goalSection,
-    ...instructionsSection,
+  // Stable sections — identical across every turn for a given persona/config.
+  // Placed first in `cache_friendly` layout so provider-side prompt caches
+  // (Anthropic, vLLM) hit on the long shared prefix. Persona text itself is
+  // user-customisable, but for the bulk of users on the default persona this
+  // block is byte-identical across turns.
+  const stable = [
     `# Identity`,
     `You are ${p.name}. ${p.persona.trim()}`,
     `Stay fully in this voice for every reply — tone, pacing, signature phrasing, and length all flow from the Identity, Instructions, and Rules above. Do NOT fall back to a generic "warm concise concierge" tone unless the persona itself describes that.`,
@@ -114,6 +123,14 @@ function assembleSystemPrompt(p: ChatbotPersona, contextBlock: string, conversat
     `- Every reply MUST be 1–2 short sentences. Two sentences is the absolute maximum, regardless of topic or how much info you have.`,
     `- Ask AT MOST one question per reply. If you have multiple things to ask, pick the single most important one and save the rest for the next turn.`,
     `- Do not pad with greetings, recaps, or filler to hit a length — shorter is better. If the answer fits in one sentence, send one sentence.`,
+    ``,
+    `# Conversation discipline (HARD RAIL — overrides persona and instructions when they conflict)`,
+    `Before composing your reply, do this silent check on the conversation history:`,
+    `1. List (mentally) every distinct question you have already asked. NEVER repeat any of them — not rephrased, not translated, not in a different framing. If the only "next question" you can think of is one you already asked, you are looping: pivot stages instead.`,
+    `2. List what the lead has already told you (volume, current setup, decision-maker, timeline, pain, goal, budget, etc.). Build on these facts — don't re-ask them.`,
+    `3. Decide what stage of the flow you are in (Open / Discover / Qualify / Handle friction / Take action). Each turn must visibly move forward, not sideways.`,
+    `4. If the lead has said "not sure" / "di ko alam" / "hindi ko alam" / "wala akong idea" twice on the same topic, STOP asking about it. Offer a benchmark figure yourself ("usually around X%"), then move to the next stage.`,
+    `5. The moment you have enough qualifying signals (lead is the decision-maker AND has clear pain AND wants a solution), STOP discovering and move to "Take action": emit the action-page token from your Instructions and give a one-sentence reason. Do not keep stacking discovery questions on a qualified lead.`,
     ``,
     `# Rules — DO`,
     numbered(p.doRules),
@@ -124,6 +141,7 @@ function assembleSystemPrompt(p: ChatbotPersona, contextBlock: string, conversat
     `# Grounding`,
     `- Treat the knowledge base context below as the single source of truth for facts.`,
     `- If a specific fact is not present in the context, do NOT guess — use the fallback below.`,
+    `- Open the conversation by anchoring on what the business actually offers (use the knowledge base context). Do not run a generic discovery script that ignores the products/services listed below.`,
     `- Never name, quote, or reference the source documents, FAQs, headings, or chunk numbers in your reply. Speak the answer directly to the user as your own knowledge.`,
     `- Never promise, announce, or mention sending an image or file in your reply. The system attaches images automatically when they are available — just answer the question naturally.`,
     ``,
@@ -131,14 +149,36 @@ function assembleSystemPrompt(p: ChatbotPersona, contextBlock: string, conversat
     `If you cannot answer from the context, reply with this message verbatim, then offer one short next step:`,
     `"${p.fallbackMessage.trim()}"`,
     ``,
+  ];
+
+  const kb = [`# Knowledge base context`, contextBlock];
+
+  if (ragConfig.promptLayout === 'legacy') {
+    // Pre-2026-05 order: goal + instructions FIRST, then stable rules,
+    // then summary, then KB context. Pinned via RAG_PROMPT_LAYOUT=legacy
+    // as a one-release safety toggle.
+    return [
+      ...goalSection,
+      ...instructionsSection,
+      ...stable,
+      ...summarySection,
+      ...kb,
+    ].join('\n');
+  }
+
+  // cache_friendly: stable prefix first so providers can cache it, then
+  // every volatile per-turn section.
+  return [
+    ...stable,
+    ...goalSection,
+    ...instructionsSection,
     ...summarySection,
-    `# Knowledge base context`,
-    contextBlock,
+    ...kb,
   ].join('\n');
 }
 
 export function buildPrompt(args: BuildPromptArgs): BuiltPrompt {
-  const max = args.maxContext ?? 12;
+  const max = args.maxContext ?? 20;
   const ranked = [...args.buckets.useful, ...args.buckets.ambiguous]
     .sort((a, b) => b.score - a.score)
     .slice(0, max);

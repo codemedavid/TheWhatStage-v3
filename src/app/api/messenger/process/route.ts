@@ -23,7 +23,12 @@ import { fetchPublicCatalogProducts, type PublicProductCard } from '@/lib/busine
 import type { MessengerGenericElement } from '@/lib/facebook/messenger'
 import { parseRealestateConfig } from '@/app/a/[slug]/_kinds/realestate/schema'
 import { appendLeadContacts, extractEmails, extractPhones } from '@/lib/leads/contact-append'
-import { answer, summarizeConversation, type AnswerHistory } from '@/lib/chatbot/answer'
+import {
+  answer,
+  shouldRollSummary,
+  summarizeConversation,
+  type AnswerHistory,
+} from '@/lib/chatbot/answer'
 import { type SelectedMediaAsset } from '@/lib/media/selector'
 import {
   answerWithClassification,
@@ -45,7 +50,19 @@ const MAX_ATTEMPTS = 3
 // OpenAI/Anthropic or Meta doesn't drop the message after three minutes.
 // Each retry reschedules with jittered backoff (see isRateLimitError below).
 const MAX_RATE_LIMIT_ATTEMPTS = 10
-const HISTORY_LIMIT = 20
+// How many turns we LOAD from storage (used for the rolling summary trigger
+// and to keep the local cache fresh). The LLM payload is a smaller slice — see
+// LLM_HISTORY_TURNS below.
+const HISTORY_LIMIT = 40
+// How many of the most recent turns we actually send into the LLM prompt.
+// Anything older is compressed into `messenger_threads.conversation_summary`
+// via the rolling-summary trigger and injected as a single block instead.
+// 12 covers ~6 customer/bot exchanges — enough for short-term context without
+// re-paying ~30 turns of prompt tokens on long Messenger threads.
+const LLM_HISTORY_TURNS = 12
+// Rolling summary cadence: every N turns past the LLM window, refresh the
+// summary so older context isn't lost. Cheap LLM call, fire-and-forget.
+const SUMMARY_INTERVAL_TURNS = 8
 const BATCH_SIZE = 3
 
 // Recognise rate-limit errors from any of the upstream APIs the worker calls:
@@ -472,13 +489,18 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
       const effectivePersona = resolvedInstructions !== undefined
         ? { ...(campaignPersona ?? {}), instructions: resolvedInstructions }
         : campaignPersona
+      // Send only the most recent LLM_HISTORY_TURNS turns into the LLM. The
+      // full 40-turn `history` is still kept around for the rolling-summary
+      // trigger below and any classifier-only path that needs broader context.
+      const llmHistory =
+        history.length > LLM_HISTORY_TURNS ? history.slice(-LLM_HISTORY_TURNS) : history
       if ((classifyEnabled && stages.length > 0) || actionPages.length > 0) {
         try {
           const r = await answerWithClassification(
             admin,
             thread.user_id,
             message,
-            history,
+            llmHistory,
             stages,
             currentStageId,
             {
@@ -503,7 +525,7 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
         }
       }
       if (!reply) {
-        const r = await answer(admin, thread.user_id, message, history, {
+        const r = await answer(admin, thread.user_id, message, llmHistory, {
           rpcName: 'match_knowledge_hybrid_service',
           campaignPersona: effectivePersona,
           conversationSummary,
@@ -593,9 +615,11 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
         }).catch((e) => console.warn('[messenger.worker] reminder hooks failed', e))
       }
 
-      // When history is at the limit, older turns exist beyond the window.
-      // Fire-and-forget a summary update so future replies retain that context.
-      if (history.length >= HISTORY_LIMIT) {
+      // Rolling summary: refresh `conversation_summary` every
+      // SUMMARY_INTERVAL_TURNS turns once history exceeds the LLM window.
+      // This keeps long threads coherent without paying for a 40-turn prompt
+      // every reply. Fire-and-forget — never blocks the bot response.
+      if (shouldRollSummary(history.length, LLM_HISTORY_TURNS, SUMMARY_INTERVAL_TURNS)) {
         summarizeConversation(history, message, reply, conversationSummary)
           .then((summary) => {
             if (summary) {

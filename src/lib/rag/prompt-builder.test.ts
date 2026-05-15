@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { buildPrompt } from './prompt-builder';
+import { ragConfig } from './config';
 import type { GradedBuckets } from './grader';
 import type { RetrievedChunk } from './retriever';
 
@@ -73,5 +74,62 @@ describe('buildPrompt', () => {
     const r = buildPrompt({ userQuery: 'q', buckets: buckets() });
     expect(r.system).toContain('# Identity');
     expect(r.system).toContain('# Grounding');
+  });
+
+  describe('prompt layout', () => {
+    it('cache_friendly puts stable Identity/Rules before volatile goal/instructions/KB', () => {
+      const original = ragConfig.promptLayout;
+      ragConfig.promptLayout = 'cache_friendly';
+      try {
+        const r = buildPrompt({
+          userQuery: 'q',
+          buckets: buckets([chunk('a', 'KB-CHUNK', 0.9)]),
+          config: {
+            funnelInstruction: 'GOAL-TEXT',
+            instructions: 'INSTR-TEXT',
+          },
+          conversationSummary: 'SUMMARY-TEXT',
+        });
+        const idxIdentity = r.system.indexOf('# Identity');
+        const idxGoal = r.system.indexOf('GOAL-TEXT');
+        const idxInstr = r.system.indexOf('INSTR-TEXT');
+        const idxSummary = r.system.indexOf('SUMMARY-TEXT');
+        const idxKb = r.system.indexOf('KB-CHUNK');
+        expect(idxIdentity).toBeGreaterThanOrEqual(0);
+        expect(idxIdentity).toBeLessThan(idxGoal);
+        expect(idxGoal).toBeLessThan(idxInstr);
+        expect(idxInstr).toBeLessThan(idxSummary);
+        expect(idxSummary).toBeLessThan(idxKb);
+      } finally {
+        ragConfig.promptLayout = original;
+      }
+    });
+
+    it('legacy preserves goal/instructions BEFORE Identity (pre-2026-05 order)', () => {
+      const original = ragConfig.promptLayout;
+      ragConfig.promptLayout = 'legacy';
+      try {
+        const r = buildPrompt({
+          userQuery: 'q',
+          buckets: buckets([chunk('a', 'KB-CHUNK', 0.9)]),
+          config: {
+            funnelInstruction: 'GOAL-TEXT',
+            instructions: 'INSTR-TEXT',
+          },
+          conversationSummary: 'SUMMARY-TEXT',
+        });
+        const idxGoal = r.system.indexOf('GOAL-TEXT');
+        const idxInstr = r.system.indexOf('INSTR-TEXT');
+        const idxIdentity = r.system.indexOf('# Identity');
+        const idxSummary = r.system.indexOf('SUMMARY-TEXT');
+        const idxKb = r.system.indexOf('KB-CHUNK');
+        expect(idxGoal).toBeLessThan(idxInstr);
+        expect(idxInstr).toBeLessThan(idxIdentity);
+        expect(idxIdentity).toBeLessThan(idxSummary);
+        expect(idxSummary).toBeLessThan(idxKb);
+      } finally {
+        ragConfig.promptLayout = original;
+      }
+    });
   });
 });

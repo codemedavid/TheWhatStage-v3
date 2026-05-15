@@ -67,6 +67,15 @@ export const ragConfig = {
   // Taglish/Tagalog interrogatives the reranker scores near 0), promote this
   // many top-ranked candidates to the ambiguous bucket so the LLM sees them.
   rerankFloorK: num(process.env.RAG_RERANK_FLOOR_K, 3),
+
+  // Prompt layout. `cache_friendly` puts the stable persona / rules /
+  // grounding / fallback block FIRST and the volatile per-turn pieces
+  // (funnel goal, instructions, summary, KB context) LAST, so providers
+  // that cache long stable prefixes (Anthropic, vLLM) can hit the cache
+  // on the bulk of the system prompt. `legacy` preserves the previous
+  // order (volatile sections first) — kept as a one-release safety toggle.
+  promptLayout:
+    (process.env.RAG_PROMPT_LAYOUT ?? 'cache_friendly') as 'cache_friendly' | 'legacy',
 };
 
 export type RagConfig = typeof ragConfig;

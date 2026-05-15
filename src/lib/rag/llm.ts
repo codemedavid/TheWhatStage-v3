@@ -12,6 +12,19 @@ export interface LlmStreamChunk {
   raw?: unknown;
 }
 
+export interface LlmUsage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+}
+
+export interface LlmCompletion {
+  text: string;
+  usage: LlmUsage | null;
+  finishReason: string | null;
+  model: string;
+}
+
 export class HfRouterLlm {
   private client: OpenAI;
   private model: string;
@@ -46,6 +59,23 @@ export class HfRouterLlm {
       responseFormat?: 'json_object';
     } = {},
   ): Promise<string> {
+    const r = await this.completeWithUsage(messages, opts);
+    return r.text;
+  }
+
+  /**
+   * Same call as `complete()` but returns the underlying `{usage, finishReason}`
+   * for observability. Existing callers can keep using `complete()` for the
+   * plain string; cost-sensitive paths (chatbot answer/classify) use this.
+   */
+  async completeWithUsage(
+    messages: LlmMessage[],
+    opts: {
+      temperature?: number;
+      maxTokens?: number;
+      responseFormat?: 'json_object';
+    } = {},
+  ): Promise<LlmCompletion> {
     const r = await this.client.chat.completions.create({
       model: this.model,
       messages,
@@ -55,7 +85,20 @@ export class HfRouterLlm {
         ? { response_format: { type: opts.responseFormat } }
         : {}),
     });
-    return r.choices[0]?.message?.content ?? '';
+    const choice = r.choices[0];
+    const usage = r.usage
+      ? {
+          promptTokens: r.usage.prompt_tokens ?? 0,
+          completionTokens: r.usage.completion_tokens ?? 0,
+          totalTokens: r.usage.total_tokens ?? 0,
+        }
+      : null;
+    return {
+      text: choice?.message?.content ?? '',
+      usage,
+      finishReason: choice?.finish_reason ?? null,
+      model: this.model,
+    };
   }
 
   async *stream(

@@ -15,7 +15,7 @@ import {
   type ActionPageRecommendationRules,
 } from './config'
 import { selectMediaForReply, type SelectedMediaAsset } from '@/lib/media/selector'
-import type { AnswerHistory, AnswerOptions, AnswerResult } from './answer'
+import { logChatbotUsage, type AnswerHistory, type AnswerOptions, type AnswerResult } from './answer'
 
 export interface StageBrief {
   id: string
@@ -172,14 +172,30 @@ export async function answerWithClassification(
     return [] as SelectedMediaAsset[]
   })
 
-  const raw = await llm.complete(
+  const t0 = Date.now()
+  const completion = await llm.completeWithUsage(
     [
       { role: 'system', content: system },
       ...history,
       { role: 'user', content: built.user },
     ],
-    { temperature: config.temperature, maxTokens: 1600, responseFormat: 'json_object' },
+    // 600 = ~400 tokens of reply + headroom for the JSON envelope and
+    // structured fields (stage_change, action_page, recommend_*). The old
+    // 1600 ceiling was 4× what we ever actually emit.
+    { temperature: config.temperature, maxTokens: 600, responseFormat: 'json_object' },
   )
+  const raw = completion.text
+  logChatbotUsage('chatbot.classify', {
+    model: completion.model,
+    promptTokens: completion.usage?.promptTokens ?? null,
+    completionTokens: completion.usage?.completionTokens ?? null,
+    finishReason: completion.finishReason,
+    kbChunks: built.contextChunks.length,
+    historyTurns: history.length,
+    summaryLen: options.conversationSummary?.length ?? 0,
+    systemChars: system.length,
+    ms: Date.now() - t0,
+  })
 
   const parsed = parseJson(raw)
   let text = ''
@@ -220,15 +236,27 @@ export async function answerWithClassification(
     const fallbackSystem = leadContext
       ? `${built.system}\n\n${leadContext}`
       : built.system
-    const fallback = await llm.complete(
+    const tFb = Date.now()
+    const fb = await llm.completeWithUsage(
       [
         { role: 'system', content: fallbackSystem },
         ...history,
         { role: 'user', content: built.user },
       ],
-      { temperature: config.temperature, maxTokens: 1500 },
+      { temperature: config.temperature, maxTokens: 400 },
     )
-    text = sanitizeReply(fallback)
+    logChatbotUsage('chatbot.answer.fallback', {
+      model: fb.model,
+      promptTokens: fb.usage?.promptTokens ?? null,
+      completionTokens: fb.usage?.completionTokens ?? null,
+      finishReason: fb.finishReason,
+      kbChunks: built.contextChunks.length,
+      historyTurns: history.length,
+      summaryLen: options.conversationSummary?.length ?? 0,
+      systemChars: fallbackSystem.length,
+      ms: Date.now() - tFb,
+    })
+    text = sanitizeReply(fb.text)
     stageChange = null
     actionPage = null
     productRecommendation = null
@@ -411,7 +439,12 @@ export function stageInstruction(
     )
   }
   const schema = `{${schemaParts.join(', ')}}`
-  const apSection = hasActionPages
+  // Split the action-page block into a stable prose preamble (placed BEFORE
+  // the volatile stageList/actionPageList) and a volatile list (placed at the
+  // very end). The preamble text is byte-identical across every turn, so
+  // hoisting it above the volatile sections lengthens the cacheable prefix
+  // when RAG_PROMPT_LAYOUT=cache_friendly.
+  const apPreamble = hasActionPages
     ? '\n\n' +
       'ACTION PAGES — INTERNAL ROUTING ONLY:\n' +
       'When the latest customer message matches one action page\'s "send when" guidance, set `action_page.action_page_id` to that page\'s id. ' +
@@ -435,9 +468,9 @@ export function stageInstruction(
       '- Max ~80 chars. One line. No greetings, no page title, no URL.\n' +
       '- Include a downward-pointing emoji like 👇 (or 📝/📅 when fitting) to draw the eye to the button.\n' +
       '- Examples: "I-tap ang button sa baba para mag-book ng call 👇", "Fill out the quick form below 👇".\n' +
-      '- NEVER use the action page title (e.g. "Lead Gen", "Booking") as the button_text.\n\n' +
-      actionPageList(actionPages)
+      '- NEVER use the action page title (e.g. "Lead Gen", "Booking") as the button_text.'
     : ''
+  const apListSection = hasActionPages ? '\n\n' + actionPageList(actionPages) : ''
   const recommendSection = hasRecommend ? recommendInstruction(recommendRules!, 'product') : ''
   const recommendPropertySection = hasRecommendProperty
     ? recommendInstruction(recommendPropertyRules!, 'property')
@@ -476,6 +509,12 @@ export function stageInstruction(
     '- Customer (currently Interested): "Sorry po, hindi na po ituloy."\n' +
     '  → stage_change to "Lost", confidence "high", reason "customer changed mind — explicit disengage".'
 
+  // Ordering note: every section above stageList is stable across turns
+  // (header, schema shape, hierarchy/calibration/examples prose, action-page
+  // preamble, recommend instructions). The volatile per-turn pieces
+  // (stageList interpolates currentStageId; actionPageList interpolates the
+  // page set) sit at the tail so provider prompt caches hit on the long
+  // stable prefix in cache_friendly mode.
   return (
     '## STAGE CLASSIFICATION — PRIMARY TASK\n' +
     'You are responsible for classifying the lead\'s pipeline stage on every turn. This is the most important structured output in your response. Your job is to keep the lead moving forward through the funnel — when in doubt between moving forward and staying, MOVE FORWARD with lower confidence rather than return null.\n\n' +
@@ -489,11 +528,12 @@ export function stageInstruction(
     calibrationBlock +
     '\n\n' +
     examplesBlock +
+    apPreamble +
+    recommendSection +
+    recommendPropertySection +
     '\n\n' +
     stageList(stages, currentStageId) +
-    apSection +
-    recommendSection +
-    recommendPropertySection
+    apListSection
   )
 }
 

@@ -200,7 +200,8 @@ ${ctx.primaryActionPageSlug
 - PRESERVE USER DIRECTIVES: if the current instructions below contain specific rules or language preferences, keep them
 - NEVER invent products, prices, or policies not listed above
 - NEVER drop grounding/anti-hallucination rules from the DON'T list
-- For Filipino businesses, default language note: match the customer's language (Tagalog/English/Taglish)
+- For Filipino businesses, default language note: match the customer's language. When the customer uses Tagalog or Taglish, reply in CONVERSATIONAL TAGLISH (everyday Filipino mixed with English) — never deep/formal Tagalog. Banned register words: "subaybayan", "pinapatakbo", "nagdedesisyon", "nawawala", "pinakamagandang mangyari", "magdesisyon". Use "i-track", "i-run", "mag-decide", "nawawala sa'yo" only sparingly, "ano ang gusto mong mangyari".
+- MANDATORY ANTI-LOOP RULES: the generated doRules MUST include a rule like "Before replying, review what the lead already told you and never re-ask an answered question." The generated dontRules MUST include "Never repeat a question already asked, even rephrased" AND "After the lead says 'di ko alam' or 'not sure' twice on the same topic, stop drilling — give a benchmark and pivot to the next stage."
 
 Current user instructions (preserve any specific directives here):
 ${ctx.currentInstructions || '(none)'}
@@ -214,11 +215,12 @@ The "instructions" field is the operational playbook the chatbot follows in ever
 It MUST do all of the following:
 
 1. Define the conversation arc as a sequence of stages the AI moves the customer through. Cover at minimum:
-   - Open: acknowledge the customer, set tone, surface what the business offers in one beat.
-   - Discover: ask the right diagnostic questions to understand what the customer actually needs, their context, and what success looks like for them. Phrase the kinds of questions to ask, not the literal questions.
-   - Qualify: define what "qualified" means for this business (e.g. budget fit, timing, problem-product fit, decision-making power) and how the AI confirms it through the conversation — not via a checklist dump.
+   - Open: acknowledge the customer, set tone, and anchor on what THIS business actually offers (use the products listed above — don't run a generic discovery script that ignores them).
+   - Discover: ask the right diagnostic questions to understand what the customer actually needs, their context, and what success looks like for them. Phrase the kinds of questions to ask, not the literal questions. The instructions MUST also tell the AI to track what's already been answered each turn and never repeat a question.
+   - Qualify: define what "qualified" means for this business (e.g. budget fit, timing, problem-product fit, decision-making power) and how the AI confirms it through the conversation — not via a checklist dump. State a concrete threshold: e.g. "once 3 of the 4 signals are present, move to Take action."
+   - Handle "don't know" answers: explicitly instruct that after the lead says "not sure" / "di ko alam" / "wala akong idea" TWICE on the same data point, the AI must stop asking, offer a benchmark estimate ("usually around X"), and pivot to the next stage. This is non-negotiable.
    - Handle friction: how to address hesitation, pricing pushback, comparison shopping, "I'll think about it", without breaking voice.
-   - Take action: at the point the customer is qualified and warm, the AI MUST direct them to the action page by emitting the !actionpage token inline. State explicitly which !actionpage:slug to send and what condition triggers it. Use the primary goal page above unless the discovery clearly points to a different listed page.
+   - Take action: at the point the customer is qualified and warm, the AI MUST direct them to the action page by emitting the !actionpage token inline. State explicitly which !actionpage:slug to send and what condition triggers it. Use the primary goal page above unless the discovery clearly points to a different listed page. The instructions MUST forbid stacking more discovery questions on a clearly-qualified lead.
 
 2. Explicitly mention !actionpage:<slug> inside the instructions where the action-page send happens. The runtime parses these tokens — without them, no action page gets attached. Use only slugs that appear in the action pages list above. Never invent slugs.
 

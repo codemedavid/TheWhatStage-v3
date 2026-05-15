@@ -50,7 +50,12 @@ export type ChatbotConfig = ChatbotPersona & {
 export const DEFAULT_CHATBOT_CONFIG: ChatbotConfig = {
   ...DEFAULT_CHATBOT_PERSONA,
   temperature: 0.4,
-  maxContext: 12,
+  // Trimmed from 20 → 6. Each retrieved chunk is up to ~1024 tokens, so the
+  // old default could spend ~20k prompt tokens just on context. 6 covers the
+  // top-quality grader output for the typical Filipino SMB knowledge base
+  // without bleeding into ambiguous fillers. Existing per-user stored values
+  // are unaffected — this only changes the fallback for new configs.
+  maxContext: 6,
   autoClassifyEnabled: true,
   activeTemplateId: null,
   personalitySource: 'custom',

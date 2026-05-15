@@ -138,20 +138,70 @@ export async function answer(
     .filter(Boolean)
     .join('\n\n')
 
-  const text = await llm.complete(
+  const t0 = Date.now()
+  const completion = await llm.completeWithUsage(
     [
       { role: 'system', content: system },
       ...history,
       { role: 'user', content: built.user },
     ],
-    { temperature: config.temperature, maxTokens: 1500 },
+    { temperature: config.temperature, maxTokens: 400 },
   )
+  logChatbotUsage('chatbot.answer', {
+    model: completion.model,
+    promptTokens: completion.usage?.promptTokens ?? null,
+    completionTokens: completion.usage?.completionTokens ?? null,
+    finishReason: completion.finishReason,
+    kbChunks: built.contextChunks.length,
+    historyTurns: history.length,
+    summaryLen: options.conversationSummary?.length ?? 0,
+    systemChars: system.length,
+    ms: Date.now() - t0,
+  })
 
   const [sourceTitles, media] = await Promise.all([
     resolveSourceTitles(supabase, userId, built.contextChunkIds),
     mediaPromise,
   ])
-  return { text: text.trim(), sourceTitles, media }
+  return { text: completion.text.trim(), sourceTitles, media }
+}
+
+/**
+ * Pure predicate for the rolling-summary trigger. Fire when the full thread
+ * history exceeds the LLM window (so we'd otherwise be dropping older turns)
+ * AND we've crossed the next interval boundary. Extracted so we can unit-test
+ * without the supabase + LLM scaffolding around it.
+ */
+export function shouldRollSummary(
+  historyLength: number,
+  llmWindow: number,
+  intervalTurns: number,
+): boolean {
+  if (historyLength <= llmWindow) return false
+  const overflow = historyLength - llmWindow
+  return overflow > 0 && overflow % intervalTurns === 0
+}
+
+export type ChatbotUsageScope =
+  | 'chatbot.answer'
+  | 'chatbot.classify'
+  | 'chatbot.answer.fallback'
+
+export interface ChatbotUsageFields {
+  model: string
+  promptTokens: number | null
+  completionTokens: number | null
+  finishReason: string | null
+  kbChunks: number
+  historyTurns: number
+  summaryLen: number
+  systemChars: number
+  ms: number
+}
+
+export function logChatbotUsage(scope: ChatbotUsageScope, fields: ChatbotUsageFields): void {
+  // Single structured log line; parseable in Vercel/whatever-aggregator.
+  console.log(`[${scope}]`, fields)
 }
 
 /**
