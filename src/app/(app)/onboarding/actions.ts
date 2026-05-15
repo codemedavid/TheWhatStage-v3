@@ -3,17 +3,20 @@
 import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
+import { z } from 'zod'
 import {
   completeOnboarding as completeOnboardingState,
   dismissOnboarding as dismissOnboardingState,
   markStep,
   setOnboardingLanguage,
   saveBusinessBasicsToState,
+  getBusinessBasics,
 } from '@/lib/onboarding/state'
 import { BusinessBasicsSchema } from '@/lib/onboarding/business-basics'
 import { LANG_COOKIE } from '@/lib/onboarding/i18n'
 import { ONBOARDING_STEPS, type OnboardingLang, type OnboardingStep } from '@/lib/onboarding/types'
 import { nextStepRoute } from '@/lib/onboarding/steps'
+import { generateKnowledge, type GeneratedKnowledge } from '@/lib/onboarding/ai/knowledge'
 
 function isStep(value: unknown): value is OnboardingStep {
   return typeof value === 'string' && (ONBOARDING_STEPS as readonly string[]).includes(value)
@@ -81,4 +84,104 @@ export async function saveBusinessBasicsAction(
     return { formError: 'Could not save. Please try again.' }
   }
   redirect('/onboarding/knowledge')
+}
+
+const EditedKnowledgeSchema = z.object({
+  sections: z
+    .array(
+      z.object({
+        title: z.string().trim().min(1).max(120),
+        body: z.string().trim().min(1).max(4000),
+      }),
+    )
+    .min(1)
+    .max(10),
+})
+
+export type KnowledgeStepError = 'no_basics' | 'generation_failed' | 'save_failed'
+
+/** Generate-only (does not save). Used to render the preview. */
+export async function generateKnowledgeAction(): Promise<
+  | { ok: true; data: GeneratedKnowledge }
+  | { ok: false; error: KnowledgeStepError }
+> {
+  const basics = await getBusinessBasics()
+  if (!basics) return { ok: false, error: 'no_basics' }
+  try {
+    const { createClient } = await import('@/lib/supabase/server')
+    const supabase = await createClient()
+    const { data: auth } = await supabase.auth.getUser()
+    if (!auth.user) return { ok: false, error: 'generation_failed' }
+    const { data: state } = await supabase
+      .from('onboarding_state')
+      .select('ui_language')
+      .eq('profile_id', auth.user.id)
+      .maybeSingle()
+    const lang = state?.ui_language === 'en' ? 'en' : 'tl'
+    const data = await generateKnowledge({ basics, lang })
+    return { ok: true, data }
+  } catch (err) {
+    console.error('[generateKnowledgeAction]', err)
+    return { ok: false, error: 'generation_failed' }
+  }
+}
+
+export async function saveKnowledgeAction(
+  _prev: { error?: KnowledgeStepError } | undefined,
+  formData: FormData,
+): Promise<{ error?: KnowledgeStepError }> {
+  const rawSections = formData.get('sections_json')
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(String(rawSections ?? '[]'))
+  } catch {
+    return { error: 'save_failed' }
+  }
+  const result = EditedKnowledgeSchema.safeParse({ sections: parsed })
+  if (!result.success) {
+    return { error: 'save_failed' }
+  }
+
+  const basics = await getBusinessBasics()
+  if (!basics) return { error: 'no_basics' }
+
+  const { createClient } = await import('@/lib/supabase/server')
+  const supabase = await createClient()
+  const { data: auth } = await supabase.auth.getUser()
+  if (!auth.user) return { error: 'save_failed' }
+
+  const text = result.data.sections
+    .map((s) => `${s.title}\n\n${s.body}`)
+    .join('\n\n---\n\n')
+  const html = result.data.sections
+    .map((s) => `<h3>${escapeHtml(s.title)}</h3><p>${escapeHtml(s.body).replace(/\n/g, '<br>')}</p>`)
+    .join('')
+
+  const { error: insertErr } = await supabase.from('knowledge_documents').insert({
+    user_id: auth.user.id,
+    title: `About ${basics.name}`,
+    content_text: text,
+    content_html: html,
+    content_json: { sections: result.data.sections, source: 'onboarding' },
+    has_unsaved_changes: false,
+    version: 1,
+    published_at: new Date().toISOString(),
+    embedding_status: 'pending',
+  })
+  if (insertErr) {
+    console.error('[saveKnowledgeAction] insert error', insertErr)
+    return { error: 'save_failed' }
+  }
+
+  await markStep('knowledge')
+  redirect('/onboarding/faqs')
+}
+
+function escapeHtml(s: string): string {
+  return s
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;')
 }
