@@ -96,6 +96,24 @@ export const dict = {
   'faqs.error':           { tl: 'May error. Subukan ulit.', en: 'Could not save. Try again.' },
   'faqs.error.no_basics': { tl: 'Punan muna ang business basics step.', en: 'Fill in business basics first.' },
   'faqs.error.generation':{ tl: 'Hindi nag-generate ang AI. Subukan ulit o i-skip.', en: "AI couldn't generate. Retry or skip." },
+
+  'personality.heading':       { tl: 'Personality ng bot mo',           en: "Your bot's personality" },
+  'personality.subheading':    { tl: 'Pumili ng vibe at magbigay ng kaunting guidance — i-fill ng AI ang iba.', en: 'Pick a vibe and add a little guidance — AI fills in the rest.' },
+  'personality.vibe.label':    { tl: 'Anong vibe ng bot mo?',           en: 'What vibe should the bot have?' },
+  'personality.vibe.friendly_kuya_ate':       { tl: 'Friendly Kuya/Ate', en: 'Friendly Kuya/Ate' },
+  'personality.vibe.professional_consultant': { tl: 'Professional',      en: 'Professional consultant' },
+  'personality.vibe.hype_closer':             { tl: 'Hype Closer',       en: 'Hype closer' },
+  'personality.vibe.calm_expert':             { tl: 'Calm Expert',       en: 'Calm expert' },
+  'personality.greet.label':   { tl: 'Paano dapat bumati ang bot?',     en: 'How should the bot greet?' },
+  'personality.greet.ph':      { tl: 'Hal. "Hi po! Welcome sa Aling Nena Bakery."', en: 'e.g. "Hi po! Welcome to Aling Nena Bakery."' },
+  'personality.must_use.label':{ tl: 'Mga salita / phrases na dapat gamitin', en: 'Words or phrases it must always use' },
+  'personality.must_use.ph':   { tl: 'Hal. "Sariwang luto araw-araw"',  en: 'e.g. "Baked fresh daily"' },
+  'personality.must_not.label':{ tl: 'Mga bawal na sabihin',            en: 'What it must never do' },
+  'personality.must_not.ph':   { tl: 'Hal. "Huwag mag-promise ng next-day delivery"', en: "e.g. \"Don't promise next-day delivery\"" },
+  'personality.save':          { tl: 'I-save ang personality',          en: 'Save personality' },
+  'personality.saving':        { tl: 'Sini-generate ng AI…',            en: 'AI is drafting…' },
+  'personality.error':         { tl: 'May error. Subukan ulit o i-skip.', en: 'Could not save. Retry or skip.' },
+  'personality.error.no_basics': { tl: 'Punan muna ang business basics step.', en: 'Fill in business basics first.' },
 } as const
 
 export type DictKey = keyof typeof dict
