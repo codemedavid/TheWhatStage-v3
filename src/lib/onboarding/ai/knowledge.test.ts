@@ -1,9 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/lib/rag', () => ({
-  HfRouterLlm: vi.fn().mockImplementation(function HfRouterLlmMock() {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ;(this as any).complete = vi.fn(async () =>
+  HfRouterLlm: vi.fn().mockImplementation(function HfRouterLlmMock(this: { complete: ReturnType<typeof vi.fn> }) {
+    this.complete = vi.fn(async () =>
       JSON.stringify({
         sections: [
           { title: 'About us', body: 'We bake fresh.' },
@@ -39,9 +38,8 @@ describe('generateKnowledge', () => {
   it('throws a typed error if the model returns invalid JSON', async () => {
     const { HfRouterLlm } = await import('@/lib/rag')
     ;(HfRouterLlm as unknown as { mockImplementationOnce: (fn: () => unknown) => void }).mockImplementationOnce(
-      function HfRouterLlmBad() {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        ;(this as any).complete = vi.fn(async () => 'not-json')
+      function HfRouterLlmBad(this: { complete: ReturnType<typeof vi.fn> }) {
+        this.complete = vi.fn(async () => 'not-json')
         return this
       },
     )
