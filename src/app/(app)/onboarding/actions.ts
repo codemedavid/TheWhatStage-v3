@@ -18,6 +18,7 @@ import { ONBOARDING_STEPS, type OnboardingLang, type OnboardingStep } from '@/li
 import { nextStepRoute } from '@/lib/onboarding/steps'
 import { generateKnowledge, type GeneratedKnowledge } from '@/lib/onboarding/ai/knowledge'
 import { generateFaqs, type GeneratedFaqs } from '@/lib/onboarding/ai/faqs'
+import { generatePersonality, VIBE_PRESETS, type VibePreset } from '@/lib/onboarding/ai/personality'
 
 function isStep(value: unknown): value is OnboardingStep {
   return typeof value === 'string' && (ONBOARDING_STEPS as readonly string[]).includes(value)
@@ -254,6 +255,81 @@ export async function saveFaqsAction(
 
   await markStep('faqs')
   redirect('/onboarding/personality')
+}
+
+const PersonalitySeedsSchema = z.object({
+  vibe_preset: z.enum(VIBE_PRESETS).optional(),
+  greet: z.string().trim().max(300).optional(),
+  must_use: z.string().trim().max(300).optional(),
+  must_not: z.string().trim().max(300).optional(),
+})
+
+export type PersonalityStepError = 'no_basics' | 'generation_failed' | 'save_failed'
+export type PersonalityFormState = { error?: PersonalityStepError }
+
+export async function savePersonalityAction(
+  _prev: PersonalityFormState | undefined,
+  formData: FormData,
+): Promise<PersonalityFormState> {
+  const seedsParsed = PersonalitySeedsSchema.safeParse({
+    vibe_preset: (formData.get('vibe_preset') || undefined) as VibePreset | undefined,
+    greet: formData.get('greet') || undefined,
+    must_use: formData.get('must_use') || undefined,
+    must_not: formData.get('must_not') || undefined,
+  })
+  if (!seedsParsed.success) return { error: 'save_failed' }
+
+  const basics = await getBusinessBasics()
+  if (!basics) return { error: 'no_basics' }
+
+  const { createClient } = await import('@/lib/supabase/server')
+  const supabase = await createClient()
+  const { data: auth } = await supabase.auth.getUser()
+  if (!auth.user) return { error: 'save_failed' }
+
+  const { data: state } = await supabase
+    .from('onboarding_state')
+    .select('ui_language')
+    .eq('profile_id', auth.user.id)
+    .maybeSingle()
+  const lang = state?.ui_language === 'en' ? 'en' : 'tl'
+
+  let generated
+  try {
+    generated = await generatePersonality({
+      basics,
+      seeds: seedsParsed.data,
+      lang,
+    })
+  } catch (err) {
+    console.error('[savePersonalityAction] generate', err)
+    return { error: 'generation_failed' }
+  }
+
+  await supabase
+    .from('onboarding_state')
+    .update({ personality_seeds: seedsParsed.data })
+    .eq('profile_id', auth.user.id)
+
+  const { error: upsertErr } = await supabase.from('chatbot_configs').upsert(
+    {
+      user_id: auth.user.id,
+      name: generated.name,
+      persona: generated.persona,
+      do_rules: generated.do_rules,
+      dont_rules: generated.dont_rules,
+      fallback_message: generated.fallback_message,
+      personality_source: 'custom',
+    },
+    { onConflict: 'user_id' },
+  )
+  if (upsertErr) {
+    console.error('[savePersonalityAction] upsert', upsertErr)
+    return { error: 'save_failed' }
+  }
+
+  await markStep('personality')
+  redirect('/onboarding/goal')
 }
 
 function escapeHtml(s: string): string {
