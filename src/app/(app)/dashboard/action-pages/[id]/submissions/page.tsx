@@ -341,6 +341,7 @@ export default async function SubmissionsPage({
         createdAt: s.created_at,
         leadId: s.lead_id,
         outcome: s.outcome,
+        messengerName: s.messenger_full_name ?? s.messenger_name ?? null,
       }
     })
 

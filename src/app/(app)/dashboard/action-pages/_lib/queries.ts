@@ -92,6 +92,7 @@ export interface SubmissionListItem {
   lead_id: string | null
   lead_name: string | null
   messenger_name: string | null
+  messenger_full_name: string | null
   created_at: string
 }
 
@@ -123,6 +124,7 @@ export async function fetchSubmissions(
       lead_id: (row.lead_id as string | null) ?? null,
       lead_name: lead?.name ?? null,
       messenger_name: null as string | null,
+      messenger_full_name: null as string | null,
       created_at: row.created_at as string,
     }
   })
@@ -140,6 +142,7 @@ export async function fetchSubmissions(
       .in('psid', psids)
       .in('page_id', pageIds)
     const nameByKey = new Map<string, string>()
+    const fbNameByKey = new Map<string, string>()
     for (const t of (threads ?? []) as Array<{
       psid: string
       page_id: string
@@ -149,10 +152,12 @@ export async function fetchSubmissions(
       const linkedLead = Array.isArray(t.leads) ? t.leads[0] : t.leads
       const resolved = linkedLead?.name || t.full_name
       if (resolved) nameByKey.set(`${t.page_id}:${t.psid}`, resolved)
+      if (t.full_name) fbNameByKey.set(`${t.page_id}:${t.psid}`, t.full_name)
     }
     for (const r of rows) {
       if (r.psid && r.page_id) {
         r.messenger_name = nameByKey.get(`${r.page_id}:${r.psid}`) ?? null
+        r.messenger_full_name = fbNameByKey.get(`${r.page_id}:${r.psid}`) ?? null
       }
     }
   }

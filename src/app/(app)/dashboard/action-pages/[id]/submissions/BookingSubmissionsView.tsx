@@ -21,6 +21,7 @@ export interface BookingEntry {
   createdAt: string           // ISO string of submission created_at
   leadId: string | null
   outcome: string | null
+  messengerName: string | null
 }
 
 interface Props {
@@ -611,6 +612,9 @@ function Drawer({ entry: e, onClose }: { entry: BookingEntry; onClose: () => voi
           <div className="bsv-drawer-section">
             <div className="bsv-drawer-section-title">Contact</div>
             <DrawerRow label="Full name" value={e.name} />
+            {e.messengerName && e.messengerName !== e.name ? (
+              <DrawerRow label="Facebook name" value={e.messengerName} />
+            ) : null}
             <DrawerRow label="Phone" value={e.phone || '—'} />
             <DrawerRow label="Source" value={e.source} />
             <DrawerRow label="Status" value={STATUS_LABELS[e.status] ?? e.status} />
