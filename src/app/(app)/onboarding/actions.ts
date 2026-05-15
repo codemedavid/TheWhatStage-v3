@@ -17,6 +17,7 @@ import { LANG_COOKIE } from '@/lib/onboarding/i18n'
 import { ONBOARDING_STEPS, type OnboardingLang, type OnboardingStep } from '@/lib/onboarding/types'
 import { nextStepRoute } from '@/lib/onboarding/steps'
 import { generateKnowledge, type GeneratedKnowledge } from '@/lib/onboarding/ai/knowledge'
+import { generateFaqs, type GeneratedFaqs } from '@/lib/onboarding/ai/faqs'
 
 function isStep(value: unknown): value is OnboardingStep {
   return typeof value === 'string' && (ONBOARDING_STEPS as readonly string[]).includes(value)
@@ -175,6 +176,84 @@ export async function saveKnowledgeAction(
 
   await markStep('knowledge')
   redirect('/onboarding/faqs')
+}
+
+export type FaqsStepError = 'no_basics' | 'generation_failed' | 'save_failed'
+
+export async function generateFaqsAction(): Promise<
+  | { ok: true; data: GeneratedFaqs }
+  | { ok: false; error: FaqsStepError }
+> {
+  const basics = await getBusinessBasics()
+  if (!basics) return { ok: false, error: 'no_basics' }
+  try {
+    const { createClient } = await import('@/lib/supabase/server')
+    const supabase = await createClient()
+    const { data: auth } = await supabase.auth.getUser()
+    if (!auth.user) return { ok: false, error: 'generation_failed' }
+    const { data: state } = await supabase
+      .from('onboarding_state')
+      .select('ui_language')
+      .eq('profile_id', auth.user.id)
+      .maybeSingle()
+    const lang = state?.ui_language === 'en' ? 'en' : 'tl'
+    const data = await generateFaqs({ basics, lang })
+    return { ok: true, data }
+  } catch (err) {
+    console.error('[generateFaqsAction]', err)
+    return { ok: false, error: 'generation_failed' }
+  }
+}
+
+const FaqsPayloadSchema = z.object({
+  items: z
+    .array(
+      z.object({
+        question: z.string().trim().min(1).max(300),
+        answer: z.string().trim().min(1).max(4000),
+      }),
+    )
+    .max(20),
+})
+
+export async function saveFaqsAction(
+  _prev: { error?: FaqsStepError } | undefined,
+  formData: FormData,
+): Promise<{ error?: FaqsStepError }> {
+  const raw = formData.get('items_json')
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(String(raw ?? '[]'))
+  } catch {
+    return { error: 'save_failed' }
+  }
+  const result = FaqsPayloadSchema.safeParse({ items: parsed })
+  if (!result.success) return { error: 'save_failed' }
+
+  const { createClient } = await import('@/lib/supabase/server')
+  const supabase = await createClient()
+  const { data: auth } = await supabase.auth.getUser()
+  if (!auth.user) return { error: 'save_failed' }
+
+  if (result.data.items.length > 0) {
+    const rows = result.data.items.map((it, i) => ({
+      user_id: auth.user!.id,
+      question: it.question,
+      answer: it.answer,
+      position: i,
+      is_published: true,
+      version: 1,
+      embedding_status: 'pending',
+    }))
+    const { error: insertErr } = await supabase.from('knowledge_faqs').insert(rows)
+    if (insertErr) {
+      console.error('[saveFaqsAction] insert', insertErr)
+      return { error: 'save_failed' }
+    }
+  }
+
+  await markStep('faqs')
+  redirect('/onboarding/personality')
 }
 
 function escapeHtml(s: string): string {
