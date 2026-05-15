@@ -1,8 +1,9 @@
 import type { StageRow, FieldDefRow, CampaignOption } from '../_lib/queries'
 import { LeadsHeaderActions } from './LeadsHeaderActions'
+import { AutoClassifyToggle } from './AutoClassifyToggle'
 
 export function LeadsHeader({
-  view, stageCount, leadCount, stages, fieldDefs, campaigns,
+  view, stageCount, leadCount, stages, fieldDefs, campaigns, autoClassifyEnabled,
 }: {
   view: 'kanban' | 'table'
   stageCount: number
@@ -10,6 +11,7 @@ export function LeadsHeader({
   stages: StageRow[]
   fieldDefs: FieldDefRow[]
   campaigns: CampaignOption[]
+  autoClassifyEnabled: boolean
 }) {
   return (
     <header
@@ -38,6 +40,7 @@ export function LeadsHeader({
         </div>
 
         <div className="ml-auto flex items-center gap-2">
+          <AutoClassifyToggle initial={autoClassifyEnabled} />
           <LeadsHeaderActions view={view} stages={stages} fieldDefs={fieldDefs} campaigns={campaigns} />
         </div>
       </div>

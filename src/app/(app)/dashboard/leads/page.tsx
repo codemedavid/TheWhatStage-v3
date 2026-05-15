@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server'
 import { LeadsQuery } from './_lib/schemas'
 import { seedDefaultStagesIfEmpty } from './_lib/seed'
 import { fetchStages, fetchStagesCached, fetchFieldDefsCached, fetchLeadsTotal, fetchCampaignOptions } from './_lib/queries'
+import { getChatbotConfig } from '@/lib/chatbot/config'
 import { LeadsShell } from './_components/LeadsShell'
 import { LeadsHeader } from './_components/LeadsHeader'
 import { Toolbar } from './_components/Toolbar'
@@ -38,11 +39,12 @@ async function LeadsBody({ params }: { params: ReturnType<typeof LeadsQuery.pars
 
   const justSeeded = await seedDefaultStagesIfEmpty(supabase, user.id)
 
-  const [stages, fieldDefs, total, campaigns] = await Promise.all([
+  const [stages, fieldDefs, total, campaigns, chatbotConfig] = await Promise.all([
     justSeeded ? fetchStages(supabase, user.id) : fetchStagesCached(user.id),
     fetchFieldDefsCached(user.id),
     fetchLeadsTotal(supabase, user.id, params),
     fetchCampaignOptions(supabase, user.id),
+    getChatbotConfig(supabase, user.id),
   ])
 
   return (
@@ -54,6 +56,7 @@ async function LeadsBody({ params }: { params: ReturnType<typeof LeadsQuery.pars
         stages={stages}
         fieldDefs={fieldDefs}
         campaigns={campaigns}
+        autoClassifyEnabled={chatbotConfig.autoClassifyEnabled}
       />
       <Toolbar params={params} />
 

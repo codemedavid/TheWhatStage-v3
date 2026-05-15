@@ -143,7 +143,6 @@ export type ChatbotConfigInput = {
   fallbackMessage: string
   temperature: number
   maxContext: number
-  autoClassifyEnabled: boolean
 }
 
 export async function upsertChatbotConfig(
@@ -162,7 +161,6 @@ export async function upsertChatbotConfig(
       fallback_message: input.fallbackMessage.trim() || DEFAULT_CHATBOT_CONFIG.fallbackMessage,
       temperature: clamp(input.temperature, 0, 1),
       max_context: clamp(Math.round(input.maxContext), 1, 40),
-      auto_classify_enabled: !!input.autoClassifyEnabled,
     },
     { onConflict: 'user_id' },
   )
@@ -172,6 +170,20 @@ export async function upsertChatbotConfig(
 function clamp(n: number, lo: number, hi: number): number {
   if (!Number.isFinite(n)) return lo
   return Math.max(lo, Math.min(hi, n))
+}
+
+export async function setAutoClassifyEnabled(
+  supabase: SupabaseClient,
+  userId: string,
+  enabled: boolean,
+): Promise<void> {
+  const { error } = await supabase
+    .from('chatbot_configs')
+    .upsert(
+      { user_id: userId, auto_classify_enabled: !!enabled },
+      { onConflict: 'user_id' },
+    )
+  if (error) throw new Error(`setAutoClassifyEnabled: ${error.message}`)
 }
 
 export async function setPrimaryActionPageId(

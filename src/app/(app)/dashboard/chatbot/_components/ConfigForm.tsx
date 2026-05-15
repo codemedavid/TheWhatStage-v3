@@ -244,23 +244,6 @@ export function ConfigForm({
               <div className="cb-field-help">Knowledge passages per reply.</div>
             </div>
           </div>
-
-          <label className="cb-kb-row">
-            <input
-              type="checkbox"
-              name="autoClassifyEnabled"
-              defaultChecked={initial.autoClassifyEnabled}
-              className="cb-checkbox"
-            />
-            <div className="cb-kb-meta">
-              <b>Auto-classify pipeline stage</b>
-              <span>
-                The AI reads each conversation and decides whether to move the lead based
-                on stage descriptions. Combined into bot replies when auto-reply is on;
-                runs every 4th message otherwise.
-              </span>
-            </div>
-          </label>
         </div>
       </div>
 

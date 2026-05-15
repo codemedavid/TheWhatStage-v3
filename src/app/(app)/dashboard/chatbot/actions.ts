@@ -32,7 +32,6 @@ export async function saveChatbotConfig(formData: FormData): Promise<void> {
     fallbackMessage: String(formData.get('fallbackMessage') ?? ''),
     temperature: num(formData.get('temperature'), 0.4),
     maxContext: num(formData.get('maxContext'), 12),
-    autoClassifyEnabled: formData.get('autoClassifyEnabled') === 'on',
   })
 
   revalidatePath('/dashboard/chatbot')
