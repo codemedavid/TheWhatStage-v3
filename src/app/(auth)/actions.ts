@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { signUpSchema, signInSchema } from '@/lib/auth/schemas'
+import { initOnboardingForProfile } from '@/lib/onboarding/state'
 
 export type AuthFormState = {
   formError?: string
@@ -62,7 +63,12 @@ export async function signUpAction(
     return { formError: 'Account created but auto sign-in failed. Try logging in.' }
   }
 
-  redirect('/dashboard')
+  const { data: meAuth } = await supabase.auth.getUser()
+  if (meAuth.user) {
+    await initOnboardingForProfile(meAuth.user.id)
+  }
+
+  redirect('/onboarding/welcome')
 }
 
 export async function signInAction(
