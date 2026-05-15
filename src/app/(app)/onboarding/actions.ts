@@ -8,7 +8,9 @@ import {
   dismissOnboarding as dismissOnboardingState,
   markStep,
   setOnboardingLanguage,
+  saveBusinessBasicsToState,
 } from '@/lib/onboarding/state'
+import { BusinessBasicsSchema } from '@/lib/onboarding/business-basics'
 import { LANG_COOKIE } from '@/lib/onboarding/i18n'
 import { ONBOARDING_STEPS, type OnboardingLang, type OnboardingStep } from '@/lib/onboarding/types'
 import { nextStepRoute } from '@/lib/onboarding/steps'
@@ -42,4 +44,41 @@ export async function dismissOnboardingAction(): Promise<void> {
 export async function completeOnboardingAction(): Promise<void> {
   await completeOnboardingState()
   redirect('/dashboard')
+}
+
+export type BusinessBasicsFormState = {
+  fieldErrors?: Record<string, string>
+  formError?: string
+}
+
+export async function saveBusinessBasicsAction(
+  _prev: BusinessBasicsFormState,
+  formData: FormData,
+): Promise<BusinessBasicsFormState> {
+  const parsed = BusinessBasicsSchema.safeParse({
+    name: formData.get('name'),
+    offer: formData.get('offer'),
+    business_type: formData.get('business_type'),
+    audience: formData.get('audience'),
+    pain: formData.get('pain'),
+    tone: formData.get('tone'),
+  })
+
+  if (!parsed.success) {
+    const fieldErrors: Record<string, string> = {}
+    for (const issue of parsed.error.issues) {
+      const key = issue.path[0]?.toString() ?? '_'
+      if (!fieldErrors[key]) fieldErrors[key] = issue.message
+    }
+    return { fieldErrors }
+  }
+
+  try {
+    await saveBusinessBasicsToState(parsed.data)
+    await markStep('business')
+  } catch (err) {
+    console.error('[saveBusinessBasicsAction] save error', err)
+    return { formError: 'Could not save. Please try again.' }
+  }
+  redirect('/onboarding/knowledge')
 }

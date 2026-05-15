@@ -148,3 +148,26 @@ export function progressFraction(state: OnboardingState): number {
   const done = STEP_ORDER.filter((s) => s.isComplete(state)).length
   return done / STEP_ORDER.length
 }
+
+import type { BusinessBasics } from './business-basics'
+import { BusinessBasicsSchema } from './business-basics'
+
+/** Persist the typed business_basics JSON for the current user. */
+export async function saveBusinessBasicsToState(basics: BusinessBasics): Promise<void> {
+  const supabase = await createClient()
+  const { data: auth } = await supabase.auth.getUser()
+  if (!auth.user) throw new Error('not authenticated')
+  const { error } = await supabase
+    .from(TABLE)
+    .update({ business_basics: basics })
+    .eq('profile_id', auth.user.id)
+  if (error) throw error
+}
+
+/** Read the typed business_basics JSON; returns null if missing or malformed. */
+export async function getBusinessBasics(): Promise<BusinessBasics | null> {
+  const state = await getOnboardingState()
+  if (!state?.business_basics) return null
+  const r = BusinessBasicsSchema.safeParse(state.business_basics)
+  return r.success ? r.data : null
+}
