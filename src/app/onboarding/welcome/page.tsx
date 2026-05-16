@@ -1,12 +1,13 @@
 import Link from 'next/link'
+import { Suspense } from 'react'
 import { WizardShell } from '../_components/WizardShell'
 import { getOnboardingLang } from '@/lib/onboarding/lang'
 import { t } from '@/lib/onboarding/i18n'
 import { getSession } from '@/lib/auth/get-session'
+import type { OnboardingLang } from '@/lib/onboarding/types'
 
 export default async function WelcomePage() {
-  const [lang, session] = await Promise.all([getOnboardingLang(), getSession()])
-  const firstName = (session?.fullName || '').trim().split(' ')[0] || (lang === 'tl' ? 'Ka-WhatStage' : 'there')
+  const lang = await getOnboardingLang()
 
   const eyebrow = lang === 'tl' ? 'Tara, i-set up natin' : "Let's set you up"
   const hello = lang === 'tl' ? 'Kumusta,' : 'Welcome,'
@@ -28,7 +29,10 @@ export default async function WelcomePage() {
             <span className="ob-welcome-pill-label">{eyebrow}</span>
           </div>
           <h1 className="ob-welcome-h1">
-            {hello} <em>{firstName}.</em>
+            {hello}{' '}
+            <Suspense fallback={<em>{lang === 'tl' ? 'Ka-WhatStage' : 'there'}.</em>}>
+              <FirstName lang={lang} />
+            </Suspense>
           </h1>
           <p className="ob-welcome-lede">{t('welcome.body', lang)}</p>
           <div className="ob-welcome-cta">
@@ -59,6 +63,13 @@ export default async function WelcomePage() {
       <style>{WELCOME_CSS}</style>
     </WizardShell>
   )
+}
+
+async function FirstName({ lang }: { lang: OnboardingLang }) {
+  const session = await getSession()
+  const fallback = lang === 'tl' ? 'Ka-WhatStage' : 'there'
+  const firstName = (session?.fullName || '').trim().split(' ')[0] || fallback
+  return <em>{firstName}.</em>
 }
 
 function Arrow() {
