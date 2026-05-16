@@ -15,16 +15,10 @@ import { runGeneration } from '@/lib/onboarding/generation/runner'
 import { createClient } from '@/lib/supabase/server'
 import { t } from '@/lib/onboarding/i18n'
 import type { ActionPageKind } from '@/lib/action-pages/kinds'
-import type { GeneratedBotInstructions } from '@/lib/onboarding/ai/bot-instructions'
+import { parseBotInstructionsResult } from '@/lib/onboarding/ai/result-schemas'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
-
-function isGeneratedBotInstructions(v: unknown): v is GeneratedBotInstructions {
-  if (!v || typeof v !== 'object') return false
-  const r = v as Record<string, unknown>
-  return typeof r.bot_send_instructions === 'string' && typeof r.recommendation_rules === 'string'
-}
 
 export default async function FlowPage() {
   const [lang, page, state] = await Promise.all([
@@ -58,12 +52,13 @@ export default async function FlowPage() {
     </>
   )
 
-  if (job?.status === 'done' && isGeneratedBotInstructions(job.result)) {
+  const parsedBot = job?.status === 'done' ? parseBotInstructionsResult(job.result) : null
+  if (parsedBot) {
     return (
       <WizardShell lang={lang} step="flow">
         {heading}
         <div className="mt-6">
-          <FlowPreview lang={lang} pageId={page.id} initial={job.result} />
+          <FlowPreview lang={lang} pageId={page.id} initial={parsedBot} />
         </div>
       </WizardShell>
     )

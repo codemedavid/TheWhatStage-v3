@@ -11,14 +11,10 @@ import { createClient } from '@/lib/supabase/server'
 import { getOnboardingLang } from '@/lib/onboarding/lang'
 import { getBusinessBasics } from '@/lib/onboarding/state'
 import { t } from '@/lib/onboarding/i18n'
-import type { GeneratedKnowledge } from '@/lib/onboarding/ai/knowledge'
+import { parseKnowledgeResult } from '@/lib/onboarding/ai/result-schemas'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
-
-function isGeneratedKnowledge(v: unknown): v is GeneratedKnowledge {
-  return !!v && typeof v === 'object' && Array.isArray((v as { sections?: unknown }).sections)
-}
 
 export default async function KnowledgePage() {
   const lang = await getOnboardingLang()
@@ -42,14 +38,15 @@ export default async function KnowledgePage() {
   const { data: auth } = await supabase.auth.getUser()
   const job = auth.user ? await getJob(auth.user.id, 'knowledge') : null
 
-  if (job?.status === 'done' && isGeneratedKnowledge(job.result)) {
+  const parsedKnowledge = job?.status === 'done' ? parseKnowledgeResult(job.result) : null
+  if (parsedKnowledge) {
     return (
       <WizardShell lang={lang} step="knowledge">
         <h1 className="text-2xl font-semibold text-zinc-900">{t('knowledge.heading', lang)}</h1>
         <p className="mt-1 text-sm text-zinc-600">{t('knowledge.subheading', lang)}</p>
         <div className="mt-6">
           <div className="mb-3 flex justify-end"><RegenerateButton lang={lang} /></div>
-          <KnowledgeEditor lang={lang} initial={job.result.sections} />
+          <KnowledgeEditor lang={lang} initial={parsedKnowledge.sections} />
         </div>
       </WizardShell>
     )

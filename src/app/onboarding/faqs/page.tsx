@@ -11,14 +11,10 @@ import { createClient } from '@/lib/supabase/server'
 import { getOnboardingLang } from '@/lib/onboarding/lang'
 import { getBusinessBasics } from '@/lib/onboarding/state'
 import { t } from '@/lib/onboarding/i18n'
-import type { GeneratedFaqs } from '@/lib/onboarding/ai/faqs'
+import { parseFaqsResult } from '@/lib/onboarding/ai/result-schemas'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
-
-function isGeneratedFaqs(v: unknown): v is GeneratedFaqs {
-  return !!v && typeof v === 'object' && Array.isArray((v as { suggestions?: unknown }).suggestions)
-}
 
 export default async function FaqsPage() {
   const lang = await getOnboardingLang()
@@ -42,14 +38,15 @@ export default async function FaqsPage() {
   const { data: auth } = await supabase.auth.getUser()
   const job = auth.user ? await getJob(auth.user.id, 'faqs') : null
 
-  if (job?.status === 'done' && isGeneratedFaqs(job.result)) {
+  const parsedFaqs = job?.status === 'done' ? parseFaqsResult(job.result) : null
+  if (parsedFaqs) {
     return (
       <WizardShell lang={lang} step="faqs">
         <h1 className="text-2xl font-semibold text-zinc-900">{t('faqs.heading', lang)}</h1>
         <p className="mt-1 text-sm text-zinc-600">{t('faqs.subheading', lang)}</p>
         <div className="mt-6">
           <div className="mb-3 flex justify-end"><RegenerateButton lang={lang} /></div>
-          <FaqChecklist lang={lang} suggestions={job.result.suggestions} />
+          <FaqChecklist lang={lang} suggestions={parsedFaqs.suggestions} />
         </div>
       </WizardShell>
     )
