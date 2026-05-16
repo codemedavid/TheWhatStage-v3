@@ -694,14 +694,25 @@ export async function saveSalesContentAction(
 
   const { createClient } = await import('@/lib/supabase/server')
   const supabase = await createClient()
-  const { data: page } = await supabase.from('action_pages').select('config').eq('id', parsed.data.pageId).maybeSingle()
+  const { data: auth } = await supabase.auth.getUser()
+  if (!auth.user) return { error: 'save_failed' }
+  const { data: page } = await supabase
+    .from('action_pages')
+    .select('config')
+    .eq('id', parsed.data.pageId)
+    .eq('user_id', auth.user.id)
+    .maybeSingle()
   if (!page) return { error: 'save_failed' }
   const config = (page.config as Record<string, unknown>) ?? {}
   const product = { ...(config.product as object ?? {}), name: parsed.data.name, headline: parsed.data.headline ?? '', description: parsed.data.description ?? '' }
   const price = { ...(config.price as object ?? {}), amount: parsed.data.price_amount }
   const newConfig = { ...config, product, price }
 
-  const { error } = await supabase.from('action_pages').update({ config: newConfig, status: 'published' }).eq('id', parsed.data.pageId)
+  const { error } = await supabase
+    .from('action_pages')
+    .update({ config: newConfig, status: 'published' })
+    .eq('id', parsed.data.pageId)
+    .eq('user_id', auth.user.id)
   if (error) {
     console.error('[saveSalesContentAction]', error)
     return { error: 'save_failed' }
@@ -727,13 +738,24 @@ export async function saveBookingContentAction(
 
   const { createClient } = await import('@/lib/supabase/server')
   const supabase = await createClient()
-  const { data: page } = await supabase.from('action_pages').select('config').eq('id', parsed.data.pageId).maybeSingle()
+  const { data: auth } = await supabase.auth.getUser()
+  if (!auth.user) return { error: 'save_failed' }
+  const { data: page } = await supabase
+    .from('action_pages')
+    .select('config')
+    .eq('id', parsed.data.pageId)
+    .eq('user_id', auth.user.id)
+    .maybeSingle()
   if (!page) return { error: 'save_failed' }
   const config = (page.config as Record<string, unknown>) ?? {}
   const appointment = { ...(config.appointment as object ?? {}), duration_min: parsed.data.duration_min }
   const newConfig = { ...config, appointment }
 
-  const { error } = await supabase.from('action_pages').update({ config: newConfig }).eq('id', parsed.data.pageId)
+  const { error } = await supabase
+    .from('action_pages')
+    .update({ config: newConfig })
+    .eq('id', parsed.data.pageId)
+    .eq('user_id', auth.user.id)
   if (error) {
     console.error('[saveBookingContentAction]', error)
     return { error: 'save_failed' }
@@ -806,12 +828,23 @@ export async function saveFormFieldsAction(
 
   const { createClient } = await import('@/lib/supabase/server')
   const supabase = await createClient()
-  const { data: page } = await supabase.from('action_pages').select('config').eq('id', parsed.data.pageId).maybeSingle()
+  const { data: auth } = await supabase.auth.getUser()
+  if (!auth.user) return { error: 'save_failed' }
+  const { data: page } = await supabase
+    .from('action_pages')
+    .select('config')
+    .eq('id', parsed.data.pageId)
+    .eq('user_id', auth.user.id)
+    .maybeSingle()
   if (!page) return { error: 'save_failed' }
   const config = (page.config as Record<string, unknown>) ?? {}
   const newConfig = { ...config, blocks }
 
-  const { error } = await supabase.from('action_pages').update({ config: newConfig }).eq('id', parsed.data.pageId)
+  const { error } = await supabase
+    .from('action_pages')
+    .update({ config: newConfig })
+    .eq('id', parsed.data.pageId)
+    .eq('user_id', auth.user.id)
   if (error) {
     console.error('[saveFormFieldsAction]', error)
     return { error: 'save_failed' }
