@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent, ReactNode } from 'react'
 import type { KindEditorProps } from '../types'
+import PaymentSettingsPanel, { type PaymentSettings } from '../../_components/PaymentSettingsPanel'
+import type { PaymentMethod } from '@/lib/payment-methods/types'
 import {
   defaultSalesConfig,
   parseSalesConfig,
@@ -92,7 +94,7 @@ function formatPricePreview(
   return `${currency} ${num}${periodSuffix}`
 }
 
-export default function SalesEditor({ page }: KindEditorProps) {
+export default function SalesEditor({ page, paymentMethods = [] }: KindEditorProps & { paymentMethods?: PaymentMethod[] }) {
   const initial = useMemo<SalesConfig>(() => {
     const parsed = parseSalesConfig(page.config)
     return parsed ?? defaultSalesConfig()
@@ -277,6 +279,19 @@ export default function SalesEditor({ page }: KindEditorProps) {
           config={config}
           setConfig={setConfig}
           hasLinkedPages={config.linked_action_page_ids.length > 0}
+        />
+      </Card>
+
+      <Card
+        step={15}
+        title="Payment"
+        subtitle="Show payment instructions to buyers on this page."
+        summary={config.payment.enabled ? 'On' : 'Off'}
+      >
+        <PaymentSettingsPanel
+          value={config.payment ?? { enabled: true, excluded_method_ids: [] }}
+          onChange={(next: PaymentSettings) => setConfig((c) => ({ ...c, payment: next }))}
+          paymentMethods={paymentMethods}
         />
       </Card>
     </div>
