@@ -9,7 +9,9 @@ import PropertySubmissionsView, {
   type PropertySubmissionRow,
 } from './PropertySubmissionsView'
 import CatalogOrdersView, { type CatalogOrderEntry } from './CatalogOrdersView'
+import SalesPaymentsView, { type SalesPaymentRow } from './SalesPaymentsView'
 import type { OrderPayment } from '@/lib/order-payments/types'
+import { listBySubmissionIds } from '@/lib/order-payments/server'
 
 export default async function SubmissionsPage({
   params,
@@ -183,17 +185,38 @@ export default async function SubmissionsPage({
       }
     })
 
+    // Fetch order payments keyed by submission_id
+    const submissionIds = merged.map((r) => r.id)
+    const paymentsMap = await listBySubmissionIds(supabase, user.id, submissionIds)
+
+    // Build payments rows — only submissions that have a payment record
+    const salesPaymentRows: SalesPaymentRow[] = merged
+      .filter((r) => paymentsMap.has(r.id))
+      .map((r) => ({
+        payment: paymentsMap.get(r.id)!,
+        submission: {
+          id: r.id,
+          created_at: r.created_at,
+          data: r.data ?? {},
+        },
+      }))
+
     return (
-      <PropertySubmissionsView
-        pageId={id}
-        pageTitle={page.title}
-        pageStatus={page.status}
-        submissions={submissionRows}
-        breadcrumbLabel="Sales submissions"
-        editLabel="Edit sales page"
-        description="Forms, bookings, qualifications, and direct submissions collected from this sales page."
-        emptyMessage="No submissions yet. When buyers fill out the form (or a linked action page) on this sales page, their submissions will appear here."
-      />
+      <div className="mx-auto max-w-5xl space-y-6 pb-16 px-4 pt-4">
+        {salesPaymentRows.length > 0 && (
+          <SalesPaymentsView payments={salesPaymentRows} actionPageId={id} />
+        )}
+        <PropertySubmissionsView
+          pageId={id}
+          pageTitle={page.title}
+          pageStatus={page.status}
+          submissions={submissionRows}
+          breadcrumbLabel="Sales submissions"
+          editLabel="Edit sales page"
+          description="Forms, bookings, qualifications, and direct submissions collected from this sales page."
+          emptyMessage="No submissions yet. When buyers fill out the form (or a linked action page) on this sales page, their submissions will appear here."
+        />
+      </div>
     )
   }
 
