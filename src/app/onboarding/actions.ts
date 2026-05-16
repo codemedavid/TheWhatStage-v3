@@ -38,8 +38,7 @@ export async function setLangAction(formData: FormData): Promise<void> {
   revalidatePath('/dashboard')
 }
 
-export async function skipStepAction(formData: FormData): Promise<void> {
-  const step = formData.get('step')
+export async function skipStepAction(step: OnboardingStep): Promise<void> {
   if (!isStep(step)) throw new Error('invalid step')
   await markStep(step, { skipped: true })
   redirect(nextStepRoute(step))

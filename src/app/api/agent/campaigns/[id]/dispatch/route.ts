@@ -144,8 +144,8 @@ export async function POST(
     .eq('id', campaignId)
 
   // Fire-and-forget trigger to the messenger worker.
-  const workerUrl = process.env.NEXT_PUBLIC_SITE_URL
-    ? `${process.env.NEXT_PUBLIC_SITE_URL}/api/messenger/process`
+  const workerUrl = process.env.NEXT_PUBLIC_APP_URL
+    ? `${process.env.NEXT_PUBLIC_APP_URL}/api/messenger/process`
     : null
 
   if (workerUrl && process.env.MESSENGER_WORKER_SECRET) {

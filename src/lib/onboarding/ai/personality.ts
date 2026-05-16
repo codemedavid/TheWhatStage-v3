@@ -3,24 +3,10 @@ import { z } from 'zod'
 import { HfRouterLlm } from '@/lib/rag'
 import type { BusinessBasics, TonePreset } from '@/lib/onboarding/business-basics'
 import type { OnboardingLang } from '@/lib/onboarding/types'
+import type { GeneratedPersonality, PersonalitySeeds, VibePreset } from '@/lib/onboarding/ai/personality-shared'
 
-export const VIBE_PRESETS = ['friendly_kuya_ate', 'professional_consultant', 'hype_closer', 'calm_expert'] as const
-export type VibePreset = (typeof VIBE_PRESETS)[number]
-
-export interface PersonalitySeeds {
-  vibe_preset?: VibePreset
-  greet?: string
-  must_use?: string
-  must_not?: string
-}
-
-export interface GeneratedPersonality {
-  name: string
-  persona: string
-  do_rules: string[]
-  dont_rules: string[]
-  fallback_message: string
-}
+export { VIBE_PRESETS } from '@/lib/onboarding/ai/personality-shared'
+export type { GeneratedPersonality, PersonalitySeeds, VibePreset } from '@/lib/onboarding/ai/personality-shared'
 
 const ResponseSchema = z.object({
   name: z.string().trim().min(1).max(60),

@@ -11,11 +11,10 @@ export default async function BusinessPage() {
   ])
   return (
     <WizardShell lang={lang} step="business">
-      <h1 className="text-2xl font-semibold text-zinc-900">{t('business.heading', lang)}</h1>
-      <p className="mt-1 text-sm text-zinc-600">{t('business.subheading', lang)}</p>
-      <div className="mt-6">
-        <BusinessForm lang={lang} initial={initial} />
-      </div>
+      <p className="ob-eyebrow">01 · {t('business.heading', lang)}</p>
+      <h1 className="ob-title">{t('business.heading', lang)}</h1>
+      <p className="ob-sub">{t('business.subheading', lang)}</p>
+      <BusinessForm lang={lang} initial={initial} />
     </WizardShell>
   )
 }

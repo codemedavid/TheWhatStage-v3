@@ -1,0 +1,269 @@
+import Link from 'next/link'
+import { LangToggle } from './LangToggle'
+import { dismissOnboardingAction } from '../actions'
+import { t } from '@/lib/onboarding/i18n'
+import { STEP_ORDER } from '@/lib/onboarding/steps'
+import type { OnboardingLang, OnboardingStep } from '@/lib/onboarding/types'
+
+interface Props {
+  lang: OnboardingLang
+  /** Current step id, or null for welcome/done pages. */
+  step: OnboardingStep | null
+  children: React.ReactNode
+}
+
+export function WizardShell({ lang, step, children }: Props) {
+  const total = STEP_ORDER.length
+  const idx = step ? STEP_ORDER.findIndex((s) => s.id === step) : -1
+  const stepNumber = idx >= 0 ? idx + 1 : null
+  const pct = stepNumber != null ? (stepNumber / total) * 100 : 0
+  const stepNumLabel = stepNumber != null ? String(stepNumber).padStart(2, '0') : '00'
+
+  return (
+    <div className="ob-shell">
+      <style>{OB_CSS}</style>
+
+      <header className="ob-top">
+        <Link href="/onboarding/welcome" className="brand" aria-label="WhatStage onboarding">
+          <span className="brand-mark">W</span>
+          <span>WhatStage</span>
+        </Link>
+        <div className="ob-top-right">
+          <LangToggle lang={lang} />
+          <form action={dismissOnboardingAction}>
+            <button type="submit" className="ob-top-link">
+              {t('shell.skip_for_now', lang)}
+            </button>
+          </form>
+        </div>
+      </header>
+
+      <div
+        className="ob-progress-track"
+        role={stepNumber != null ? 'progressbar' : undefined}
+        aria-valuenow={stepNumber ?? undefined}
+        aria-valuemin={0}
+        aria-valuemax={total}
+      >
+        <div className="ob-progress-fill" style={{ width: `${pct}%` }} />
+      </div>
+      <div className="ob-progress-meta">
+        <span>
+          {stepNumber != null
+            ? `Step ${stepNumLabel} / ${String(total).padStart(2, '0')}`
+            : 'Welcome'}
+        </span>
+        <span>{Math.round(pct)}%</span>
+      </div>
+
+      <main className="ob-main">
+        <div className="ob-canvas">{children}</div>
+      </main>
+    </div>
+  )
+}
+
+const OB_CSS = `
+.ob-shell {
+  --bg: #F5F1E8;
+  --bg-elev: #FBF8F1;
+  --paper: #FFFFFF;
+  --ink: #1F1E1D;
+  --ink-2: #3A3835;
+  --ink-3: #6B6862;
+  --ink-4: #A19F98;
+  --line: #E5DFD0;
+  --line-strong: #D6CFBE;
+  --accent: #C96442;
+  --accent-hover: #B5563A;
+  --accent-soft: #F2DDD2;
+  --accent-ink: #6E2E1B;
+  --success: #5C7C5A;
+  --success-soft: #DDE7D7;
+  --radius-sm: 8px;
+  --radius: 12px;
+  --radius-lg: 18px;
+  --serif: var(--font-instrument-serif), 'Instrument Serif', Georgia, serif;
+  --sans: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --mono: var(--font-geist-mono), ui-monospace, 'SF Mono', monospace;
+
+  min-height: 100vh;
+  display: grid;
+  grid-template-rows: auto auto auto 1fr;
+  font-family: var(--sans);
+  color: var(--ink);
+  background:
+    radial-gradient(60% 50% at 10% 0%, color-mix(in oklab, var(--accent) 8%, transparent) 0%, transparent 60%),
+    radial-gradient(50% 40% at 100% 100%, color-mix(in oklab, var(--accent) 6%, transparent) 0%, transparent 60%),
+    var(--bg);
+}
+
+.ob-shell .ob-top {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 22px 36px;
+}
+.ob-shell .brand {
+  display: flex; align-items: center; gap: 12px;
+  font-family: var(--serif); font-size: 22px; letter-spacing: -0.01em;
+  color: var(--ink); text-decoration: none;
+}
+.ob-shell .brand-mark {
+  width: 32px; height: 32px; background: var(--ink); color: var(--bg-elev);
+  border-radius: 8px; display: grid; place-items: center;
+  font-family: var(--serif); font-size: 19px; font-style: italic; line-height: 1;
+}
+.ob-shell .ob-top-right { display: flex; align-items: center; gap: 10px; }
+.ob-shell .ob-top-link {
+  appearance: none; border: 0; background: transparent;
+  font-family: var(--sans); font-size: 13px; color: var(--ink-3);
+  cursor: pointer; padding: 7px 12px; border-radius: 999px;
+  transition: color .18s;
+}
+.ob-shell .ob-top-link:hover { color: var(--ink); }
+
+.ob-shell .ob-progress-track {
+  height: 2px; background: var(--line);
+  margin: 0 36px; border-radius: 2px; overflow: hidden;
+}
+.ob-shell .ob-progress-fill {
+  height: 100%; background: var(--accent);
+  border-radius: 2px; transition: width .5s cubic-bezier(.2,.7,.2,1);
+}
+.ob-shell .ob-progress-meta {
+  display: flex; justify-content: space-between;
+  padding: 10px 36px 0;
+  font-family: var(--mono); font-size: 11px;
+  letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3);
+}
+
+.ob-shell .ob-main {
+  display: grid; align-items: start;
+  padding: 40px 36px 48px;
+}
+.ob-shell .ob-canvas {
+  max-width: 760px; margin: 0 auto; width: 100%;
+}
+
+/* ---- Shared primitives (step pages adopt via class names) ---- */
+.ob-shell .ob-eyebrow {
+  display: inline-flex; align-items: center; gap: 10px;
+  font-family: var(--mono); font-size: 11px;
+  letter-spacing: 0.18em; text-transform: uppercase;
+  color: var(--ink-3); margin: 0 0 18px;
+}
+.ob-shell .ob-eyebrow::before {
+  content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--accent);
+}
+.ob-shell .ob-title {
+  font-family: var(--serif); font-weight: 400;
+  font-size: clamp(34px, 4.4vw, 56px);
+  line-height: 1.1; letter-spacing: -0.018em;
+  margin: 0 0 14px; text-wrap: balance;
+}
+.ob-shell .ob-sub {
+  font-size: 16px; line-height: 1.55; color: var(--ink-2);
+  margin: 0 0 28px; max-width: 560px;
+}
+
+.ob-shell .ob-btn {
+  appearance: none; border: 0; font-family: var(--sans);
+  font-size: 14px; font-weight: 500; cursor: pointer;
+  border-radius: 999px; padding: 11px 20px;
+  display: inline-flex; align-items: center; gap: 8px;
+  transition: transform .12s, background .18s, color .18s, box-shadow .18s, border-color .18s;
+  text-decoration: none; white-space: nowrap;
+}
+.ob-shell .ob-btn:active { transform: translateY(1px); }
+.ob-shell .ob-btn-primary {
+  background: var(--accent); color: #FFF8F1;
+  box-shadow: 0 1px 0 rgba(0,0,0,0.05) inset, 0 8px 22px -10px color-mix(in oklab, var(--accent) 70%, black);
+}
+.ob-shell .ob-btn-primary:hover { background: var(--accent-hover); }
+.ob-shell .ob-btn-primary:disabled {
+  background: var(--line-strong); color: var(--ink-4);
+  cursor: not-allowed; box-shadow: none;
+}
+.ob-shell .ob-btn-ghost {
+  background: transparent; color: var(--ink-2);
+  border: 1px solid var(--line-strong);
+}
+.ob-shell .ob-btn-ghost:hover { background: var(--bg-elev); border-color: var(--ink-4); }
+.ob-shell .ob-btn-text {
+  background: transparent; color: var(--ink-3); padding: 11px 14px;
+}
+.ob-shell .ob-btn-text:hover { color: var(--ink); }
+.ob-shell .ob-btn-lg { padding: 14px 24px; font-size: 15px; }
+
+.ob-shell .ob-field { display: flex; flex-direction: column; gap: 8px; margin-bottom: 22px; }
+.ob-shell .ob-label {
+  font-family: var(--sans); font-size: 13px; font-weight: 500;
+  color: var(--ink-2); letter-spacing: -0.005em;
+}
+.ob-shell .ob-help { font-size: 13px; color: var(--ink-3); }
+.ob-shell .ob-input,
+.ob-shell .ob-textarea {
+  width: 100%; background: var(--paper);
+  border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 14px 16px; font-family: var(--sans); font-size: 16px;
+  color: var(--ink); outline: none;
+  transition: border-color .18s, box-shadow .18s;
+}
+.ob-shell .ob-input::placeholder,
+.ob-shell .ob-textarea::placeholder { color: var(--ink-4); }
+.ob-shell .ob-input:focus,
+.ob-shell .ob-textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 4px color-mix(in oklab, var(--accent) 14%, transparent);
+}
+.ob-shell .ob-textarea { min-height: 96px; resize: vertical; line-height: 1.5; }
+
+.ob-shell .ob-choice-grid { display: grid; gap: 10px; }
+.ob-shell .ob-choice-grid.two { grid-template-columns: repeat(2, 1fr); }
+.ob-shell .ob-choice {
+  display: flex; align-items: center; gap: 14px;
+  padding: 14px 16px;
+  background: var(--paper); border: 1px solid var(--line);
+  border-radius: var(--radius); cursor: pointer;
+  transition: all .18s ease; text-align: left;
+  font-family: var(--sans); font-size: 15px; color: var(--ink);
+  position: relative;
+}
+.ob-shell .ob-choice:hover {
+  border-color: var(--accent);
+  background: color-mix(in oklab, var(--accent-soft) 50%, var(--paper));
+}
+.ob-shell .ob-choice.selected {
+  border-color: var(--accent); background: var(--accent-soft);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.ob-shell .ob-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 10px; background: var(--bg-elev);
+  border: 1px solid var(--line); border-radius: 999px;
+  font-size: 12px; color: var(--ink-3);
+  font-family: var(--mono); letter-spacing: 0.02em;
+}
+
+.ob-shell .ob-card {
+  background: var(--paper); border: 1px solid var(--line);
+  border-radius: var(--radius-lg); padding: 24px;
+  box-shadow: 0 1px 2px rgba(31,30,29,0.04);
+}
+
+.ob-shell .ob-nav {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; padding-top: 28px; margin-top: 28px;
+  border-top: 1px solid var(--line);
+}
+.ob-shell .ob-nav-actions { display: flex; align-items: center; gap: 8px; }
+
+@media (max-width: 768px) {
+  .ob-shell .ob-top,
+  .ob-shell .ob-main { padding-left: 20px; padding-right: 20px; }
+  .ob-shell .ob-main { padding-top: 28px; padding-bottom: 36px; }
+  .ob-shell .ob-progress-track,
+  .ob-shell .ob-progress-meta { margin-left: 20px; margin-right: 20px; padding-left: 0; padding-right: 0; }
+  .ob-shell .ob-choice-grid.two { grid-template-columns: 1fr; }
+}
+`

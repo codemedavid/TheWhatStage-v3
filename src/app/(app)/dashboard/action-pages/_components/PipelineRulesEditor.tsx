@@ -20,7 +20,7 @@ const OUTCOMES_BY_KIND: Record<string, { value: string; label: string }[]> = {
     { value: 'disqualified',   label: 'Disqualified' },
     { value: 'pending_review', label: 'Pending review' },
   ],
-  sales:         [{ value: 'checked_out',     label: 'Checked out' }],
+  sales:         [{ value: 'submitted',       label: 'Submitted' }],
   catalog:       [{ value: 'checked_out',     label: 'Checked out' }],
   realestate:    [{ value: 'viewing_booked',  label: 'Viewing booked' }],
 }
@@ -106,6 +106,11 @@ export function PipelineRulesEditor({
                         {o.label}
                       </option>
                     ))}
+                    {rule.outcome && !outcomes.some((o) => o.value === rule.outcome) ? (
+                      <option key={rule.outcome} value={rule.outcome}>
+                        {rule.outcome} (legacy)
+                      </option>
+                    ) : null}
                   </select>
                 ) : (
                   <input

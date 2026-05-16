@@ -211,9 +211,22 @@ export async function answerWithClassification(
       recommend_product?: unknown
       recommend_property?: unknown
     }
-    if (typeof r.reply === 'string') text = sanitizeReply(r.reply)
+    const rawReply = typeof r.reply === 'string' ? r.reply : ''
+    if (rawReply) text = sanitizeReply(rawReply)
     stageChange = coerceStageChange(r.stage_change, stages, currentStageId)
     actionPage = coerceActionPage(r.action_page, actionPages)
+    // The model occasionally announces a link in `reply` ("Eto na yung link…")
+    // but doesn't set the structured `action_page` field, so the customer sees
+    // a broken promise. sanitizeReply strips the tease sentence, but we log
+    // every detection so we can track how often the model misbehaves.
+    if (!actionPage && rawReply && rawReply !== text && LINK_TEASE_RE.test(rawReply)) {
+      console.warn('[classify.tease] model teased a link with no action_page attached', {
+        userId,
+        actionPagesAvailable: actionPages.length,
+        rawPreview: rawReply.slice(0, 200),
+        sanitizedPreview: text.slice(0, 200),
+      })
+    }
     if (recommendRules && options.activeCatalogPageId) {
       productRecommendation = coerceRecommendation(
         r.recommend_product,
@@ -364,10 +377,31 @@ export async function applyStageChange(
     if (change.to_stage_id === fromStageId) return null
     if (!stages.some((s) => s.id === change.to_stage_id)) return null
 
+    const from = fromStageId ? stages.find((s) => s.id === fromStageId) ?? null : null
+    const to = stages.find((s) => s.id === change.to_stage_id)
+    if (!to) return null
+
+    // Backward-move guard. The prompt tells the classifier that backward moves
+    // require an explicit disengage signal, but the LLM regularly hallucinates
+    // the source stage (e.g. reasons like "moving from entry stage to engaged"
+    // when the lead is actually on Interested) and emits high-confidence
+    // backward moves anyway. Structurally restrict backward moves to terminal
+    // / parking kinds where moving back is a legitimate outcome.
+    if (from && to.position < from.position) {
+      const allowedBackwardKinds = new Set(['lost', 'dormant', 'objection'])
+      if (!allowedBackwardKinds.has(to.kind as string)) {
+        console.warn('[classify] rejected backward move', {
+          from: from.name,
+          to: to.name,
+          confidence: change.confidence,
+          reason: change.reason?.slice(0, 200),
+        })
+        return null
+      }
+    }
+
     if (change.confidence === 'low') {
-      const from = stages.find((s) => s.id === fromStageId)
-      const to = stages.find((s) => s.id === change.to_stage_id)
-      if (!from || !to) return null
+      if (!from) return null
       const isAdjacentForward = to.position === from.position + 1
       const isIntoObjection = (to.kind as string) === 'objection'
       if (!isAdjacentForward && !isIntoObjection) return null
@@ -463,6 +497,12 @@ export function stageInstruction(
       '- NEVER write any reference to a form, link, button, or action page in `reply` — in ANY language (English, Tagalog, Taglish, or other). This includes but is not limited to: "Fill out the form", "I-fill out ang form", "heto ang link", "link sa form", "i-click ang button", "Check the link", etc.\n' +
       '- NEVER insert placeholder text like "[Insert Link]", "[form link here]", "[link]", or any bracketed template. If you would normally insert a link or URL, do NOT — the system sends the button separately.\n' +
       '- The "send when" text below is INTERNAL routing guidance only — never mention it or act on it in the reply text.\n\n' +
+      'CONCRETE BAD/GOOD EXAMPLES — do not repeat the bad pattern under any circumstance:\n' +
+      '- BAD `reply`: "Sige, eto ang link para makita mo kung paano namin inaayos ang ganyang setup: check it" — this paraphrases "here\'s the link" AND inserts a placeholder ("check it"). Both are forbidden. The customer sees this as gibberish because the actual button is sent separately.\n' +
+      '- BAD `reply`: "Heto na po ang link 👇", "Click the link below", "I-tap ang link sa baba", "Check this out", "Tingnan mo \'to", "Here\'s the form" — every one of these is a violation, in every language.\n' +
+      '- GOOD `reply` (action_page set): "Usually sa ganyang volume, 60–70% talaga nasasayang. Eto na ang ginagawa namin para sa mga ganyang setup —" (warm, conversational, references NOTHING about a link/button/form). The button arrives on its own as a separate message.\n' +
+      '- GOOD `reply` (action_page set): "Got it — same pattern as ibang clients namin. Tingnan mo kung magagamit niyo \'to sa team niyo." (no link reference; the button card follows automatically).\n' +
+      'IRON RULE: if you find yourself writing the word "link", "button", "form", "check", "tap", "click", "tingnan", "heto", "eto", "here\'s" or any synonym referring to the action page inside `reply`, STOP and rewrite. Set `action_page.action_page_id` instead and let `reply` stay conversational.\n\n' +
       'BUTTON_TEXT RULES (the card caption shown above the button):\n' +
       '- Write a short, action-pushing call-to-action in the SAME language as the customer (e.g. Tagalog/Taglish if they wrote Tagalog).\n' +
       '- Max ~80 chars. One line. No greetings, no page title, no URL.\n' +
@@ -532,8 +572,23 @@ export function stageInstruction(
     recommendSection +
     recommendPropertySection +
     '\n\n' +
+    currentStageBanner(stages, currentStageId) +
     stageList(stages, currentStageId) +
     apListSection
+  )
+}
+
+function currentStageBanner(stages: StageBrief[], currentStageId: string | null): string {
+  const cur = currentStageId ? stages.find((s) => s.id === currentStageId) : null
+  if (!cur) {
+    return 'CURRENT STAGE: (none — lead has no stage yet). Pick the best fit for the very first inbound message.\n\n'
+  }
+  return (
+    `CURRENT STAGE: "${cur.name}" (kind: ${cur.kind}, position: ${cur.position}). ` +
+    'The lead has ALREADY ADVANCED to this stage in prior turns. Do NOT reason as if it is on an earlier stage. ' +
+    'Do NOT say things like "exit entry stage" or "first inbound" unless the kind above is literally "entry". ' +
+    'A move to a stage with a SMALLER position than ' + cur.position + ' is a BACKWARD move and is only allowed when the customer explicitly disengages ' +
+    '(e.g. "not interested", "ayaw na", "cancel", "hindi na po ituloy"). Otherwise pick forward or null.\n\n'
   )
 }
 
@@ -716,10 +771,42 @@ export function sanitizeReply(raw: string): string {
     '',
   )
 
+  // 8b. Link-tease sentences. Models occasionally announce a link in `reply`
+  //     ("Sige, eto ang link... check it") without actually setting the
+  //     structured `action_page` field, so the customer sees a teaser with no
+  //     button. The prompt forbids this in any language; strip any sentence
+  //     that contains a tease phrase so the customer at worst gets a shorter
+  //     (or empty) reply rather than a broken promise of a link.
+  s = stripLinkTeaseSentences(s)
+
   // 9. Collapse whitespace runs and trim.
   s = s.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim()
 
   return s
+}
+
+// Patterns that announce "here's the link / button / form" in any language we
+// see in Messenger threads (EN / TL / Taglish). A sentence containing any of
+// these is treated as a tease and dropped from `reply` — the prompt forbids
+// referencing the action-page button in prose regardless of whether the
+// structured `action_page` field was actually set.
+const LINK_TEASE_RE =
+  /\b(?:e?to|heto|nandito|narito)\b[^.!?\n]{0,30}?\b(?:link|button|form|page)\b|\bhere(?:'?s|\s+is)\s+(?:the|a|your)?\s*(?:link|form|button|page)\b|\bcheck\s+(?:it|this|out|the\s+(?:link|page|form|button)|sa|ang|yung|ito|'to|niyo|mo|niya)\b|\btingnan\s+(?:mo|niyo|nyo)\b|\bi[-\s]?(?:click|tap|fill)\b|\bclick\s+(?:the|this|here|sa|yung|ito|'to)\b|\btap\s+(?:the|this|here|sa|yung)\b|\bfill\s+(?:out|in|up)\s+(?:the|this|na|yung)?\s*form\b|\bsundin\s+ang\s+link\b|\bpara\s+(?:ma)?kita\s+mo\b/i
+
+export function stripLinkTeaseSentences(s: string): string {
+  if (!s) return s
+  // Split on sentence enders (including `:` since Tagalog tease lines often
+  // end on a colon → "eto ang link para makita mo: check it"). Keep the
+  // delimiters by capturing them so we can drop them along with the tease.
+  const parts = s.split(/([.!?:\n]+)/)
+  const out: string[] = []
+  for (let i = 0; i < parts.length; i += 2) {
+    const seg = parts[i] ?? ''
+    const delim = parts[i + 1] ?? ''
+    if (seg && LINK_TEASE_RE.test(seg)) continue
+    out.push(seg + delim)
+  }
+  return out.join('')
 }
 
 function parseJson(raw: string): unknown {

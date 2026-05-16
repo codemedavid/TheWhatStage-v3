@@ -2,7 +2,7 @@
 
 import { useActionState } from 'react'
 import { savePersonalityAction, type PersonalityFormState } from '../actions'
-import { VIBE_PRESETS, type VibePreset } from '@/lib/onboarding/ai/personality'
+import { VIBE_PRESETS, type VibePreset } from '@/lib/onboarding/ai/personality-shared'
 import { StepNav } from '../_components/StepNav'
 import { t, type DictKey } from '@/lib/onboarding/i18n'
 import type { OnboardingLang } from '@/lib/onboarding/types'

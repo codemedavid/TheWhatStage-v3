@@ -4,7 +4,7 @@ import { getOnboardingState } from '@/lib/onboarding/state'
 import { getOnboardingLang } from '@/lib/onboarding/lang'
 import { STEP_ORDER } from '@/lib/onboarding/steps'
 import { t, type DictKey } from '@/lib/onboarding/i18n'
-import { dismissOnboardingAction } from '@/app/(app)/onboarding/actions'
+import { dismissOnboardingAction } from '@/app/onboarding/actions'
 
 export async function LaunchChecklist() {
   const [state, lang] = await Promise.all([getOnboardingState(), getOnboardingLang()])

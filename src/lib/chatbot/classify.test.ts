@@ -324,4 +324,49 @@ describe('sanitizeReply', () => {
     const twice = sanitizeReply(once)
     expect(twice).toBe(once)
   })
+
+  // ---- Link-tease sentences. The model sometimes paraphrases "here's the
+  //      link" without actually attaching the action_page, leaving the
+  //      customer with a broken promise. These MUST be stripped.
+  it.each([
+    'Sige, eto ang link para makita mo kung paano namin inaayos ang ganyang setup: check it',
+    'Heto na po ang link 👇',
+    "Here's the link for you 👇",
+    'Click the link below',
+    'I-tap ang link sa baba',
+    'Check this out',
+    "Tingnan mo 'to",
+    'Fill out the form below',
+    'I-click ang button para mag-book',
+    'I-fill out ang form para makita ang availability',
+    // Production case (2026-05-15 screenshot): bot teased a link with no
+    // button card attached, customer replied "wala pa din pong link".
+    'Perfect. Eto na yung link para makita mo kung paano namin inaayos ang ganyang setup:',
+  ])('strips link-tease line: %s', (raw) => {
+    const out = sanitizeReply(raw)
+    expect(out).not.toMatch(/\blink\b/i)
+    expect(out).not.toMatch(/\bcheck\s+(?:it|this|the|sa|ang|yung|mo|'to)/i)
+    expect(out).not.toMatch(/\bi[-\s]?(?:click|tap|fill)\b/i)
+    expect(out).not.toMatch(/\bclick\s+the\b/i)
+    expect(out).not.toMatch(/\btingnan\s+mo\b/i)
+    expect(out).not.toMatch(/\bheto\s+(?:na\s+)?(?:po\s+)?ang\s+link/i)
+    expect(out).not.toMatch(/\beto\s+ang\s+link/i)
+    expect(out).not.toMatch(/\bfill\s+out\b/i)
+  })
+
+  it('strips a tease sentence but keeps surrounding conversational text', () => {
+    const raw =
+      'Usually sa ganyang volume, 60–70% talaga nasasayang. Sige, eto ang link para makita mo: check it. Salamat po!'
+    const out = sanitizeReply(raw)
+    expect(out).toContain('60–70%')
+    expect(out).toContain('Salamat po!')
+    expect(out).not.toMatch(/eto\s+ang\s+link/i)
+    expect(out).not.toMatch(/check\s+it/i)
+  })
+
+  it('leaves a fully conversational reply untouched', () => {
+    const raw =
+      'Usually sa ganyang volume, nasa 60-70% ang nasasayang. Gusto mo bang makita kung paano namin inaayos yan?'
+    expect(sanitizeReply(raw)).toBe(raw)
+  })
 })
