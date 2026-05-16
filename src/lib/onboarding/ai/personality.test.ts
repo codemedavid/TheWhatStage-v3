@@ -36,7 +36,7 @@ describe('generatePersonality', () => {
     expect(out.fallback_message).toMatch(/owner/i)
   })
 
-  it('throws generation_failed on bad JSON', async () => {
+  it('retries once when JSON is malformed and succeeds on the second call', async () => {
     const { HfRouterLlm } = await import('@/lib/rag')
     ;(HfRouterLlm as unknown as { mockImplementationOnce: (fn: () => unknown) => void }).mockImplementationOnce(
       function Bad(this: { complete: ReturnType<typeof vi.fn> }) {
@@ -44,6 +44,20 @@ describe('generatePersonality', () => {
         return this
       },
     )
+    const out = await generatePersonality({ basics, seeds: {}, lang: 'tl' })
+    expect(out.name).toBe('Nena')
+  })
+
+  it('throws generation_failed when both attempts fail', async () => {
+    const { HfRouterLlm } = await import('@/lib/rag')
+    const badImpl = function Bad(this: { complete: ReturnType<typeof vi.fn> }) {
+      this.complete = vi.fn(async () => 'nope')
+      return this
+    }
+    ;(HfRouterLlm as unknown as { mockImplementationOnce: (fn: () => unknown) => void })
+      .mockImplementationOnce(badImpl)
+    ;(HfRouterLlm as unknown as { mockImplementationOnce: (fn: () => unknown) => void })
+      .mockImplementationOnce(badImpl)
     await expect(generatePersonality({ basics, seeds: {}, lang: 'tl' })).rejects.toThrow(/generation_failed/i)
   })
 })

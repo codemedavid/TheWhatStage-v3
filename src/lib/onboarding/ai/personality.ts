@@ -57,7 +57,22 @@ function userPrompt(b: BusinessBasics): string {
   ].join('\n')
 }
 
-export async function generatePersonality(input: {
+function extractJson(raw: string): unknown {
+  // Strip code fences like ```json ... ```
+  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i)
+  const candidate = (fenced?.[1] ?? raw).trim()
+  // First try the whole string.
+  try { return JSON.parse(candidate) } catch { /* fall through */ }
+  // Fallback: slice from first { to last } and try again.
+  const first = candidate.indexOf('{')
+  const last = candidate.lastIndexOf('}')
+  if (first !== -1 && last > first) {
+    return JSON.parse(candidate.slice(first, last + 1))
+  }
+  throw new Error('invalid_json')
+}
+
+async function callOnce(input: {
   basics: BusinessBasics
   seeds: PersonalitySeeds
   lang: OnboardingLang
@@ -77,11 +92,28 @@ export async function generatePersonality(input: {
   }
   let parsed: unknown
   try {
-    parsed = JSON.parse(raw)
+    parsed = extractJson(raw)
   } catch {
     throw new Error('generation_failed: invalid_json')
   }
   const r = ResponseSchema.safeParse(parsed)
   if (!r.success) throw new Error('generation_failed: schema_mismatch')
   return r.data
+}
+
+export async function generatePersonality(input: {
+  basics: BusinessBasics
+  seeds: PersonalitySeeds
+  lang: OnboardingLang
+}): Promise<GeneratedPersonality> {
+  try {
+    return await callOnce(input)
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : ''
+    // Retry once on parse / schema failures (transient LLM formatting issues).
+    if (msg.includes('invalid_json') || msg.includes('schema_mismatch')) {
+      return await callOnce(input)
+    }
+    throw err
+  }
 }
