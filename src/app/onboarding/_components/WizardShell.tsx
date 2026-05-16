@@ -266,4 +266,25 @@ const OB_CSS = `
   .ob-shell .ob-progress-meta { margin-left: 20px; margin-right: 20px; padding-left: 0; padding-right: 0; }
   .ob-shell .ob-choice-grid.two { grid-template-columns: 1fr; }
 }
+
+@media (max-width: 520px) {
+  .ob-shell .ob-top {
+    flex-wrap: wrap; gap: 10px;
+    padding: 14px 16px;
+  }
+  .ob-shell .ob-top-right { gap: 4px; flex-shrink: 0; }
+  .ob-shell .ob-top-link { padding: 6px 10px; font-size: 12px; }
+  .ob-shell .ob-main { padding: 24px 16px 32px; }
+  .ob-shell .ob-progress-track,
+  .ob-shell .ob-progress-meta { margin-left: 16px; margin-right: 16px; }
+  .ob-shell .ob-nav {
+    flex-wrap: wrap; gap: 10px;
+    padding-top: 20px; margin-top: 20px;
+  }
+  .ob-shell .ob-nav > * { min-width: 0; }
+  .ob-shell .ob-nav-actions { gap: 6px; flex-wrap: wrap; }
+  .ob-shell .ob-btn { padding: 9px 14px; font-size: 13px; }
+  .ob-shell .ob-btn-lg { padding: 12px 18px; font-size: 14px; }
+  .ob-shell .ob-title { font-size: clamp(28px, 7vw, 40px); }
+}
 `
