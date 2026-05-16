@@ -47,6 +47,32 @@ export async function upsertRunning(
   if (error) console.error('[generation.repo.upsertRunning]', error)
 }
 
+export type EnqueueResult = 'enqueued' | 'in_progress' | 'already_done'
+
+/** Atomic conditional enqueue (Postgres RPC with row-level lock). Returns
+ * 'already_done' / 'in_progress' when the runner should bail out without
+ * re-running the LLM. Falls back to upsertRunning if the RPC errors so a
+ * deploy that races the migration still works. */
+export async function enqueueRunning(
+  profileId: string,
+  kind: GenerationKind,
+  inputHash: string,
+): Promise<EnqueueResult> {
+  const admin = createAdminClient()
+  const { data, error } = await admin.rpc('onboarding_enqueue_generation', {
+    p_profile_id: profileId,
+    p_kind: kind,
+    p_input_hash: inputHash,
+  })
+  if (error) {
+    console.error('[generation.repo.enqueueRunning] rpc', error)
+    await upsertRunning(profileId, kind, inputHash)
+    return 'enqueued'
+  }
+  const status = String(data ?? 'enqueued') as EnqueueResult
+  return status === 'already_done' || status === 'in_progress' ? status : 'enqueued'
+}
+
 export async function markDone(
   profileId: string,
   kind: GenerationKind,

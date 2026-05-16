@@ -3,6 +3,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
 const repo = vi.hoisted(() => ({
   getJob: vi.fn(),
   upsertRunning: vi.fn(async () => {}),
+  enqueueRunning: vi.fn(async () => 'enqueued' as const),
   markDone: vi.fn(async () => {}),
   markFailed: vi.fn(async () => {}),
 }))
@@ -22,6 +23,7 @@ const knowledgeInput = {
 beforeEach(() => {
   repo.getJob.mockReset()
   repo.upsertRunning.mockReset().mockResolvedValue(undefined)
+  repo.enqueueRunning.mockReset().mockResolvedValue('enqueued' as never)
   repo.markDone.mockReset().mockResolvedValue(undefined)
   repo.markFailed.mockReset().mockResolvedValue(undefined)
   kindsRun.mockReset()
@@ -29,10 +31,10 @@ beforeEach(() => {
 
 describe('runGeneration', () => {
   it('writes running -> done on success', async () => {
-    repo.getJob.mockResolvedValue(null)
+    repo.enqueueRunning.mockResolvedValue('enqueued' as never)
     kindsRun.mockResolvedValue({ sections: [{ title: 't', body: 'b' }] })
     await runGeneration('p1', 'knowledge', knowledgeInput)
-    expect(repo.upsertRunning).toHaveBeenCalledWith('p1', 'knowledge', expect.any(String))
+    expect(repo.enqueueRunning).toHaveBeenCalledWith('p1', 'knowledge', expect.any(String))
     expect(repo.markDone).toHaveBeenCalledWith(
       'p1',
       'knowledge',
@@ -42,7 +44,7 @@ describe('runGeneration', () => {
   })
 
   it('writes running -> failed when the generator throws', async () => {
-    repo.getJob.mockResolvedValue(null)
+    repo.enqueueRunning.mockResolvedValue('enqueued' as never)
     kindsRun.mockRejectedValue(new Error('boom'))
     await runGeneration('p1', 'knowledge', knowledgeInput)
     expect(repo.markFailed).toHaveBeenCalledWith('p1', 'knowledge', expect.any(String), 'boom')
@@ -50,25 +52,25 @@ describe('runGeneration', () => {
   })
 
   it('never throws even when repo fails', async () => {
-    repo.getJob.mockRejectedValue(new Error('db down'))
+    repo.enqueueRunning.mockRejectedValue(new Error('db down'))
     kindsRun.mockResolvedValue({})
     await expect(
       runGeneration('p1', 'knowledge', knowledgeInput),
     ).resolves.toBeUndefined()
   })
 
-  it('short-circuits when the same input was previously generated', async () => {
-    let lastHash = ''
-    repo.upsertRunning.mockImplementation((async (_p: string, _k: string, h: string) => {
-      lastHash = h
-    }) as never)
-    repo.getJob
-      .mockResolvedValueOnce(null)
-      .mockImplementationOnce(async () => ({ status: 'done', input_hash: lastHash }))
+  it('short-circuits when enqueue reports already_done', async () => {
+    repo.enqueueRunning.mockResolvedValue('already_done' as never)
     kindsRun.mockResolvedValue({ ok: true })
-    const input = knowledgeInput
-    await runGeneration('p1', 'knowledge', input)
-    await runGeneration('p1', 'knowledge', input)
-    expect(kindsRun).toHaveBeenCalledTimes(1)
+    await runGeneration('p1', 'knowledge', knowledgeInput)
+    expect(kindsRun).not.toHaveBeenCalled()
+    expect(repo.markDone).not.toHaveBeenCalled()
+  })
+
+  it('short-circuits when enqueue reports in_progress', async () => {
+    repo.enqueueRunning.mockResolvedValue('in_progress' as never)
+    kindsRun.mockResolvedValue({ ok: true })
+    await runGeneration('p1', 'knowledge', knowledgeInput)
+    expect(kindsRun).not.toHaveBeenCalled()
   })
 })

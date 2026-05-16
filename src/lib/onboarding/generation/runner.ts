@@ -1,12 +1,14 @@
 import 'server-only'
 import { canonicalHash } from './hash'
 import { KINDS, type KindInput } from './kinds'
-import { getJob, upsertRunning, markDone, markFailed } from './repo'
+import { enqueueRunning, markDone, markFailed } from './repo'
 import type { GenerationKind } from './types'
 
 /**
  * Run an AI generation in the background. Writes status to generation_jobs.
- * Idempotent: re-running with the same input short-circuits.
+ * Atomically conditional via the onboarding_enqueue_generation RPC: two
+ * concurrent calls won't both run the LLM, and a finished job won't be
+ * clobbered back to 'running' by a late-arriving duplicate request.
  * Never throws — errors are persisted as status='failed' on the job row.
  */
 export async function runGeneration<K extends GenerationKind>(
@@ -16,10 +18,8 @@ export async function runGeneration<K extends GenerationKind>(
 ): Promise<void> {
   try {
     const hash = canonicalHash(input)
-    const existing = await getJob(profileId, kind)
-    if (existing?.status === 'done' && existing.input_hash === hash) return
-
-    await upsertRunning(profileId, kind, hash)
+    const state = await enqueueRunning(profileId, kind, hash)
+    if (state !== 'enqueued') return
     try {
       const handler = KINDS[kind] as { run: (i: KindInput<K>) => Promise<unknown> }
       const result = await handler.run(input)
