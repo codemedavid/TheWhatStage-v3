@@ -78,6 +78,10 @@ export const CatalogSubmissionPayload = z.object({
   customer_phone: z.string().trim().max(40).optional(),
   customer_notes: z.string().trim().max(2000).optional(),
   payment_method_id: z.string().uuid().optional(),
+  payment_proof_url: z.string().url().max(2048).optional(),
+  payment_proof_file_id: z.string().max(256).optional(),
+  payment_amount: z.coerce.number().min(0).optional(),
+  payment_note: z.string().trim().max(2000).optional(),
   custom: z
     .union([
       z.string().transform((value, ctx) => {
@@ -132,11 +136,19 @@ export function parseCatalogSubmission(
   const fields = parseCheckoutFields(config)
   const custom = validateCustom(parsed.custom, fields)
 
+  if (parsed.payment_method_id && !parsed.payment_proof_url) {
+    throw new Error('payment proof is required when a payment method is selected')
+  }
+
   return {
     outcome: 'checked_out',
     data: {
       items: parsed.items,
       payment_method_id: parsed.payment_method_id ?? null,
+      payment_proof_url: parsed.payment_proof_url ?? null,
+      payment_proof_file_id: parsed.payment_proof_file_id ?? null,
+      payment_amount: parsed.payment_amount ?? null,
+      payment_note: parsed.payment_note ?? null,
       customer: {
         name: parsed.customer_name ?? null,
         email: parsed.customer_email ?? null,
