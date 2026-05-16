@@ -1,8 +1,11 @@
+import { after } from 'next/server'
 import { generateFormFieldsAction } from '../actions'
 import { FormFieldsEditor } from './FormFieldsEditor'
 import { GenerationGate } from '../_components/GenerationGate'
 import { getJob } from '@/lib/onboarding/generation/repo'
+import { runGeneration } from '@/lib/onboarding/generation/runner'
 import { createClient } from '@/lib/supabase/server'
+import { getBusinessBasics } from '@/lib/onboarding/state'
 import { t } from '@/lib/onboarding/i18n'
 import type { OnboardingLang } from '@/lib/onboarding/types'
 
@@ -74,6 +77,23 @@ export async function FormFieldsContent({
         {t('gc.form.error.generation', lang)}
       </div>
     )
+  }
+
+  // Lazily enqueue if no job row exists yet.
+  if (!job && auth.user) {
+    const basics = await getBusinessBasics()
+    if (basics) {
+      const profileId = auth.user.id
+      const { data: stateRow } = await supabase
+        .from('onboarding_state')
+        .select('ui_language')
+        .eq('profile_id', profileId)
+        .maybeSingle()
+      const pageLang = stateRow?.ui_language === 'en' ? 'en' : 'tl'
+      after(async () => {
+        await runGeneration(profileId, 'form_fields', { basics, kind, lang: pageLang })
+      })
+    }
   }
 
   return (

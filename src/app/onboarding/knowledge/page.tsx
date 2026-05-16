@@ -1,10 +1,12 @@
 import Link from 'next/link'
+import { after } from 'next/server'
 import { WizardShell } from '../_components/WizardShell'
 import { KnowledgeEditor } from './KnowledgeEditor'
 import { RegenerateButton } from './RegenerateButton'
 import { generateKnowledgeAction } from '../actions'
 import { GenerationGate } from '../_components/GenerationGate'
 import { getJob } from '@/lib/onboarding/generation/repo'
+import { runGeneration } from '@/lib/onboarding/generation/runner'
 import { createClient } from '@/lib/supabase/server'
 import { getOnboardingLang } from '@/lib/onboarding/lang'
 import { getBusinessBasics } from '@/lib/onboarding/state'
@@ -12,6 +14,7 @@ import { t } from '@/lib/onboarding/i18n'
 import type { GeneratedKnowledge } from '@/lib/onboarding/ai/knowledge'
 
 export const dynamic = 'force-dynamic'
+export const maxDuration = 60
 
 function isGeneratedKnowledge(v: unknown): v is GeneratedKnowledge {
   return !!v && typeof v === 'object' && Array.isArray((v as { sections?: unknown }).sections)
@@ -75,6 +78,21 @@ export default async function KnowledgePage() {
         </div>
       </WizardShell>
     )
+  }
+
+  // No job row yet — lazily enqueue so existing users / direct nav / stale-swept
+  // sessions still trigger generation.
+  if (!job && auth.user) {
+    const profileId = auth.user.id
+    const { data: stateRow } = await supabase
+      .from('onboarding_state')
+      .select('ui_language')
+      .eq('profile_id', profileId)
+      .maybeSingle()
+    const pageLang = stateRow?.ui_language === 'en' ? 'en' : 'tl'
+    after(async () => {
+      await runGeneration(profileId, 'knowledge', { basics, lang: pageLang })
+    })
   }
 
   return (

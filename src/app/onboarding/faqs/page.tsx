@@ -1,10 +1,12 @@
 import Link from 'next/link'
+import { after } from 'next/server'
 import { WizardShell } from '../_components/WizardShell'
 import { FaqChecklist } from './FaqChecklist'
 import { RegenerateButton } from '../knowledge/RegenerateButton'
 import { generateFaqsAction } from '../actions'
 import { GenerationGate } from '../_components/GenerationGate'
 import { getJob } from '@/lib/onboarding/generation/repo'
+import { runGeneration } from '@/lib/onboarding/generation/runner'
 import { createClient } from '@/lib/supabase/server'
 import { getOnboardingLang } from '@/lib/onboarding/lang'
 import { getBusinessBasics } from '@/lib/onboarding/state'
@@ -12,6 +14,7 @@ import { t } from '@/lib/onboarding/i18n'
 import type { GeneratedFaqs } from '@/lib/onboarding/ai/faqs'
 
 export const dynamic = 'force-dynamic'
+export const maxDuration = 60
 
 function isGeneratedFaqs(v: unknown): v is GeneratedFaqs {
   return !!v && typeof v === 'object' && Array.isArray((v as { suggestions?: unknown }).suggestions)
@@ -74,6 +77,21 @@ export default async function FaqsPage() {
         </div>
       </WizardShell>
     )
+  }
+
+  // No job row yet — lazily enqueue so existing users / direct nav / stale-swept
+  // sessions still trigger generation.
+  if (!job && auth.user) {
+    const profileId = auth.user.id
+    const { data: stateRow } = await supabase
+      .from('onboarding_state')
+      .select('ui_language')
+      .eq('profile_id', profileId)
+      .maybeSingle()
+    const pageLang = stateRow?.ui_language === 'en' ? 'en' : 'tl'
+    after(async () => {
+      await runGeneration(profileId, 'faqs', { basics, lang: pageLang })
+    })
   }
 
   return (
