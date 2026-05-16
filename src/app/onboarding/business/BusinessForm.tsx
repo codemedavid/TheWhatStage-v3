@@ -35,14 +35,27 @@ export function BusinessForm({ lang, initial }: Props) {
     {},
   )
   const err = (k: string) => state.fieldErrors?.[k]
+  // Prefer echoed-back values from a failed submit over initial DB values, so
+  // the form preserves whatever the user typed instead of wiping it.
+  const v = (k: keyof NonNullable<BusinessBasicsFormState['values']>) =>
+    state.values?.[k] ?? (initial?.[k as keyof typeof initial] as string | undefined) ?? ''
 
   return (
-    <form action={action} className="space-y-5">
+    <form action={action} className="space-y-5" key={state.values ? 'retry' : 'fresh'}>
+      {state.formError && (
+        <div
+          role="alert"
+          aria-live="polite"
+          className="rounded-md border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-900"
+        >
+          {state.formError}
+        </div>
+      )}
       <Field
         name="name"
         label={t('business.name.label', lang)}
         placeholder={t('business.name.ph', lang)}
-        defaultValue={initial?.name ?? ''}
+        defaultValue={v('name')}
         error={err('name')}
         maxLength={120}
       />
@@ -50,7 +63,7 @@ export function BusinessForm({ lang, initial }: Props) {
         name="offer"
         label={t('business.offer.label', lang)}
         placeholder={t('business.offer.ph', lang)}
-        defaultValue={initial?.offer ?? ''}
+        defaultValue={v('offer')}
         error={err('offer')}
         maxLength={500}
         textarea
@@ -70,7 +83,7 @@ export function BusinessForm({ lang, initial }: Props) {
                 type="radio"
                 name="business_type"
                 value={type}
-                defaultChecked={(initial?.business_type ?? 'service') === type}
+                defaultChecked={(state.values?.business_type ?? initial?.business_type ?? 'service') === type}
                 className="sr-only"
               />
               {t(TYPE_LABEL_KEY[type], lang)}
@@ -86,7 +99,7 @@ export function BusinessForm({ lang, initial }: Props) {
         name="audience"
         label={t('business.audience.label', lang)}
         placeholder={t('business.audience.ph', lang)}
-        defaultValue={initial?.audience ?? ''}
+        defaultValue={v('audience')}
         error={err('audience')}
         maxLength={500}
         textarea
@@ -95,7 +108,7 @@ export function BusinessForm({ lang, initial }: Props) {
         name="pain"
         label={t('business.pain.label', lang)}
         placeholder={t('business.pain.ph', lang)}
-        defaultValue={initial?.pain ?? ''}
+        defaultValue={v('pain')}
         error={err('pain')}
         maxLength={500}
         textarea
@@ -115,7 +128,7 @@ export function BusinessForm({ lang, initial }: Props) {
                 type="radio"
                 name="tone"
                 value={tone}
-                defaultChecked={(initial?.tone ?? 'friendly') === tone}
+                defaultChecked={(state.values?.tone ?? initial?.tone ?? 'friendly') === tone}
                 className="sr-only"
               />
               {t(TONE_LABEL_KEY[tone], lang)}
@@ -123,10 +136,6 @@ export function BusinessForm({ lang, initial }: Props) {
           ))}
         </div>
       </fieldset>
-
-      {state.formError && (
-        <p className="text-sm text-red-600">{state.formError}</p>
-      )}
 
       <StepNav
         step="business"

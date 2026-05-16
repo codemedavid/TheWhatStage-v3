@@ -40,3 +40,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+
+# Local dogfood artifacts — large screenshot/video bundles
+dogfood-output/

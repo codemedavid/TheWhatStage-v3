@@ -70,12 +70,33 @@ export async function getOnboardingState(): Promise<OnboardingState | null> {
   return rowToState(data as Row)
 }
 
-/** Insert an onboarding_state row for a freshly signed-up user. Idempotent. */
+/** Insert an onboarding_state row for a freshly signed-up user. Idempotent.
+ * Retries once on FK violation: the handle_new_user trigger that creates the
+ * profile row sometimes hasn't committed by the time we get here, and inserting
+ * the FK target before it exists yields code 23503. */
 export async function initOnboardingForProfile(profileId: string): Promise<void> {
   const admin = createAdminClient()
-  await admin
-    .from(TABLE)
-    .upsert({ profile_id: profileId }, { onConflict: 'profile_id', ignoreDuplicates: true })
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const { error } = await admin
+      .from(TABLE)
+      .upsert({ profile_id: profileId }, { onConflict: 'profile_id', ignoreDuplicates: true })
+    if (!error) return
+    if (error.code === '23503' && attempt === 0) {
+      await new Promise((r) => setTimeout(r, 200))
+      continue
+    }
+    throw new Error(`init_onboarding_failed: ${error.code ?? '?'} ${error.message}`)
+  }
+}
+
+/** Ensure a state row exists for the current user. Called defensively from
+ * save actions so a failed signup-time init doesn't leave the user with
+ * step-saves that silently update zero rows. */
+export async function ensureOnboardingState(): Promise<void> {
+  const supabase = await createClient()
+  const { data: auth } = await supabase.auth.getUser()
+  if (!auth.user) throw new Error('not authenticated')
+  await initOnboardingForProfile(auth.user.id)
 }
 
 /** Mark a step completed (or skipped) for the current user. */

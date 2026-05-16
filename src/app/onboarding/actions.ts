@@ -9,6 +9,7 @@ import { z } from 'zod'
 import {
   completeOnboarding as completeOnboardingState,
   dismissOnboarding as dismissOnboardingState,
+  ensureOnboardingState,
   markStep,
   setOnboardingLanguage,
   saveBusinessBasicsToState,
@@ -17,7 +18,12 @@ import {
 import { isActionPageKind, KIND_REGISTRY, type ActionPageKind } from '@/lib/action-pages/kinds'
 import { BusinessBasicsSchema } from '@/lib/onboarding/business-basics'
 import { LANG_COOKIE } from '@/lib/onboarding/i18n'
-import { ONBOARDING_STEPS, type OnboardingLang, type OnboardingStep } from '@/lib/onboarding/types'
+import {
+  ONBOARDING_STEPS,
+  type OnboardingAuditEntry,
+  type OnboardingLang,
+  type OnboardingStep,
+} from '@/lib/onboarding/types'
 import { nextStepRoute } from '@/lib/onboarding/steps'
 import { generateKnowledge, type GeneratedKnowledge } from '@/lib/onboarding/ai/knowledge'
 import { generateFaqs, type GeneratedFaqs } from '@/lib/onboarding/ai/faqs'
@@ -59,20 +65,31 @@ export async function completeOnboardingAction(): Promise<void> {
 export type BusinessBasicsFormState = {
   fieldErrors?: Record<string, string>
   formError?: string
+  /** Echoed back on validation/save failure so the form re-renders with the
+   * user's input instead of wiping it. */
+  values?: {
+    name?: string
+    offer?: string
+    business_type?: string
+    audience?: string
+    pain?: string
+    tone?: string
+  }
 }
 
 export async function saveBusinessBasicsAction(
   _prev: BusinessBasicsFormState,
   formData: FormData,
 ): Promise<BusinessBasicsFormState> {
-  const parsed = BusinessBasicsSchema.safeParse({
-    name: formData.get('name'),
-    offer: formData.get('offer'),
-    business_type: formData.get('business_type'),
-    audience: formData.get('audience'),
-    pain: formData.get('pain'),
-    tone: formData.get('tone'),
-  })
+  const raw = {
+    name: String(formData.get('name') ?? ''),
+    offer: String(formData.get('offer') ?? ''),
+    business_type: String(formData.get('business_type') ?? ''),
+    audience: String(formData.get('audience') ?? ''),
+    pain: String(formData.get('pain') ?? ''),
+    tone: String(formData.get('tone') ?? ''),
+  }
+  const parsed = BusinessBasicsSchema.safeParse(raw)
 
   if (!parsed.success) {
     const fieldErrors: Record<string, string> = {}
@@ -80,15 +97,21 @@ export async function saveBusinessBasicsAction(
       const key = issue.path[0]?.toString() ?? '_'
       if (!fieldErrors[key]) fieldErrors[key] = issue.message
     }
-    return { fieldErrors }
+    return { fieldErrors, values: raw }
   }
 
   try {
+    // Defensively ensure the state row exists. If signup-time init silently
+    // failed, every step-save would otherwise update zero rows and appear stuck.
+    await ensureOnboardingState()
     await saveBusinessBasicsToState(parsed.data)
     await markStep('business')
   } catch (err) {
     console.error('[saveBusinessBasicsAction] save error', err)
-    return { formError: 'Could not save. Please try again.' }
+    return {
+      formError: 'Could not save. Please try again.',
+      values: raw,
+    }
   }
 
   // Fire-and-forget generations for downstream steps.
@@ -175,13 +198,21 @@ export async function saveKnowledgeAction(
     return { error: 'save_failed' }
   }
 
-  const basics = await getBusinessBasics()
-  if (!basics) return { error: 'no_basics' }
-
   const { createClient } = await import('@/lib/supabase/server')
   const supabase = await createClient()
   const { data: auth } = await supabase.auth.getUser()
   if (!auth.user) return { error: 'save_failed' }
+  const userId = auth.user.id
+
+  const { data: stateRow } = await supabase
+    .from('onboarding_state')
+    .select('business_basics, ai_generations')
+    .eq('profile_id', userId)
+    .maybeSingle()
+
+  const basicsParsed = BusinessBasicsSchema.safeParse(stateRow?.business_basics)
+  if (!basicsParsed.success) return { error: 'no_basics' }
+  const basics = basicsParsed.data
 
   const text = result.data.sections
     .map((s) => `${s.title}\n\n${s.body}`)
@@ -191,7 +222,7 @@ export async function saveKnowledgeAction(
     .join('')
 
   const { error: insertErr } = await supabase.from('knowledge_documents').insert({
-    user_id: auth.user.id,
+    user_id: userId,
     title: `About ${basics.name}`,
     content_text: text,
     content_html: html,
@@ -206,7 +237,17 @@ export async function saveKnowledgeAction(
     return { error: 'save_failed' }
   }
 
-  await markStep('knowledge')
+  const now = new Date().toISOString()
+  const audit: OnboardingAuditEntry[] = Array.isArray(stateRow?.ai_generations)
+    ? (stateRow!.ai_generations as OnboardingAuditEntry[])
+    : []
+  audit.push({ step: 'knowledge', at: now, skipped: false })
+  const { error: stepErr } = await supabase
+    .from('onboarding_state')
+    .update({ knowledge_completed_at: now, ai_generations: audit })
+    .eq('profile_id', userId)
+  if (stepErr) console.error('[saveKnowledgeAction] markStep', stepErr)
+
   redirect('/onboarding/faqs')
 }
 
@@ -266,10 +307,11 @@ export async function saveFaqsAction(
   const supabase = await createClient()
   const { data: auth } = await supabase.auth.getUser()
   if (!auth.user) return { error: 'save_failed' }
+  const userId = auth.user.id
 
   if (result.data.items.length > 0) {
     const rows = result.data.items.map((it, i) => ({
-      user_id: auth.user!.id,
+      user_id: userId,
       question: it.question,
       answer: it.answer,
       position: i,
@@ -284,7 +326,22 @@ export async function saveFaqsAction(
     }
   }
 
-  await markStep('faqs')
+  const { data: stateRow } = await supabase
+    .from('onboarding_state')
+    .select('ai_generations')
+    .eq('profile_id', userId)
+    .maybeSingle()
+  const now = new Date().toISOString()
+  const audit: OnboardingAuditEntry[] = Array.isArray(stateRow?.ai_generations)
+    ? (stateRow!.ai_generations as OnboardingAuditEntry[])
+    : []
+  audit.push({ step: 'faqs', at: now, skipped: false })
+  const { error: stepErr } = await supabase
+    .from('onboarding_state')
+    .update({ faqs_completed_at: now, ai_generations: audit })
+    .eq('profile_id', userId)
+  if (stepErr) console.error('[saveFaqsAction] markStep', stepErr)
+
   redirect('/onboarding/personality')
 }
 
@@ -309,57 +366,75 @@ export async function savePersonalityAction(
     must_not: formData.get('must_not') || undefined,
   })
   if (!seedsParsed.success) return { error: 'save_failed' }
-
-  const basics = await getBusinessBasics()
-  if (!basics) return { error: 'no_basics' }
+  const seeds = seedsParsed.data
 
   const { createClient } = await import('@/lib/supabase/server')
   const supabase = await createClient()
   const { data: auth } = await supabase.auth.getUser()
   if (!auth.user) return { error: 'save_failed' }
+  const userId = auth.user.id
 
-  const { data: state } = await supabase
+  const { data: stateRow } = await supabase
     .from('onboarding_state')
-    .select('ui_language')
-    .eq('profile_id', auth.user.id)
+    .select('business_basics, ai_generations, ui_language')
+    .eq('profile_id', userId)
     .maybeSingle()
-  const lang = state?.ui_language === 'en' ? 'en' : 'tl'
 
-  let generated
-  try {
-    generated = await generatePersonality({
-      basics,
-      seeds: seedsParsed.data,
-      lang,
-    })
-  } catch (err) {
-    console.error('[savePersonalityAction] generate', err)
-    return { error: 'generation_failed' }
-  }
+  const basicsParsed = BusinessBasicsSchema.safeParse(stateRow?.business_basics)
+  if (!basicsParsed.success) return { error: 'no_basics' }
+  const basics = basicsParsed.data
+  const lang = stateRow?.ui_language === 'en' ? 'en' : 'tl'
 
-  await supabase
-    .from('onboarding_state')
-    .update({ personality_seeds: seedsParsed.data })
-    .eq('profile_id', auth.user.id)
-
+  // Persist seeds + ensure a chatbot_configs row exists so downstream steps
+  // (goal, flow) can attach to it even before generation finishes.
   const { error: upsertErr } = await supabase.from('chatbot_configs').upsert(
-    {
-      user_id: auth.user.id,
-      name: generated.name,
-      persona: generated.persona,
-      do_rules: generated.do_rules,
-      dont_rules: generated.dont_rules,
-      fallback_message: generated.fallback_message,
-      personality_source: 'custom',
-    },
+    { user_id: userId, personality_source: 'custom' },
     { onConflict: 'user_id' },
   )
   if (upsertErr) {
-    console.error('[savePersonalityAction] upsert', upsertErr)
+    console.error('[savePersonalityAction] upsert chatbot_configs', upsertErr)
     return { error: 'save_failed' }
   }
 
-  await markStep('personality')
+  const now = new Date().toISOString()
+  const audit: OnboardingAuditEntry[] = Array.isArray(stateRow?.ai_generations)
+    ? (stateRow!.ai_generations as OnboardingAuditEntry[])
+    : []
+  audit.push({ step: 'personality', at: now, skipped: false })
+  const { error: stateErr } = await supabase
+    .from('onboarding_state')
+    .update({
+      personality_seeds: seeds,
+      personality_completed_at: now,
+      ai_generations: audit,
+    })
+    .eq('profile_id', userId)
+  if (stateErr) console.error('[savePersonalityAction] state update', stateErr)
+
+  // Generate the persona in the background — the user moves on immediately.
+  after(async () => {
+    try {
+      const generated = await generatePersonality({ basics, seeds, lang })
+      const { createAdminClient } = await import('@/lib/supabase/admin')
+      const admin = createAdminClient()
+      const { error } = await admin.from('chatbot_configs').upsert(
+        {
+          user_id: userId,
+          name: generated.name,
+          persona: generated.persona,
+          do_rules: generated.do_rules,
+          dont_rules: generated.dont_rules,
+          fallback_message: generated.fallback_message,
+          personality_source: 'custom',
+        },
+        { onConflict: 'user_id' },
+      )
+      if (error) console.error('[savePersonalityAction] bg upsert', error)
+    } catch (err) {
+      console.error('[savePersonalityAction] background generate', err)
+    }
+  })
+
   redirect('/onboarding/goal')
 }
 
