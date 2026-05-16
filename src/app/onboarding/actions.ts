@@ -2,6 +2,8 @@
 
 import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
+import { after } from 'next/server'
+import { runGeneration } from '@/lib/onboarding/generation/runner'
 import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
 import {
@@ -88,6 +90,32 @@ export async function saveBusinessBasicsAction(
     console.error('[saveBusinessBasicsAction] save error', err)
     return { formError: 'Could not save. Please try again.' }
   }
+
+  // Fire-and-forget generations for downstream steps.
+  try {
+    const { createClient: createSupabaseServerClient } = await import('@/lib/supabase/server')
+    const supabase = await createSupabaseServerClient()
+    const { data: auth } = await supabase.auth.getUser()
+    if (auth.user) {
+      const profileId = auth.user.id
+      const { data: stateRow } = await supabase
+        .from('onboarding_state')
+        .select('ui_language')
+        .eq('profile_id', profileId)
+        .maybeSingle()
+      const lang = stateRow?.ui_language === 'en' ? 'en' : 'tl'
+      const basics = parsed.data
+      after(async () => {
+        await Promise.allSettled([
+          runGeneration(profileId, 'knowledge', { basics, lang }),
+          runGeneration(profileId, 'faqs', { basics, lang }),
+        ])
+      })
+    }
+  } catch (err) {
+    console.error('[saveBusinessBasicsAction] schedule-generation', err)
+  }
+
   redirect('/onboarding/knowledge')
 }
 

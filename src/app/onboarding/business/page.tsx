@@ -4,6 +4,8 @@ import { getOnboardingLang } from '@/lib/onboarding/lang'
 import { getBusinessBasics } from '@/lib/onboarding/state'
 import { t } from '@/lib/onboarding/i18n'
 
+export const maxDuration = 60
+
 export default async function BusinessPage() {
   const [lang, initial] = await Promise.all([
     getOnboardingLang(),
