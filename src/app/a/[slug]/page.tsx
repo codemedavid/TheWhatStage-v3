@@ -2,6 +2,7 @@ import { notFound } from 'next/navigation'
 import { loadPublicActionPage } from './_lib/load'
 import { ActionPageRenderer } from './_components/Renderer'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { loadEnabledPaymentMethodsForPage } from '@/lib/payment-methods/public'
 
 async function loadSubmissionPublicMessage(args: {
   pageId: string
@@ -44,6 +45,17 @@ export default async function PublicActionPage({
   const isRealestate = result.page.kind === 'realestate' && !submitted
   const isSales = result.page.kind === 'sales' && !submitted
 
+  const salesPaymentConfig = isSales
+    ? ((result.page.config as { payment?: { enabled?: boolean; excluded_method_ids?: string[] } }).payment)
+    : undefined
+  const salesPaymentMethods =
+    isSales && salesPaymentConfig?.enabled !== false
+      ? await loadEnabledPaymentMethodsForPage(
+          result.userId,
+          salesPaymentConfig?.excluded_method_ids ?? [],
+        )
+      : []
+
   if (isBooking || isCatalog || isRealestate || isSales) {
     return (
       <ActionPageRenderer
@@ -52,7 +64,7 @@ export default async function PublicActionPage({
         rawToken={rawToken}
         variant="standalone"
         products={result.products ?? []}
-        paymentMethods={result.paymentMethods ?? []}
+        paymentMethods={isSales ? salesPaymentMethods : (result.paymentMethods ?? [])}
         searchParams={sp}
       />
     )
