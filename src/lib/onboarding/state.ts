@@ -2,9 +2,8 @@ import 'server-only'
 import { cache } from 'react'
 import { createClient, getAuthUser } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { STEP_ORDER, stepCompletionColumn } from './steps'
+import { STEP_ORDER } from './steps'
 import type {
-  OnboardingAuditEntry,
   OnboardingState,
   OnboardingStep,
 } from './types'
@@ -102,35 +101,22 @@ export async function ensureOnboardingState(): Promise<void> {
   await initOnboardingForProfile(auth.user.id)
 }
 
-/** Mark a step completed (or skipped) for the current user. */
+/** Mark a step completed (or skipped) for the current user. Single Postgres
+ * round-trip via the onboarding_mark_step RPC: column update + audit append
+ * in one statement, server-side jsonb || so concurrent step saves can't
+ * race-clobber the audit array. */
 export async function markStep(
   step: OnboardingStep,
   opts: { skipped?: boolean } = {},
 ): Promise<void> {
   const supabase = await createClient()
-  const { data: auth } = await supabase.auth.getUser()
-  if (!auth.user) throw new Error('not authenticated')
-  const col = stepCompletionColumn(step)
-  const now = new Date().toISOString()
-
-  const { data: row } = await supabase
-    .from(TABLE)
-    .select('ai_generations')
-    .eq('profile_id', auth.user.id)
-    .maybeSingle()
-  const audit: OnboardingAuditEntry[] = Array.isArray(row?.ai_generations)
-    ? (row!.ai_generations as OnboardingAuditEntry[])
-    : []
-  audit.push({ step, at: now, skipped: !!opts.skipped })
-
-  const patch: Record<string, unknown> = {
-    [col]: now,
-    ai_generations: audit,
-  }
-  const { error } = await supabase
-    .from(TABLE)
-    .update(patch)
-    .eq('profile_id', auth.user.id)
+  const user = await getAuthUser()
+  if (!user) throw new Error('not authenticated')
+  const { error } = await supabase.rpc('onboarding_mark_step', {
+    p_profile_id: user.id,
+    p_step: step,
+    p_skipped: !!opts.skipped,
+  })
   if (error) throw error
 }
 
