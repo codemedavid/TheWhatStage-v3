@@ -27,7 +27,9 @@ import {
 import { nextStepRoute } from '@/lib/onboarding/steps'
 import { generateKnowledge, type GeneratedKnowledge } from '@/lib/onboarding/ai/knowledge'
 import { generateFaqs, type GeneratedFaqs } from '@/lib/onboarding/ai/faqs'
-import { generatePersonality, VIBE_PRESETS, type VibePreset } from '@/lib/onboarding/ai/personality'
+import { VIBE_PRESETS, type VibePreset } from '@/lib/onboarding/ai/personality'
+import type { GeneratedPersonality } from '@/lib/onboarding/ai/personality-shared'
+import { getJob } from '@/lib/onboarding/generation/repo'
 import { generateFormFields, type SuggestedBlock } from '@/lib/onboarding/ai/form-fields'
 import { generateBotInstructions, type GeneratedBotInstructions } from '@/lib/onboarding/ai/bot-instructions'
 import { getPrimaryActionPage } from '@/lib/onboarding/state'
@@ -419,27 +421,30 @@ export async function savePersonalityAction(
   if (stateErr) console.error('[savePersonalityAction] state update', stateErr)
 
   // Generate the persona in the background — the user moves on immediately.
+  // Routed through runGeneration so we get a generation_jobs row (visibility,
+  // status, retry, idempotency) instead of an inline LLM call that swallows
+  // failures. After the job completes we copy the result into chatbot_configs.
   after(async () => {
-    try {
-      const generated = await generatePersonality({ basics, seeds, lang })
-      const { createAdminClient } = await import('@/lib/supabase/admin')
-      const admin = createAdminClient()
-      const { error } = await admin.from('chatbot_configs').upsert(
-        {
-          user_id: userId,
-          name: generated.name,
-          persona: generated.persona,
-          do_rules: generated.do_rules,
-          dont_rules: generated.dont_rules,
-          fallback_message: generated.fallback_message,
-          personality_source: 'custom',
-        },
-        { onConflict: 'user_id' },
-      )
-      if (error) console.error('[savePersonalityAction] bg upsert', error)
-    } catch (err) {
-      console.error('[savePersonalityAction] background generate', err)
-    }
+    await runGeneration(userId, 'personality_seed', { basics, seeds, lang })
+    const job = await getJob(userId, 'personality_seed')
+    if (job?.status !== 'done') return
+    const result = job.result as GeneratedPersonality | null
+    if (!result || typeof result.name !== 'string') return
+    const { createAdminClient } = await import('@/lib/supabase/admin')
+    const admin = createAdminClient()
+    const { error } = await admin.from('chatbot_configs').upsert(
+      {
+        user_id: userId,
+        name: result.name,
+        persona: result.persona,
+        do_rules: result.do_rules,
+        dont_rules: result.dont_rules,
+        fallback_message: result.fallback_message,
+        personality_source: 'custom',
+      },
+      { onConflict: 'user_id' },
+    )
+    if (error) console.error('[savePersonalityAction] persona upsert', error)
   })
 
   redirect('/onboarding/goal')
