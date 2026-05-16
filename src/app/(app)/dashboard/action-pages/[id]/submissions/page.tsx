@@ -9,6 +9,7 @@ import PropertySubmissionsView, {
   type PropertySubmissionRow,
 } from './PropertySubmissionsView'
 import CatalogOrdersView, { type CatalogOrderEntry } from './CatalogOrdersView'
+import type { OrderPayment } from '@/lib/order-payments/types'
 
 export default async function SubmissionsPage({
   params,
@@ -206,7 +207,7 @@ export default async function SubmissionsPage({
       .order('created_at', { ascending: false })
       .limit(500)
 
-    const catalogOrders: CatalogOrderEntry[] = ((rawOrders ?? []) as Array<{
+    type RawOrder = {
       id: string
       payment_status: string
       currency: string
@@ -225,7 +226,29 @@ export default async function SubmissionsPage({
         line_total_amount: number
         currency: string
       }>
-    }>).map(o => ({
+    }
+
+    const typedOrders = (rawOrders ?? []) as RawOrder[]
+
+    // Fetch order payments keyed by business_order_id
+    const orderIds = typedOrders.map((o) => o.id)
+    let paymentsRecord: Record<string, OrderPayment> = {}
+    if (orderIds.length > 0) {
+      const { data: paymentRows } = await supabase
+        .from('order_payments')
+        .select('*')
+        .eq('user_id', user.id)
+        .in('business_order_id', orderIds)
+      if (paymentRows) {
+        for (const p of paymentRows as OrderPayment[]) {
+          if (p.business_order_id) {
+            paymentsRecord[p.business_order_id] = p
+          }
+        }
+      }
+    }
+
+    const catalogOrders: CatalogOrderEntry[] = typedOrders.map(o => ({
       id: o.id,
       shortId: '#' + o.id.replace(/-/g, '').slice(0, 6),
       createdAt: o.created_at,
@@ -251,6 +274,7 @@ export default async function SubmissionsPage({
     return (
       <CatalogOrdersView
         orders={catalogOrders}
+        payments={paymentsRecord}
         pageTitle={page.title}
         pageStatus={page.status}
         pageId={id}

@@ -1,7 +1,9 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useTransition } from 'react'
 import Link from 'next/link'
+import type { OrderPayment } from '@/lib/order-payments/types'
+import { verifyPayment, rejectPayment } from './payment-actions'
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                               */
@@ -34,6 +36,7 @@ export interface CatalogOrderEntry {
 
 interface Props {
   orders: CatalogOrderEntry[]
+  payments: Record<string, OrderPayment>
   pageTitle: string
   pageStatus: 'draft' | 'published' | 'archived'
   pageId: string
@@ -115,11 +118,71 @@ const SOURCE_META: Record<string, { color: string }> = {
   Web:       { color: '#6B6960' },
 }
 
+const PAYMENT_STATUS_META: Record<string, { label: string; bg: string; ink: string; dot: string }> = {
+  submitted: { label: 'Awaiting verification', bg: 'rgba(217,119,6,0.10)',  ink: '#92400E', dot: '#D97706' },
+  verified:  { label: 'Payment verified',      bg: 'rgba(31,122,77,0.10)',  ink: '#1F5C3A', dot: '#1F7A4D' },
+  rejected:  { label: 'Payment rejected',      bg: 'rgba(220,38,38,0.10)', ink: '#991B1B', dot: '#DC2626' },
+}
+
+/* ------------------------------------------------------------------ */
+/*  Payment Actions (client subcomponent)                              */
+/* ------------------------------------------------------------------ */
+
+function PaymentActions({ paymentId, pageId }: { paymentId: string; pageId: string }) {
+  const [pending, start] = useTransition()
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      <button
+        type="button"
+        disabled={pending}
+        onClick={() => start(() => verifyPayment(paymentId, pageId))}
+        className="rounded border px-2 py-1 text-xs font-medium transition-colors disabled:opacity-50"
+        style={{ borderColor: '#1F7A4D', color: '#1F5C3A', background: 'rgba(31,122,77,0.06)' }}
+      >
+        Mark as paid
+      </button>
+      <details className="inline-block">
+        <summary
+          className="cursor-pointer list-none rounded border px-2 py-1 text-xs font-medium"
+          style={{ borderColor: '#DC2626', color: '#991B1B', background: 'rgba(220,38,38,0.06)' }}
+        >
+          Reject…
+        </summary>
+        <form
+          className="mt-1 grid gap-1"
+          action={async (fd: FormData) => {
+            const reason = String(fd.get('reason') ?? '').trim()
+            if (!reason) return
+            await rejectPayment(paymentId, reason, pageId)
+          }}
+        >
+          <textarea
+            name="reason"
+            required
+            maxLength={500}
+            placeholder="Reason for rejection…"
+            className="w-full rounded border p-1.5 text-xs outline-none"
+            style={{ borderColor: '#E8E6DE', color: '#1A1915', minWidth: '200px' }}
+            rows={3}
+          />
+          <button
+            type="submit"
+            className="rounded px-2 py-1 text-xs font-medium text-white"
+            style={{ background: '#DC2626' }}
+          >
+            Submit rejection
+          </button>
+        </form>
+      </details>
+    </div>
+  )
+}
+
 /* ------------------------------------------------------------------ */
 /*  Main component                                                      */
 /* ------------------------------------------------------------------ */
 
-export default function CatalogOrdersView({ orders, pageTitle, pageStatus, pageId }: Props) {
+export default function CatalogOrdersView({ orders, payments, pageTitle, pageStatus, pageId }: Props) {
   const [filter, setFilter] = useState<FilterTab>('all')
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState<CatalogOrderEntry | null>(null)
@@ -371,7 +434,7 @@ export default function CatalogOrdersView({ orders, pageTitle, pageStatus, pageI
                     {/* Order rows */}
                     <div className="space-y-2">
                       {dayOrders.map(o => (
-                        <OrderRow key={o.id} order={o} onClick={() => setSelected(o)} />
+                        <OrderRow key={o.id} order={o} payment={payments[o.id] ?? null} pageId={pageId} onClick={() => setSelected(o)} />
                       ))}
                     </div>
                   </div>
@@ -384,7 +447,7 @@ export default function CatalogOrdersView({ orders, pageTitle, pageStatus, pageI
 
       {/* ── Drawer ── */}
       {selected && (
-        <OrderDrawer order={selected} onClose={() => setSelected(null)} />
+        <OrderDrawer order={selected} payment={payments[selected.id] ?? null} pageId={pageId} onClose={() => setSelected(null)} />
       )}
     </div>
   )
@@ -418,10 +481,81 @@ function StatCard({ label, value, foot, accent }: { label: string; value: string
 }
 
 /* ------------------------------------------------------------------ */
+/*  Payment Cell (inline in order row / drawer)                        */
+/* ------------------------------------------------------------------ */
+
+function PaymentCell({ payment: p, pageId }: { payment: OrderPayment; pageId: string }) {
+  const pm = PAYMENT_STATUS_META[p.status] ?? PAYMENT_STATUS_META.submitted
+
+  return (
+    <div
+      className="flex flex-wrap items-start gap-3 rounded-lg border px-3 py-2.5"
+      style={{ borderColor: '#E8E6DE', background: '#FAFAF7' }}
+    >
+      {/* Method + status */}
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-[12px] font-medium" style={{ color: '#1A1915' }}>
+            {p.method_name}
+          </span>
+          <span
+            className="rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
+            style={{ background: '#EFEEE8', color: '#6B6960' }}
+          >
+            {p.method_kind}
+          </span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span
+            className="flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium"
+            style={{ background: pm.bg, color: pm.ink }}
+          >
+            <span className="h-1.5 w-1.5 rounded-full" style={{ background: pm.dot }} />
+            {pm.label}
+          </span>
+        </div>
+        {p.status === 'rejected' && p.rejection_reason && (
+          <p className="mt-0.5 text-[11px]" style={{ color: '#991B1B' }}>
+            Reason: {p.rejection_reason}
+          </p>
+        )}
+      </div>
+
+      {/* Proof thumbnail */}
+      <a
+        href={p.proof_url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="shrink-0 overflow-hidden rounded-lg border transition-opacity hover:opacity-80"
+        style={{ borderColor: '#D9D6CC' }}
+        onClick={e => e.stopPropagation()}
+        title="View payment proof"
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={p.proof_url}
+          alt="Payment proof"
+          width={40}
+          height={40}
+          className="h-10 w-10 object-cover"
+        />
+      </a>
+
+      {/* Actions */}
+      {p.status === 'submitted' && (
+        <div onClick={e => e.stopPropagation()}>
+          <PaymentActions paymentId={p.id} pageId={pageId} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ------------------------------------------------------------------ */
 /*  Order Row                                                           */
 /* ------------------------------------------------------------------ */
 
-function OrderRow({ order: o, onClick }: { order: CatalogOrderEntry; onClick: () => void }) {
+function OrderRow({ order: o, payment, pageId, onClick }: { order: CatalogOrderEntry; payment: OrderPayment | null; pageId: string; onClick: () => void }) {
   const sm = STATUS_META[o.paymentStatus] ?? STATUS_META.pending
   const srcMeta = SOURCE_META[o.source] ?? SOURCE_META.Web
   const ini = initials(o.customerName)
@@ -429,77 +563,87 @@ function OrderRow({ order: o, onClick }: { order: CatalogOrderEntry; onClick: ()
   const primaryItem = o.items[0]
 
   return (
-    <button
-      onClick={onClick}
-      className="flex w-full items-center gap-4 rounded-xl border px-4 py-3.5 text-left transition-all hover:shadow-[0_2px_8px_rgba(0,0,0,0.06)]"
+    <div
+      className="flex w-full flex-col gap-3 rounded-xl border px-4 py-3.5 transition-all hover:shadow-[0_2px_8px_rgba(0,0,0,0.06)]"
       style={{ background: '#FFFFFF', borderColor: '#E8E6DE' }}
     >
-      {/* Avatar */}
-      <div
-        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[13px] font-bold text-white"
-        style={{ background: 'linear-gradient(135deg, #1F7A4D, #2EA86A)' }}
+      {/* Main row — clickable */}
+      <button
+        onClick={onClick}
+        className="flex w-full items-center gap-4 text-left"
       >
-        {ini}
-      </div>
-
-      {/* Center meta */}
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-[14px] font-semibold" style={{ color: '#1A1915' }}>
-            {displayName}
-          </span>
-          <code
-            className="rounded px-1.5 py-0.5 text-[11px] font-medium"
-            style={{ background: '#F6F5F1', color: '#6B6960', fontFamily: 'var(--font-geist-mono, monospace)' }}
-          >
-            {o.shortId}
-          </code>
-          <span
-            className="flex items-center gap-1 text-[11px] font-medium"
-            style={{ color: srcMeta.color }}
-          >
-            <span
-              className="inline-block h-1.5 w-1.5 rounded-full"
-              style={{ background: srcMeta.color }}
-            />
-            {o.source}
-          </span>
-        </div>
-        <div className="mt-1 flex items-center gap-1.5 text-[12px]" style={{ color: '#6B6960' }}>
-          {primaryItem && (
-            <>
-              <span className="truncate max-w-[200px]">{primaryItem.title}</span>
-              {o.items.length > 1 && (
-                <span style={{ color: '#9C9A90' }}>
-                  + {o.items.length - 1} more
-                </span>
-              )}
-            </>
-          )}
-        </div>
-      </div>
-
-      {/* Tail */}
-      <div className="flex shrink-0 items-center gap-3">
-        {/* Status pill */}
-        <span
-          className="flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[12px] font-medium"
-          style={{ background: sm.bg, color: sm.ink }}
+        {/* Avatar */}
+        <div
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[13px] font-bold text-white"
+          style={{ background: 'linear-gradient(135deg, #1F7A4D, #2EA86A)' }}
         >
-          <span className="h-1.5 w-1.5 rounded-full" style={{ background: sm.dot }} />
-          {sm.label}
-        </span>
-        {/* Total */}
-        <span className="min-w-[64px] text-right text-[14px] font-semibold" style={{ color: '#1A1915' }}>
-          {currencySymbol(o.currency)}{o.subtotalAmount.toLocaleString()}
-        </span>
-        {/* Time ago */}
-        <span className="hidden text-[12px] sm:block" style={{ color: '#9C9A90' }}>
-          {relTime(o.createdAt)}
-        </span>
-        <ChevronRightIcon size={14} color="#D9D6CC" />
-      </div>
-    </button>
+          {ini}
+        </div>
+
+        {/* Center meta */}
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[14px] font-semibold" style={{ color: '#1A1915' }}>
+              {displayName}
+            </span>
+            <code
+              className="rounded px-1.5 py-0.5 text-[11px] font-medium"
+              style={{ background: '#F6F5F1', color: '#6B6960', fontFamily: 'var(--font-geist-mono, monospace)' }}
+            >
+              {o.shortId}
+            </code>
+            <span
+              className="flex items-center gap-1 text-[11px] font-medium"
+              style={{ color: srcMeta.color }}
+            >
+              <span
+                className="inline-block h-1.5 w-1.5 rounded-full"
+                style={{ background: srcMeta.color }}
+              />
+              {o.source}
+            </span>
+          </div>
+          <div className="mt-1 flex items-center gap-1.5 text-[12px]" style={{ color: '#6B6960' }}>
+            {primaryItem && (
+              <>
+                <span className="truncate max-w-[200px]">{primaryItem.title}</span>
+                {o.items.length > 1 && (
+                  <span style={{ color: '#9C9A90' }}>
+                    + {o.items.length - 1} more
+                  </span>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* Tail */}
+        <div className="flex shrink-0 items-center gap-3">
+          {/* Status pill */}
+          <span
+            className="flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[12px] font-medium"
+            style={{ background: sm.bg, color: sm.ink }}
+          >
+            <span className="h-1.5 w-1.5 rounded-full" style={{ background: sm.dot }} />
+            {sm.label}
+          </span>
+          {/* Total */}
+          <span className="min-w-[64px] text-right text-[14px] font-semibold" style={{ color: '#1A1915' }}>
+            {currencySymbol(o.currency)}{o.subtotalAmount.toLocaleString()}
+          </span>
+          {/* Time ago */}
+          <span className="hidden text-[12px] sm:block" style={{ color: '#9C9A90' }}>
+            {relTime(o.createdAt)}
+          </span>
+          <ChevronRightIcon size={14} color="#D9D6CC" />
+        </div>
+      </button>
+
+      {/* Payment row — only when a payment record exists */}
+      {payment && (
+        <PaymentCell payment={payment} pageId={pageId} />
+      )}
+    </div>
   )
 }
 
@@ -507,7 +651,7 @@ function OrderRow({ order: o, onClick }: { order: CatalogOrderEntry; onClick: ()
 /*  Order Drawer                                                        */
 /* ------------------------------------------------------------------ */
 
-function OrderDrawer({ order: o, onClose }: { order: CatalogOrderEntry; onClose: () => void }) {
+function OrderDrawer({ order: o, payment, pageId, onClose }: { order: CatalogOrderEntry; payment: OrderPayment | null; pageId: string; onClose: () => void }) {
   const sm = STATUS_META[o.paymentStatus] ?? STATUS_META.pending
   const ini = initials(o.customerName)
   const displayName = o.customerName ?? 'Anonymous'
@@ -671,6 +815,16 @@ function OrderDrawer({ order: o, onClose }: { order: CatalogOrderEntry; onClose:
               >
                 {o.customerNotes}
               </div>
+            </div>
+          )}
+
+          {/* Payment */}
+          {payment && (
+            <div>
+              <h4 className="mb-3 text-[11px] font-semibold uppercase tracking-wide" style={{ color: '#9C9A90' }}>
+                Payment
+              </h4>
+              <PaymentCell payment={payment} pageId={pageId} />
             </div>
           )}
 
