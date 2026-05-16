@@ -183,6 +183,26 @@ export const dict = {
   'flow.error.no_goal':   { tl: 'Pumili muna ng goal.',       en: 'Pick a goal first.' },
   'flow.error.generation':{ tl: 'Hindi nag-generate ang AI. Subukan ulit o i-skip.', en: 'AI failed. Retry or skip.' },
   'flow.error.save':      { tl: 'May error sa pag-save.',     en: 'Could not save.' },
+
+  'gen.knowledge.heading': { tl: 'Binubuo ang knowledge mo…',            en: 'Generating your knowledge…' },
+  'gen.knowledge.line1':   { tl: 'Binabasa ang business basics mo…',     en: 'Reading your business basics…' },
+  'gen.knowledge.line2':   { tl: 'Pinipili ang pinakamahalagang detalye…', en: 'Picking the most important details…' },
+  'gen.knowledge.line3':   { tl: 'Ina-arrange para madaling i-edit…',    en: 'Arranging it so you can edit easily…' },
+  'gen.faqs.heading':      { tl: 'Sinusulat ang FAQs mo…',               en: 'Drafting your FAQs…' },
+  'gen.faqs.line1':        { tl: 'Iniisip kung ano-ano tinatanong ng customers…', en: 'Imagining what customers ask…' },
+  'gen.faqs.line2':        { tl: 'Pinopolish ang sagot…',                en: 'Polishing answers…' },
+  'gen.faqs.line3':        { tl: 'Tinatanggal ang duplicates…',          en: 'Removing duplicates…' },
+  'gen.personality.heading': { tl: 'Hinahanap ang vibe…',               en: 'Finding your vibe…' },
+  'gen.personality.line1': { tl: 'Hinahalo ang tone at audience mo…',   en: 'Mixing tone and audience…' },
+  'gen.personality.line2': { tl: 'Sinusulat ang sample greeting…',      en: 'Writing a sample greeting…' },
+  'gen.form_fields.heading': { tl: 'Inaayos ang form fields…',          en: 'Drafting your form fields…' },
+  'gen.form_fields.line1': { tl: 'Iniisip kung ano dapat itanong…',     en: 'Picking what to ask…' },
+  'gen.form_fields.line2': { tl: 'Inaayos ang pagkakasunod-sunod…',     en: 'Ordering the fields…' },
+  'gen.bot.heading':       { tl: 'Tinatapos ang bot instructions…',      en: 'Finalizing your bot instructions…' },
+  'gen.bot.line1':         { tl: 'Pinagsasama-sama ang lahat ng sagot mo…', en: 'Stitching all your answers together…' },
+  'gen.bot.line2':         { tl: 'Nilalagay ang tono at boundaries…',   en: 'Setting tone and boundaries…' },
+  'gen.skip':              { tl: 'I-skip muna — review later',           en: 'Skip for now — review later' },
+  'gen.error.generic':     { tl: 'May error sa pag-generate. Pwede mong subukan ulit.', en: 'Generation failed. You can try again.' },
 } as const
 
 export type DictKey = keyof typeof dict
