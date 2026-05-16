@@ -1,38 +1,32 @@
 'use client'
 
-import { useState, useTransition } from 'react'
-import { generateFlowAction } from '../actions'
-import { FlowPreview } from './FlowPreview'
+import { useTransition, useState } from 'react'
+import { startFlowGenerationAction } from '../actions'
 import { StepNav } from '../_components/StepNav'
 import { t } from '@/lib/onboarding/i18n'
 import type { OnboardingLang } from '@/lib/onboarding/types'
-import type { GeneratedBotInstructions } from '@/lib/onboarding/ai/bot-instructions'
 
 export function FlowForm({
-  lang, pageId, pageTitle, initialDescription,
+  lang, pageTitle, initialDescription,
 }: {
   lang: OnboardingLang; pageId: string; pageTitle: string; initialDescription: string
 }) {
   const [description, setDescription] = useState(initialDescription)
   const [error, setError] = useState<string | null>(null)
-  const [preview, setPreview] = useState<GeneratedBotInstructions | null>(null)
   const [pending, start] = useTransition()
 
-  async function handleGenerate(formData: FormData) {
+  async function handleSubmit(formData: FormData) {
     start(async () => {
       setError(null)
-      const r = await generateFlowAction(formData)
-      if (r.ok) setPreview(r.data)
-      else setError(r.error === 'generation_failed' ? t('flow.error.generation', lang) : t('flow.error.save', lang))
+      const r = await startFlowGenerationAction(formData)
+      if (r?.error) {
+        setError(t('flow.error.save', lang))
+      }
     })
   }
 
-  if (preview) {
-    return <FlowPreview lang={lang} pageId={pageId} initial={preview} onBack={() => setPreview(null)} />
-  }
-
   return (
-    <form action={handleGenerate} className="space-y-4">
+    <form action={handleSubmit} className="space-y-4">
       <p className="text-xs text-zinc-500">{pageTitle}</p>
       <label className="block">
         <span className="block text-sm font-medium text-zinc-900">{t('flow.description.label', lang)}</span>

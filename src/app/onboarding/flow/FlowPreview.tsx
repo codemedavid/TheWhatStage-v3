@@ -8,9 +8,9 @@ import type { OnboardingLang } from '@/lib/onboarding/types'
 import type { GeneratedBotInstructions } from '@/lib/onboarding/ai/bot-instructions'
 
 export function FlowPreview({
-  lang, pageId, initial, onBack,
+  lang, pageId, initial,
 }: {
-  lang: OnboardingLang; pageId: string; initial: GeneratedBotInstructions; onBack: () => void
+  lang: OnboardingLang; pageId: string; initial: GeneratedBotInstructions
 }) {
   const [data, setData] = useState(initial)
   const [state, action, pending] = useActionState(saveFlowAction, {})
@@ -47,8 +47,6 @@ export function FlowPreview({
         <span className="font-medium">{t('flow.preview.slots', lang)}: </span>
         {data.required_slots.length === 0 ? '—' : data.required_slots.join(', ')}
       </div>
-
-      <button type="button" onClick={onBack} className="text-sm text-zinc-600 hover:text-zinc-900">{t('shell.back', lang)}</button>
 
       {state.error && <p className="text-sm text-red-600">{t('flow.error.save', lang)}</p>}
 

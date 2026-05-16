@@ -683,6 +683,59 @@ const FlowPayloadSchema = z.object({
 
 export type FlowStepError = 'no_goal' | 'no_basics' | 'generation_failed' | 'save_failed'
 
+const StartFlowSchema = z.object({
+  flow_description: z.string().trim().min(20).max(2000),
+})
+
+/**
+ * Saves the flow description and kicks off bot_instructions generation in the
+ * background. The user is redirected back to /onboarding/flow, which then
+ * gates on the job status until the result is ready for review.
+ */
+export async function startFlowGenerationAction(formData: FormData): Promise<{ error?: FlowStepError }> {
+  const parsed = StartFlowSchema.safeParse({ flow_description: formData.get('flow_description') })
+  if (!parsed.success) return { error: 'save_failed' }
+
+  const basics = await getBusinessBasics()
+  if (!basics) return { error: 'no_basics' }
+  const page = await getPrimaryActionPage()
+  if (!page) return { error: 'no_goal' }
+
+  const { createClient } = await import('@/lib/supabase/server')
+  const supabase = await createClient()
+  const { data: auth } = await supabase.auth.getUser()
+  if (!auth.user) return { error: 'save_failed' }
+
+  const { data: stateRow } = await supabase
+    .from('onboarding_state')
+    .select('ui_language')
+    .eq('profile_id', auth.user.id)
+    .maybeSingle()
+  const lang = stateRow?.ui_language === 'en' ? 'en' : 'tl'
+
+  await supabase
+    .from('onboarding_state')
+    .update({ flow_description: parsed.data.flow_description })
+    .eq('profile_id', auth.user.id)
+
+  const cfg = (page.config as Record<string, unknown> | null) ?? {}
+  const cta = cfg.cta as { primary_label?: string } | undefined
+  const ctaLabel = cta?.primary_label ?? page.title
+
+  const profileId = auth.user.id
+  after(async () => {
+    await runGeneration(profileId, 'bot_instructions', {
+      basics,
+      goal: page.kind as ActionPageKind,
+      actionPage: { title: page.title, ctaLabel },
+      flowDescription: parsed.data.flow_description,
+      lang,
+    })
+  })
+
+  redirect('/onboarding/flow')
+}
+
 export async function generateFlowAction(
   formData: FormData,
 ): Promise<

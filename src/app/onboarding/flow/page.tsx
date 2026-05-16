@@ -1,11 +1,23 @@
 import Link from 'next/link'
 import { WizardShell } from '../_components/WizardShell'
 import { FlowForm } from './FlowForm'
+import { FlowPreview } from './FlowPreview'
+import { GenerationGate } from '../_components/GenerationGate'
 import { getOnboardingLang } from '@/lib/onboarding/lang'
 import { getOnboardingState, getPrimaryActionPage } from '@/lib/onboarding/state'
+import { getJob } from '@/lib/onboarding/generation/repo'
+import { createClient } from '@/lib/supabase/server'
 import { t } from '@/lib/onboarding/i18n'
+import type { GeneratedBotInstructions } from '@/lib/onboarding/ai/bot-instructions'
 
 export const dynamic = 'force-dynamic'
+export const maxDuration = 60
+
+function isGeneratedBotInstructions(v: unknown): v is GeneratedBotInstructions {
+  if (!v || typeof v !== 'object') return false
+  const r = v as Record<string, unknown>
+  return typeof r.bot_send_instructions === 'string' && typeof r.recommendation_rules === 'string'
+}
 
 export default async function FlowPage() {
   const [lang, page, state] = await Promise.all([
@@ -28,11 +40,52 @@ export default async function FlowPage() {
     )
   }
 
-  return (
-    <WizardShell lang={lang} step="flow">
+  const supabase = await createClient()
+  const { data: auth } = await supabase.auth.getUser()
+  const job = auth.user ? await getJob(auth.user.id, 'bot_instructions') : null
+
+  const heading = (
+    <>
       <h1 className="text-2xl font-semibold text-zinc-900">{t('flow.heading', lang)}</h1>
       <p className="mt-1 text-sm text-zinc-600">{t('flow.subheading', lang)}</p>
+    </>
+  )
+
+  if (job?.status === 'done' && isGeneratedBotInstructions(job.result)) {
+    return (
+      <WizardShell lang={lang} step="flow">
+        {heading}
+        <div className="mt-6">
+          <FlowPreview lang={lang} pageId={page.id} initial={job.result} />
+        </div>
+      </WizardShell>
+    )
+  }
+
+  if (job?.status === 'running' || job?.status === 'queued') {
+    return (
+      <WizardShell lang={lang} step="flow">
+        {heading}
+        <GenerationGate
+          kind="bot_instructions"
+          animationHeading={t('gen.bot.heading', lang)}
+          animationLines={[t('gen.bot.line1', lang), t('gen.bot.line2', lang)]}
+          errorMessage={t('gen.error.generic', lang)}
+          skipHref="/onboarding/done"
+          skipLabel={t('gen.skip', lang)}
+        />
+      </WizardShell>
+    )
+  }
+
+  // No job yet, or failed → render the form to (re-)start generation.
+  return (
+    <WizardShell lang={lang} step="flow">
+      {heading}
       <div className="mt-6">
+        {job?.status === 'failed' ? (
+          <p className="mb-3 text-sm text-red-600">{t('gen.error.generic', lang)}</p>
+        ) : null}
         <FlowForm
           lang={lang}
           pageId={page.id}
