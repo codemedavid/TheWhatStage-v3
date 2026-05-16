@@ -24,6 +24,32 @@ export async function getJob(
   return (data as GenerationJob | null) ?? null
 }
 
+export type JobStatusBrief = Pick<
+  GenerationJob,
+  'status' | 'error' | 'started_at' | 'updated_at'
+>
+
+/** Narrow projection of the job row — no `result` JSONB column. Used by the
+ * poll endpoint where ~15 of 17 polls per generation never need the (often
+ * multi-KB) result payload. */
+export async function getJobStatus(
+  profileId: string,
+  kind: GenerationKind,
+): Promise<JobStatusBrief | null> {
+  const admin = createAdminClient()
+  const { data, error } = await admin
+    .from(TABLE)
+    .select('status, error, started_at, updated_at')
+    .eq('profile_id', profileId)
+    .eq('kind', kind)
+    .maybeSingle()
+  if (error) {
+    console.error('[generation.repo.getJobStatus]', error)
+    return null
+  }
+  return (data as JobStatusBrief | null) ?? null
+}
+
 export async function upsertRunning(
   profileId: string,
   kind: GenerationKind,
