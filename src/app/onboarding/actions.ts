@@ -425,6 +425,26 @@ export async function saveGoalAction(
   }
 
   await markStep('goal')
+
+  // Fire-and-forget form_fields generation if applicable.
+  try {
+    if (basics && (kind === 'form' || kind === 'qualification')) {
+      const profileId = auth.user.id
+      const { data: stateRow } = await supabase
+        .from('onboarding_state')
+        .select('ui_language')
+        .eq('profile_id', profileId)
+        .maybeSingle()
+      const lang = stateRow?.ui_language === 'en' ? 'en' : 'tl'
+      const formKind: 'form' | 'qualification' = kind
+      after(async () => {
+        await runGeneration(profileId, 'form_fields', { basics, kind: formKind, lang })
+      })
+    }
+  } catch (err) {
+    console.error('[saveGoalAction] schedule-generation', err)
+  }
+
   redirect('/onboarding/goal-content')
 }
 
