@@ -12,7 +12,7 @@ import {
 } from '@/lib/onboarding/state'
 import { getJob } from '@/lib/onboarding/generation/repo'
 import { runGeneration } from '@/lib/onboarding/generation/runner'
-import { createClient } from '@/lib/supabase/server'
+import { getAuthUser } from '@/lib/supabase/server'
 import { t } from '@/lib/onboarding/i18n'
 import type { ActionPageKind } from '@/lib/action-pages/kinds'
 import { parseBotInstructionsResult } from '@/lib/onboarding/ai/result-schemas'
@@ -21,10 +21,11 @@ export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
 export default async function FlowPage() {
-  const [lang, page, state] = await Promise.all([
+  const [lang, page, state, user] = await Promise.all([
     getOnboardingLang(),
     getPrimaryActionPage(),
     getOnboardingState(),
+    getAuthUser(),
   ])
 
   if (!page) {
@@ -41,9 +42,7 @@ export default async function FlowPage() {
     )
   }
 
-  const supabase = await createClient()
-  const { data: auth } = await supabase.auth.getUser()
-  const job = auth.user ? await getJob(auth.user.id, 'bot_instructions') : null
+  const job = user ? await getJob(user.id, 'bot_instructions') : null
 
   const heading = (
     <>
@@ -69,14 +68,14 @@ export default async function FlowPage() {
   // mid-flight), schedule it now and surface the gate so the user sees progress
   // instead of being silently dropped back on the empty form.
   const hasDescription = (state?.flow_description ?? '').trim().length >= 20
-  const shouldRescue = !job && hasDescription && auth.user
+  const shouldRescue = !job && hasDescription && !!user
   if (shouldRescue) {
     const basics = await getBusinessBasics()
     if (basics) {
       const cfg = (page.config as Record<string, unknown> | null) ?? {}
       const cta = cfg.cta as { primary_label?: string } | undefined
       const ctaLabel = cta?.primary_label ?? page.title
-      const profileId = auth.user.id
+      const profileId = user!.id
       const flowDescription = state!.flow_description!
       after(async () => {
         await runGeneration(profileId, 'bot_instructions', {

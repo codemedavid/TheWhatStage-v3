@@ -7,7 +7,7 @@ import { retryGenerationAction } from '../actions'
 import { GenerationGate } from '../_components/GenerationGate'
 import { getJob } from '@/lib/onboarding/generation/repo'
 import { runGeneration } from '@/lib/onboarding/generation/runner'
-import { createClient } from '@/lib/supabase/server'
+import { getAuthUser } from '@/lib/supabase/server'
 import { getOnboardingLang } from '@/lib/onboarding/lang'
 import { getBusinessBasics } from '@/lib/onboarding/state'
 import { t } from '@/lib/onboarding/i18n'
@@ -18,7 +18,11 @@ export const maxDuration = 60
 
 export default async function FaqsPage() {
   const lang = await getOnboardingLang()
-  const basics = await getBusinessBasics()
+  const user = await getAuthUser()
+  const [basics, job] = await Promise.all([
+    getBusinessBasics(),
+    user ? getJob(user.id, 'faqs') : Promise.resolve(null),
+  ])
 
   if (!basics) {
     return (
@@ -33,10 +37,6 @@ export default async function FaqsPage() {
       </WizardShell>
     )
   }
-
-  const supabase = await createClient()
-  const { data: auth } = await supabase.auth.getUser()
-  const job = auth.user ? await getJob(auth.user.id, 'faqs') : null
 
   const parsedFaqs = job?.status === 'done' ? parseFaqsResult(job.result) : null
   if (parsedFaqs) {
@@ -75,18 +75,10 @@ export default async function FaqsPage() {
     )
   }
 
-  // No job row yet — lazily enqueue so existing users / direct nav / stale-swept
-  // sessions still trigger generation.
-  if (!job && auth.user) {
-    const profileId = auth.user.id
-    const { data: stateRow } = await supabase
-      .from('onboarding_state')
-      .select('ui_language')
-      .eq('profile_id', profileId)
-      .maybeSingle()
-    const pageLang = stateRow?.ui_language === 'en' ? 'en' : 'tl'
+  if (!job && user) {
+    const profileId = user.id
     after(async () => {
-      await runGeneration(profileId, 'faqs', { basics, lang: pageLang })
+      await runGeneration(profileId, 'faqs', { basics, lang })
     })
   }
 

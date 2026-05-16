@@ -1,5 +1,6 @@
 import 'server-only'
-import { createClient } from '@/lib/supabase/server'
+import { cache } from 'react'
+import { createClient, getAuthUser } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { STEP_ORDER, stepCompletionColumn } from './steps'
 import type {
@@ -56,19 +57,21 @@ function rowToState(row: Row): OnboardingState {
   }
 }
 
-/** Read the onboarding row for the signed-in user. Returns null if none exists. */
-export async function getOnboardingState(): Promise<OnboardingState | null> {
+/** Read the onboarding row for the signed-in user. Returns null if none exists.
+ * Wrapped in React cache() so multiple lib helpers (getBusinessBasics,
+ * getPrimaryActionPage, action-side ensures) share a single SELECT per render. */
+export const getOnboardingState = cache(async (): Promise<OnboardingState | null> => {
+  const user = await getAuthUser()
+  if (!user) return null
   const supabase = await createClient()
-  const { data: auth } = await supabase.auth.getUser()
-  if (!auth.user) return null
   const { data, error } = await supabase
     .from(TABLE)
     .select('*')
-    .eq('profile_id', auth.user.id)
+    .eq('profile_id', user.id)
     .maybeSingle()
   if (error || !data) return null
   return rowToState(data as Row)
-}
+})
 
 /** Insert an onboarding_state row for a freshly signed-up user. Idempotent.
  * Retries once on FK violation: the handle_new_user trigger that creates the
@@ -200,21 +203,22 @@ export interface PrimaryActionPageBrief {
   config: unknown
 }
 
-export async function getPrimaryActionPage(): Promise<PrimaryActionPageBrief | null> {
+export const getPrimaryActionPage = cache(async (): Promise<PrimaryActionPageBrief | null> => {
+  const user = await getAuthUser()
+  if (!user) return null
   const supabase = await createClient()
-  const { data: auth } = await supabase.auth.getUser()
-  if (!auth.user) return null
   const { data: cfg } = await supabase
     .from('chatbot_configs')
     .select('primary_action_page_id')
-    .eq('user_id', auth.user.id)
+    .eq('user_id', user.id)
     .maybeSingle()
   if (!cfg?.primary_action_page_id) return null
   const { data: page } = await supabase
     .from('action_pages')
     .select('id, kind, title, config')
     .eq('id', cfg.primary_action_page_id)
+    .eq('user_id', user.id)
     .maybeSingle()
   if (!page) return null
   return { id: page.id, kind: page.kind, title: page.title, config: page.config }
-}
+})
