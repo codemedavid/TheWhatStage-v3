@@ -7,7 +7,7 @@ import { t } from '@/lib/onboarding/i18n'
 export default async function DonePage() {
   const lang = await getOnboardingLang()
   return (
-    <WizardShell lang={lang} step={null}>
+    <WizardShell lang={lang} step={null} terminal="done">
       <h1 className="text-2xl font-semibold text-zinc-900">{t('done.title', lang)}</h1>
       <p className="mt-3 text-zinc-700">{t('done.body', lang)}</p>
       <div className="mt-8 flex flex-wrap gap-3">

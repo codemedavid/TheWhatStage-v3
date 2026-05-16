@@ -20,7 +20,7 @@ export default async function WelcomePage() {
   const stamp = lang === 'tl' ? 'Made in PH' : 'Made in PH'
 
   return (
-    <WizardShell lang={lang} step={null}>
+    <WizardShell lang={lang} step={null} terminal="welcome">
       <section className="ob-welcome">
         <div className="ob-welcome-left">
           <div className="ob-welcome-pill">

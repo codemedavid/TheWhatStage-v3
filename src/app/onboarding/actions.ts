@@ -53,7 +53,14 @@ export async function skipStepAction(step: OnboardingStep): Promise<void> {
 }
 
 export async function dismissOnboardingAction(): Promise<void> {
-  await dismissOnboardingState()
+  try {
+    await dismissOnboardingState()
+  } catch (err) {
+    // Session expired or row missing — don't blank the page on an error
+    // boundary. Send the user somewhere sensible instead.
+    console.error('[dismissOnboardingAction]', err)
+    redirect('/login')
+  }
   redirect('/dashboard')
 }
 
