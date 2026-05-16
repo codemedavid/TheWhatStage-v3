@@ -130,6 +130,14 @@ export const SalesFallbackFormSchema = z.object({
   success_message: z.string().max(400).default("Thanks! We'll be in touch shortly."),
 })
 
+export const SalesPaymentSchema = z.object({
+  enabled: z.boolean().default(true),
+  excluded_method_ids: z
+    .array(z.unknown())
+    .default([])
+    .transform((arr) => arr.filter((x): x is string => typeof x === 'string' && x.length > 0)),
+})
+
 export const SalesConfigSchema = z.object({
   theme: SalesThemeSchema.default({
     background_color: '#FFFFFF',
@@ -171,6 +179,10 @@ export const SalesConfigSchema = z.object({
   }),
   social_proof: z.array(SalesSocialProofSchema).default([]),
   linked_action_page_ids: z.array(z.string().uuid()).default([]),
+  payment: SalesPaymentSchema.default({
+    enabled: true,
+    excluded_method_ids: [],
+  }),
   fallback_form: SalesFallbackFormSchema.default({
     enabled: true,
     fields: [
@@ -198,6 +210,7 @@ export type SalesDelivery = z.infer<typeof SalesDeliverySchema>
 export type SalesSocialProof = z.infer<typeof SalesSocialProofSchema>
 export type SalesFallbackField = z.infer<typeof SalesFallbackFieldSchema>
 export type SalesFallbackForm = z.infer<typeof SalesFallbackFormSchema>
+export type SalesPayment = z.infer<typeof SalesPaymentSchema>
 
 export function defaultSalesConfig(): SalesConfig {
   return SalesConfigSchema.parse({})
