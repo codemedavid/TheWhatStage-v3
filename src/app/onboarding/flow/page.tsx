@@ -1,13 +1,20 @@
 import Link from 'next/link'
+import { after } from 'next/server'
 import { WizardShell } from '../_components/WizardShell'
 import { FlowForm } from './FlowForm'
 import { FlowPreview } from './FlowPreview'
 import { GenerationGate } from '../_components/GenerationGate'
 import { getOnboardingLang } from '@/lib/onboarding/lang'
-import { getOnboardingState, getPrimaryActionPage } from '@/lib/onboarding/state'
+import {
+  getBusinessBasics,
+  getOnboardingState,
+  getPrimaryActionPage,
+} from '@/lib/onboarding/state'
 import { getJob } from '@/lib/onboarding/generation/repo'
+import { runGeneration } from '@/lib/onboarding/generation/runner'
 import { createClient } from '@/lib/supabase/server'
 import { t } from '@/lib/onboarding/i18n'
+import type { ActionPageKind } from '@/lib/action-pages/kinds'
 import type { GeneratedBotInstructions } from '@/lib/onboarding/ai/bot-instructions'
 
 export const dynamic = 'force-dynamic'
@@ -62,7 +69,33 @@ export default async function FlowPage() {
     )
   }
 
-  if (job?.status === 'running' || job?.status === 'queued') {
+  // Lazy-enqueue rescue: if the user already submitted a flow_description but
+  // there's no job row (e.g. after() never executed because the request died
+  // mid-flight), schedule it now and surface the gate so the user sees progress
+  // instead of being silently dropped back on the empty form.
+  const hasDescription = (state?.flow_description ?? '').trim().length >= 20
+  const shouldRescue = !job && hasDescription && auth.user
+  if (shouldRescue) {
+    const basics = await getBusinessBasics()
+    if (basics) {
+      const cfg = (page.config as Record<string, unknown> | null) ?? {}
+      const cta = cfg.cta as { primary_label?: string } | undefined
+      const ctaLabel = cta?.primary_label ?? page.title
+      const profileId = auth.user.id
+      const flowDescription = state!.flow_description!
+      after(async () => {
+        await runGeneration(profileId, 'bot_instructions', {
+          basics,
+          goal: page.kind as ActionPageKind,
+          actionPage: { title: page.title, ctaLabel },
+          flowDescription,
+          lang,
+        })
+      })
+    }
+  }
+
+  if (job?.status === 'running' || job?.status === 'queued' || shouldRescue) {
     return (
       <WizardShell lang={lang} step="flow">
         {heading}
