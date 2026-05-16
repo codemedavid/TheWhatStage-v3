@@ -65,6 +65,7 @@ export function EditActionPageShell({
         embedSnippet={embedSnippet}
         saved={saved}
         errorBanner={errorBanner}
+        paymentMethods={paymentMethods}
       />
     )
   }

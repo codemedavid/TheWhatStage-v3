@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react'
 import { useFormStatus } from 'react-dom'
 import { updateActionPage, deleteActionPage } from '../../actions/crud'
 import type { ActionPageRow } from '../../_lib/queries'
+import type { PaymentMethod } from '@/lib/payment-methods/types'
 import { CopyField } from '../../_components/CopyField'
 import { PipelineRulesEditor } from '../../_components/PipelineRulesEditor'
 import { TriggerGuard } from '../../_components/TriggerGuard'
@@ -22,6 +23,7 @@ export function CatalogShell({
   embedSnippet,
   saved,
   errorBanner,
+  paymentMethods = [],
 }: {
   page: ActionPageRow
   stages: { id: string; name: string }[]
@@ -30,6 +32,7 @@ export function CatalogShell({
   embedSnippet: string
   saved: boolean
   errorBanner: string | null
+  paymentMethods?: PaymentMethod[]
 }) {
   const [title, setTitle] = useState(page.title)
   const [description, setDescription] = useState(page.description ?? '')
@@ -182,7 +185,7 @@ export function CatalogShell({
 
         {/* Main canvas */}
         <main className="mx-auto w-full max-w-7xl flex-1 px-5 py-6">
-          <CatalogEditor page={page} />
+          <CatalogEditor page={page} paymentMethods={paymentMethods} />
 
           {/* Hidden inputs for the workflow fields the drawer manages —
               also rendered inside the drawer; keeping them here ensures

@@ -42,7 +42,7 @@ export default async function ActionPageEditor({
   ])
   if (!page) notFound()
 
-  const paymentMethods = page.kind === 'sales' ? await loadPaymentMethods() : []
+  const paymentMethods = page.kind === 'sales' || page.kind === 'catalog' ? await loadPaymentMethods() : []
 
   let currentGoalTitle: string | null = null
   if (justPublished && offerMode === 'switch') {

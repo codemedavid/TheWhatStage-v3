@@ -28,7 +28,7 @@ export function KindEditor({
     case 'sales':
       return <SalesEditor page={page} paymentMethods={paymentMethods} />
     case 'catalog':
-      return <CatalogEditor page={page} />
+      return <CatalogEditor page={page} paymentMethods={paymentMethods} />
     case 'realestate':
       return <RealEstateEditor page={page} />
   }
