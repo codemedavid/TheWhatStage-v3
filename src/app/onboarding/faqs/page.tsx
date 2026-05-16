@@ -3,7 +3,7 @@ import { after } from 'next/server'
 import { WizardShell } from '../_components/WizardShell'
 import { FaqChecklist } from './FaqChecklist'
 import { RegenerateButton } from '../knowledge/RegenerateButton'
-import { generateFaqsAction } from '../actions'
+import { retryGenerationAction } from '../actions'
 import { GenerationGate } from '../_components/GenerationGate'
 import { getJob } from '@/lib/onboarding/generation/repo'
 import { runGeneration } from '@/lib/onboarding/generation/runner'
@@ -56,24 +56,23 @@ export default async function FaqsPage() {
   }
 
   if (job?.status === 'failed') {
-    const sync = await generateFaqsAction()
-    if (sync.ok === false) {
-      return (
-        <WizardShell lang={lang} step="faqs">
-          <h1 className="text-2xl font-semibold text-zinc-900">{t('faqs.heading', lang)}</h1>
-          <div className="mt-6 rounded-md border border-red-300 bg-red-50 p-4 text-sm text-red-900">
-            <p>{t('faqs.error.generation', lang)}</p>
-            <div className="mt-3"><RegenerateButton lang={lang} /></div>
-          </div>
-        </WizardShell>
-      )
-    }
     return (
       <WizardShell lang={lang} step="faqs">
         <h1 className="text-2xl font-semibold text-zinc-900">{t('faqs.heading', lang)}</h1>
-        <div className="mt-6">
-          <div className="mb-3 flex justify-end"><RegenerateButton lang={lang} /></div>
-          <FaqChecklist lang={lang} suggestions={sync.data.suggestions} />
+        <div className="mt-6 rounded-md border border-red-300 bg-red-50 p-4 text-sm text-red-900">
+          <p>{t('faqs.error.generation', lang)}</p>
+          <p className="mt-2 text-xs text-red-800/80">{job.error ?? 'unknown_error'}</p>
+          <div className="mt-3 flex flex-wrap gap-3">
+            <form action={retryGenerationAction}>
+              <input type="hidden" name="kind" value="faqs" />
+              <button type="submit" className="font-medium underline">
+                {t('faqs.regenerate', lang)}
+              </button>
+            </form>
+            <Link href="/onboarding/personality" className="font-medium underline">
+              {t('gen.skip', lang)}
+            </Link>
+          </div>
         </div>
       </WizardShell>
     )

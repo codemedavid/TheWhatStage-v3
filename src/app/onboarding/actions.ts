@@ -16,6 +16,7 @@ import {
   getBusinessBasics,
 } from '@/lib/onboarding/state'
 import { isActionPageKind, KIND_REGISTRY, type ActionPageKind } from '@/lib/action-pages/kinds'
+import { isGenerationKind, type GenerationKind } from '@/lib/onboarding/generation/types'
 import { BusinessBasicsSchema } from '@/lib/onboarding/business-basics'
 import { LANG_COOKIE } from '@/lib/onboarding/i18n'
 import {
@@ -46,6 +47,82 @@ export async function setLangAction(formData: FormData): Promise<void> {
   await setOnboardingLanguage(lang, 'both')
   revalidatePath('/onboarding')
   revalidatePath('/dashboard')
+}
+
+/**
+ * Re-enqueue a failed generation. Wired to the "Retry" form rendered by the
+ * gate pages when status='failed'. Re-resolves inputs from server state so a
+ * stale tab does not pass forged parameters.
+ */
+export async function retryGenerationAction(formData: FormData): Promise<void> {
+  const kindRaw = formData.get('kind')
+  if (!isGenerationKind(kindRaw)) redirect('/onboarding/welcome')
+  const kind = kindRaw
+
+  const { createClient: createSupabaseServerClient } = await import('@/lib/supabase/server')
+  const supabase = await createSupabaseServerClient()
+  const { data: auth } = await supabase.auth.getUser()
+  if (!auth.user) redirect('/login')
+  const profileId = auth.user.id
+
+  const basics = await getBusinessBasics()
+  if (!basics) redirect('/onboarding/business')
+
+  const { data: stateRow } = await supabase
+    .from('onboarding_state')
+    .select('ui_language, personality_seeds, flow_description')
+    .eq('profile_id', profileId)
+    .maybeSingle()
+  const lang: OnboardingLang = stateRow?.ui_language === 'en' ? 'en' : 'tl'
+
+  if (kind === 'knowledge' || kind === 'faqs') {
+    after(async () => {
+      await runGeneration(profileId, kind, { basics, lang })
+    })
+  } else if (kind === 'personality_seed') {
+    const seeds = (stateRow?.personality_seeds ?? {}) as {
+      vibe_preset?: VibePreset
+      greet?: string
+      must_use?: string
+      must_not?: string
+    }
+    after(async () => {
+      await runGeneration(profileId, 'personality_seed', { basics, seeds, lang })
+    })
+  } else if (kind === 'form_fields') {
+    const page = await getPrimaryActionPage()
+    const formKind: 'form' | 'qualification' | null =
+      page?.kind === 'form' ? 'form' : page?.kind === 'qualification' ? 'qualification' : null
+    if (!formKind) redirect('/onboarding/goal')
+    after(async () => {
+      await runGeneration(profileId, 'form_fields', { basics, kind: formKind, lang })
+    })
+  } else if (kind === 'bot_instructions') {
+    const page = await getPrimaryActionPage()
+    const flowDescription = (stateRow?.flow_description ?? '').trim()
+    if (!page || flowDescription.length < 20) redirect('/onboarding/flow')
+    const cfg = (page.config as Record<string, unknown> | null) ?? {}
+    const cta = cfg.cta as { primary_label?: string } | undefined
+    const ctaLabel = cta?.primary_label ?? page.title
+    after(async () => {
+      await runGeneration(profileId, 'bot_instructions', {
+        basics,
+        goal: page.kind as ActionPageKind,
+        actionPage: { title: page.title, ctaLabel },
+        flowDescription,
+        lang,
+      })
+    })
+  }
+
+  const routeByKind: Record<GenerationKind, string> = {
+    knowledge: '/onboarding/knowledge',
+    faqs: '/onboarding/faqs',
+    personality_seed: '/onboarding/personality',
+    form_fields: '/onboarding/goal-content',
+    bot_instructions: '/onboarding/flow',
+  }
+  redirect(routeByKind[kind])
 }
 
 export async function skipStepAction(step: OnboardingStep): Promise<void> {
