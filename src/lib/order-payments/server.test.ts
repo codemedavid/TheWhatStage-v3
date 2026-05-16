@@ -3,9 +3,7 @@ import { resolveStatusForOrder, snapshotMethod } from './server'
 
 describe('snapshotMethod', () => {
   it('returns kind + name from a payment method row', () => {
-    const snap = snapshotMethod({
-      id: 'm1', kind: 'gcash', name: 'My GCash',
-    } as any)
+    const snap = snapshotMethod({ kind: 'gcash', name: 'My GCash' })
     expect(snap).toEqual({ method_kind: 'gcash', method_name: 'My GCash' })
   })
 })

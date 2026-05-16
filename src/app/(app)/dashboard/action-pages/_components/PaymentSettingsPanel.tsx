@@ -46,7 +46,7 @@ export default function PaymentSettingsPanel({ value, onChange, paymentMethods }
         <div className="mt-3">
           {paymentMethods.length === 0 ? (
             <p className="text-sm text-gray-600">
-              You don't have any payment methods yet.{' '}
+              You don&apos;t have any payment methods yet.{' '}
               <Link href="/dashboard/payment-methods" className="underline">
                 Add one
               </Link>.

@@ -92,8 +92,8 @@ export default function PaymentBlockClient({
   if (done) {
     return (
       <div className="text-center">
-        <p className="text-lg font-semibold">Thanks — we've received your payment proof.</p>
-        <p className="mt-1 text-sm text-gray-600">We'll confirm shortly.</p>
+        <p className="text-lg font-semibold">Thanks — we&apos;ve received your payment proof.</p>
+        <p className="mt-1 text-sm text-gray-600">We&apos;ll confirm shortly.</p>
       </div>
     )
   }
