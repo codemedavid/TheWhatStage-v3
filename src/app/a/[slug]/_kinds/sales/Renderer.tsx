@@ -290,6 +290,9 @@ export default async function SalesRenderer(props: KindRendererProps) {
                 paymentMethods={props.paymentMethods ?? []}
                 defaultCurrency={config.price.currency ?? 'PHP'}
                 priceAmount={config.price.amount}
+                priceLabel={priceLabel?.primary ?? null}
+                productName={productName}
+                productTypeLabel={productTypeLabel}
                 accent={config.theme.accent_color}
                 ctaFg={config.theme.button_text_color}
                 claims={props.claims}
