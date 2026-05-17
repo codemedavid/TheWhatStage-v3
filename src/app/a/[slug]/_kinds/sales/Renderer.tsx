@@ -8,8 +8,7 @@ import FormRenderer from '../form/Renderer'
 import BookingRenderer from '../booking/Renderer'
 import QualificationRenderer from '../qualification/Renderer'
 import { SalesGalleryClient } from './GalleryClient'
-import { SalesRevealForm } from './SalesConvertClient'
-import PaymentBlockClient from './PaymentBlockClient'
+import { SalesCheckoutModal } from './SalesCheckoutModal'
 
 const KIND_CTA_LABEL: Record<string, string> = {
   form: 'Fill out the form',
@@ -280,18 +279,22 @@ export default async function SalesRenderer(props: KindRendererProps) {
                 />
               </>
             ) : (
-              <SalesRevealForm
+              <SalesCheckoutModal
+                slug={props.page.slug}
+                pageId={props.page.id}
                 ctaLabel={config.cta.primary_label}
+                submitButtonLabel={config.fallback_form.submit_button_label}
+                successMessage={config.fallback_form.success_message}
+                fields={config.fallback_form.fields}
+                paymentEnabled={config.payment.enabled}
+                paymentMethods={props.paymentMethods ?? []}
+                defaultCurrency={config.price.currency ?? 'PHP'}
+                priceAmount={config.price.amount}
                 accent={config.theme.accent_color}
                 ctaFg={config.theme.button_text_color}
-              >
-                <FallbackForm
-                  page={props.page}
-                  config={config}
-                  claims={props.claims}
-                  rawToken={props.rawToken}
-                />
-              </SalesRevealForm>
+                claims={props.claims}
+                rawToken={props.rawToken}
+              />
             )}
           </section>
         </article>
@@ -314,21 +317,6 @@ export default async function SalesRenderer(props: KindRendererProps) {
         </aside>
       </div>
 
-      {config.payment.enabled && props.paymentMethods && props.paymentMethods.length > 0 ? (
-        <div className="mx-auto max-w-6xl px-4 pb-8">
-          <section className="rounded-2xl border border-[#E5E7EB] bg-white p-5 sm:p-7">
-            <PaymentBlockClient
-              slug={props.page.slug}
-              pageId={props.page.id}
-              methods={props.paymentMethods}
-              accent={config.theme.accent_color}
-              claims={props.claims}
-              rawToken={props.rawToken}
-              defaultCurrency={config.price.currency ?? 'PHP'}
-            />
-          </section>
-        </div>
-      ) : null}
     </main>
   )
 }
@@ -724,83 +712,6 @@ function LinkedConversions({
       })}
     </div>
   )
-}
-
-function FallbackForm({
-  page,
-  config,
-  claims,
-  rawToken,
-}: {
-  page: ActionPageRow
-  config: SalesConfig
-  claims: KindRendererProps['claims']
-  rawToken: KindRendererProps['rawToken']
-}) {
-  const enabled = config.fallback_form.fields.filter((f) => f.enabled)
-  if (enabled.length === 0) return null
-
-  return (
-    <form
-      action="/api/action-pages/submit"
-      method="post"
-      className="space-y-4 rounded-xl border border-[#E5E7EB] bg-white p-6"
-    >
-      <input type="hidden" name="slug" value={page.slug} />
-      {claims && rawToken && (
-        <>
-          <input type="hidden" name="p" value={claims.psid} />
-          <input type="hidden" name="g" value={claims.pageId} />
-          <input type="hidden" name="e" value={String(claims.exp)} />
-          <input type="hidden" name="t" value={rawToken} />
-        </>
-      )}
-      {enabled.map((field) => (
-        <div key={field.key} className="space-y-1">
-          <label
-            htmlFor={`sf-${field.key}`}
-            className="block text-[12px] font-semibold text-[#374151]"
-          >
-            {field.label}
-            {field.required && <span className="ml-0.5 text-red-600">*</span>}
-          </label>
-          {field.key === 'message' ? (
-            <textarea
-              id={`sf-${field.key}`}
-              name={field.key}
-              required={field.required}
-              rows={4}
-              className="w-full rounded-md border border-[#D1D5DB] bg-white px-3 py-2 text-[14px]"
-            />
-          ) : (
-            <input
-              id={`sf-${field.key}`}
-              name={field.key}
-              type={inputTypeFor(field.key)}
-              required={field.required}
-              className="w-full rounded-md border border-[#D1D5DB] bg-white px-3 py-2 text-[14px]"
-            />
-          )}
-        </div>
-      ))}
-      <button
-        type="submit"
-        className="w-full rounded-md px-4 py-3 text-[14px] font-semibold"
-        style={{
-          backgroundColor: 'var(--sales-accent)',
-          color: 'var(--sales-accent-fg)',
-        }}
-      >
-        {config.fallback_form.submit_button_label}
-      </button>
-    </form>
-  )
-}
-
-function inputTypeFor(key: string): string {
-  if (key === 'email') return 'email'
-  if (key === 'phone') return 'tel'
-  return 'text'
 }
 
 /* ────────────────────────── Helpers ────────────────────────── */
