@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import './generation-animation.css'
 
 interface Props {
   /** Step-specific status lines that rotate every 2s. Required ≥ 1 line. */
@@ -35,7 +36,7 @@ export function GenerationAnimation({ lines, heading }: Props) {
       ) : null}
 
       <div className="relative h-24 w-24">
-        <div className="absolute inset-0 animate-[spin_8s_linear_infinite] rounded-full bg-[conic-gradient(from_0deg,#a78bfa,#22d3ee,#34d399,#a78bfa)] blur-md opacity-80 motion-reduce:animate-pulse" />
+        <div className="ob-orb absolute inset-0 animate-[spin_8s_linear_infinite] rounded-full blur-md opacity-80 motion-reduce:animate-pulse" />
         <div className="absolute inset-2 rounded-full bg-white" />
       </div>
 

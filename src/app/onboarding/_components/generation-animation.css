@@ -1,0 +1,12 @@
+/* Co-located styles for GenerationAnimation. Keeps the conic-gradient palette
+ * inside the design-system token surface so the orb matches the rest of the
+ * wizard. Motion (spin/pulse) lives in Tailwind animate-* utilities on the
+ * element itself; this file only contributes the gradient backdrop. */
+.ob-orb {
+  background: conic-gradient(
+    from 0deg,
+    var(--accent),
+    var(--accent-soft),
+    var(--accent)
+  );
+}
