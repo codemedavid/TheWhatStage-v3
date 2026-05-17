@@ -25,7 +25,7 @@ import {
   type OnboardingStep,
 } from '@/lib/onboarding/types'
 import { nextStepRoute } from '@/lib/onboarding/steps'
-import { uniqueSlug } from './slug'
+import { uniqueSlug } from '@/lib/onboarding/slug'
 import { generateKnowledge, type GeneratedKnowledge } from '@/lib/onboarding/ai/knowledge'
 import { generateFaqs, type GeneratedFaqs } from '@/lib/onboarding/ai/faqs'
 import { VIBE_PRESETS, type VibePreset } from '@/lib/onboarding/ai/personality'
