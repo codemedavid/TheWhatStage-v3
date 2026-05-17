@@ -574,7 +574,7 @@ export const dict = {
   'checklist.personality':      { tl: 'Personality ng bot',         en: 'Bot personality' },
   'checklist.goal':             { tl: 'Pangunahing goal',           en: 'Primary goal' },
   'checklist.goal_content':     { tl: 'Detalye ng action page',     en: 'Action page content' },
-  'checklist.flow':             { tl: 'Daloy ng usapan',            en: 'Conversation flow' },
+  'checklist.flow':             { tl: 'Flow ng conversation',            en: 'Conversation flow' },
   'checklist.dismiss':          { tl: 'Itago ang checklist',        en: 'Hide checklist' },
   'checklist.resume':           { tl: 'Ituloy',                     en: 'Resume' },
   'checklist.start':            { tl: 'Simulan',                    en: 'Start' },

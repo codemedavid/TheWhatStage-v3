@@ -21,7 +21,6 @@ const DEFAULT_STAGE_BY_KIND_AND_OUTCOME: Partial<
   },
   sales: {
     submitted: 'qualifying',
-    checked_out: 'won',
   },
   catalog: { checked_out: 'won' },
   realestate: {

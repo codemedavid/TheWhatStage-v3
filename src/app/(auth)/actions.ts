@@ -4,6 +4,8 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { signUpSchema, signInSchema } from '@/lib/auth/schemas'
+import { initOnboardingForProfile } from '@/lib/onboarding/state'
+import { getPostAuthRedirect } from '@/lib/onboarding/post-auth-redirect'
 
 export type AuthFormState = {
   formError?: string
@@ -62,7 +64,19 @@ export async function signUpAction(
     return { formError: 'Account created but auto sign-in failed. Try logging in.' }
   }
 
-  redirect('/dashboard')
+  const { data: meAuth } = await supabase.auth.getUser()
+  if (meAuth.user) {
+    try {
+      await initOnboardingForProfile(meAuth.user.id)
+    } catch (err) {
+      console.error('[signUpAction] init onboarding state', err)
+      return {
+        formError: 'Account created but setup could not start. Please sign in to try again.',
+      }
+    }
+  }
+
+  redirect('/onboarding/welcome')
 }
 
 export async function signInAction(
@@ -88,5 +102,5 @@ export async function signInAction(
     return { formError: 'Invalid email or password.' }
   }
 
-  redirect('/dashboard')
+  redirect(await getPostAuthRedirect())
 }

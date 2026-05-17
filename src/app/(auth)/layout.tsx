@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation'
 import { getSession } from '@/lib/auth/get-session'
+import { getPostAuthRedirect } from '@/lib/onboarding/post-auth-redirect'
 
 export default async function AuthLayout({
   children,
@@ -7,7 +8,7 @@ export default async function AuthLayout({
   children: React.ReactNode
 }) {
   const session = await getSession()
-  if (session) redirect('/dashboard')
+  if (session) redirect(await getPostAuthRedirect())
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-[#F9FAFB] px-4">
