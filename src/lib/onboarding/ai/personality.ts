@@ -18,15 +18,31 @@ const ResponseSchema = z.object({
 })
 
 function vibeLine(v: VibePreset | undefined, tone: TonePreset): string {
-  if (!v) return `Tone preset: ${tone}.`
   const map: Record<VibePreset, string> = {
     friendly_kuya_ate: 'Vibe: warm Pinoy kuya/ate energy — uses "po/opo", calls customer "ka", playful.',
     professional_consultant: 'Vibe: calm professional consultant — concise, no slang, never aggressive.',
     hype_closer: 'Vibe: hype closer — confident, energetic, uses urgency without being scammy.',
     calm_expert: 'Vibe: calm expert — explains patiently, technical when needed, never condescending.',
   }
-  return map[v]
+  // Default to hype_closer when the owner skipped the picker — a closer
+  // baseline converts better than a generic "tone preset" fallback, and the
+  // owner can still override via seeds.
+  const effective = v ?? 'hype_closer'
+  return `${map[effective]} (owner tone preset: ${tone})`
 }
+
+// Taglish guidance — only injected when lang === 'tl'. Filipino Messenger
+// customers rarely speak pure Tagalog; they code-switch. Without explicit
+// rules the model drifts into either textbook Tagalog (sounds robotic) or
+// pure English (loses warmth). These rules anchor the register.
+const TAGLISH_RULES = [
+  'Taglish rules (customer chats in Taglish — Tagalog/English mix):',
+  '  - Mirror the customer. If they message in Taglish, reply in Taglish; if pure English, stay English; if pure Tagalog, stay Tagalog.',
+  '  - Keep technical / price / product nouns in English ("delivery fee", "package", "slot", "down payment"). Do NOT translate these.',
+  '  - Use "po/opo" sparingly — only when the customer uses it first or clearly skews formal.',
+  '  - Conversational fillers OK: "sige", "kasi", "talaga", "pwede", "ano", "ito". Avoid stiff phrases like "Magandang araw po sa inyo".',
+  '  - Never machine-translated Tagalog ("nag-aalok kami ng aming serbisyo") — write how a real kasama types on Messenger.',
+].join('\n')
 
 /**
  * Personality prompt builds a closer, not a receptionist. Rules are written
@@ -67,6 +83,7 @@ function systemPrompt(lang: OnboardingLang, seeds: PersonalitySeeds, tone: ToneP
     'fallback_message is what the bot sends when truly stuck — warm, brief, with a clear handoff ("I\'ll loop in the owner — what\'s the best way to reach you, viber/SMS?").',
     '',
     vibeLine(seeds.vibe_preset, tone),
+    lang === 'tl' ? TAGLISH_RULES : '',
     seeds.greet ? `Owner-provided opening line guidance: ${safe(seeds.greet)}` : '',
     seeds.must_use ? `Must use: ${safe(seeds.must_use)}` : '',
     seeds.must_not ? `Must not: ${safe(seeds.must_not)}` : '',

@@ -45,7 +45,7 @@ export function PersonalityForm({ lang, initial }: Props) {
                 type="radio"
                 name="vibe_preset"
                 value={vibe}
-                defaultChecked={(initial?.vibe_preset ?? 'friendly_kuya_ate') === vibe}
+                defaultChecked={(initial?.vibe_preset ?? 'hype_closer') === vibe}
                 className="sr-only"
               />
               {t(VIBE_KEY[vibe], lang)}

@@ -507,7 +507,7 @@ export async function savePersonalityAction(
     hype_closer: 'an energetic, persuasive closer',
     calm_expert: 'a calm, reassuring expert',
   }
-  const vibeText = seeds.vibe_preset ? vibeBlurb[seeds.vibe_preset] : 'a friendly, helpful assistant'
+  const vibeText = vibeBlurb[seeds.vibe_preset ?? 'hype_closer']
   const personaParts: string[] = [`Acts like ${vibeText} for ${basics.name}.`]
   if (seeds.greet) personaParts.push(`Opening greeting style: ${seeds.greet}`)
   const doRules = seeds.must_use ? [seeds.must_use] : []
