@@ -149,8 +149,23 @@ export async function dismissOnboardingAction(): Promise<void> {
   redirect('/dashboard')
 }
 
-export async function completeOnboardingAction(): Promise<void> {
+/**
+ * Wired to `<form action={completeOnboardingAction}>` on /onboarding/done.
+ *
+ * The `_formData` parameter is intentional: Next 16's `<form>`-action dispatch
+ * passes a FormData instance as the first argument; without an explicit param
+ * the dispatched call can land on a stale closure where the `redirect()` throw
+ * is not propagated back to the navigation handler, so the browser stays put
+ * even though the DB write happens. Accepting (and ignoring) FormData makes
+ * this a canonical form-action signature and lets Next correctly follow the
+ * 303 redirect to /dashboard.
+ *
+ * `revalidatePath('/dashboard')` busts any stale RSC payload so the just-set
+ * `completed_at` is reflected immediately on the destination page.
+ */
+export async function completeOnboardingAction(_formData?: FormData): Promise<void> {
   await completeOnboardingState()
+  revalidatePath('/dashboard')
   redirect('/dashboard')
 }
 
