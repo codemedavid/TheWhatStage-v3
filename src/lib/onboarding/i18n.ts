@@ -32,7 +32,7 @@ export const dict = {
   'checklist.personality':      { tl: 'Personality ng bot',         en: 'Bot personality' },
   'checklist.goal':             { tl: 'Pangunahing goal',           en: 'Primary goal' },
   'checklist.goal_content':     { tl: 'Detalye ng action page',     en: 'Action page content' },
-  'checklist.flow':             { tl: 'Daloy ng usapan',            en: 'Conversation flow' },
+  'checklist.flow':             { tl: 'Flow ng conversation',            en: 'Conversation flow' },
   'checklist.dismiss':          { tl: 'Itago ang checklist',        en: 'Hide checklist' },
   'checklist.resume':           { tl: 'Ituloy',                     en: 'Resume' },
   'checklist.start':            { tl: 'Simulan',                    en: 'Start' },
@@ -65,6 +65,7 @@ export const dict = {
   'business.tone.calm':         { tl: 'Calm',         en: 'Calm' },
   'business.save':          { tl: 'I-save at magpatuloy', en: 'Save and continue' },
   'business.saving':        { tl: 'Sini-save…',          en: 'Saving…' },
+  'business.fix_below':     { tl: 'Pakipuno ng mga kulang na detalye sa baba.', en: 'Please fill in the missing details below.' },
 
   'knowledge.heading':         { tl: 'Knowledge base ng business mo', en: 'Your business knowledge base' },
   'knowledge.subheading':      { tl: 'Sinulat ng AI based sa info mo. Pwede mong i-edit bago i-save.', en: 'AI drafted these from your answers. Edit anything before saving.' },
@@ -169,7 +170,7 @@ export const dict = {
   'gc.form.label_ph':        { tl: 'Label ng field',        en: 'Field label' },
   'gc.form.error.generation':{ tl: 'Hindi nag-generate ang AI. Subukan ulit o i-skip.', en: 'AI failed. Retry or skip.' },
 
-  'flow.heading':         { tl: 'Daloy ng usapan',         en: 'Conversation flow' },
+  'flow.heading':         { tl: 'Flow ng conversation',         en: 'Conversation flow' },
   'flow.subheading':      { tl: 'I-describe sa simpleng salita kung paano dapat mag-usap ang bot mo. Gagawa ng AI ng instructions + rules.', en: 'Describe in plain words how your bot should flow with customers. AI turns this into send-instructions + rules.' },
   'flow.description.label': { tl: 'Halimbawa, "Tinatanong nila ang presyo, sinasagot ko, tinatanong ko kung gusto mag-book."', en: 'e.g. "They ask about price, I answer, then I ask if they want to book."' },
   'flow.description.ph':  { tl: 'Sulatin mo dito…',          en: 'Type here…' },

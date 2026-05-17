@@ -60,14 +60,14 @@ describe('KINDS registry', () => {
     await KINDS.bot_instructions.run({
       basics,
       goal: 'form',
-      actionPage: { title: 'My page', ctaLabel: 'Book' },
+      actionPage: { title: 'My page', ctaLabel: 'Book', slug: 'my-page' },
       flowDescription: 'Greet then ask name',
       lang: 'tl',
     })
     expect(generateBotInstructions).toHaveBeenCalledWith({
       basics,
       goal: 'form',
-      action_page: { title: 'My page', cta_label: 'Book' },
+      action_page: { title: 'My page', cta_label: 'Book', slug: 'my-page' },
       flow_description: 'Greet then ask name',
       lang: 'tl',
     })

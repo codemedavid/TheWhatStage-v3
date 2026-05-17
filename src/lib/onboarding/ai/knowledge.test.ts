@@ -35,14 +35,13 @@ describe('generateKnowledge', () => {
     expect(out.sections[0]).toEqual({ title: 'About us', body: 'We bake fresh.' })
   })
 
-  it('throws a typed error if the model returns invalid JSON', async () => {
+  it('throws a typed error if the model keeps returning invalid JSON', async () => {
     const { HfRouterLlm } = await import('@/lib/rag')
-    ;(HfRouterLlm as unknown as { mockImplementationOnce: (fn: () => unknown) => void }).mockImplementationOnce(
-      function HfRouterLlmBad(this: { complete: ReturnType<typeof vi.fn> }) {
-        this.complete = vi.fn(async () => 'not-json')
-        return this
-      },
-    )
+    const m = HfRouterLlm as unknown as { mockImplementation: (fn: () => unknown) => void }
+    m.mockImplementation(function HfRouterLlmBad(this: { complete: ReturnType<typeof vi.fn> }) {
+      this.complete = vi.fn(async () => 'not-json')
+      return this
+    })
     await expect(generateKnowledge({ basics, lang: 'tl' })).rejects.toThrow(/generation_failed/i)
   })
 })

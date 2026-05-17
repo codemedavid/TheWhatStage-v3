@@ -123,9 +123,11 @@
 }
 .ob-shell .ob-btn-ghost:hover { background: var(--bg-elev); border-color: var(--ink-4); }
 .ob-shell .ob-btn-text {
-  background: transparent; color: var(--ink-3); padding: 11px 14px;
+  background: transparent; color: var(--ink-2); padding: 11px 14px;
+  text-decoration: underline; text-decoration-color: var(--line-strong);
+  text-underline-offset: 4px;
 }
-.ob-shell .ob-btn-text:hover { color: var(--ink); }
+.ob-shell .ob-btn-text:hover { color: var(--accent); text-decoration-color: var(--accent); }
 .ob-shell .ob-btn-lg { padding: 14px 24px; font-size: 15px; }
 
 .ob-shell .ob-field { display: flex; flex-direction: column; gap: 8px; margin-bottom: 22px; }

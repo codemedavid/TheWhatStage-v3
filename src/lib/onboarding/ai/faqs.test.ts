@@ -36,14 +36,13 @@ describe('generateFaqs', () => {
     expect(out.suggestions[0]).toEqual({ question: 'Magkano?', answer: 'PHP 250 each, free shipping in QC.' })
   })
 
-  it('throws generation_failed on bad JSON', async () => {
+  it('throws generation_failed when the model keeps returning bad JSON', async () => {
     const { HfRouterLlm } = await import('@/lib/rag')
-    ;(HfRouterLlm as unknown as { mockImplementationOnce: (fn: () => unknown) => void }).mockImplementationOnce(
-      function Bad(this: { complete: ReturnType<typeof vi.fn> }) {
-        this.complete = vi.fn(async () => 'nope')
-        return this
-      },
-    )
+    const m = HfRouterLlm as unknown as { mockImplementation: (fn: () => unknown) => void }
+    m.mockImplementation(function Bad(this: { complete: ReturnType<typeof vi.fn> }) {
+      this.complete = vi.fn(async () => 'nope')
+      return this
+    })
     await expect(generateFaqs({ basics, lang: 'tl' })).rejects.toThrow(/generation_failed/i)
   })
 })

@@ -25,7 +25,7 @@ export interface FormFieldsInput {
 export interface BotInstructionsInput {
   basics: BusinessBasics
   goal: ActionPageKind
-  actionPage: { title: string; ctaLabel: string }
+  actionPage: { title: string; ctaLabel: string; slug: string }
   flowDescription: string
   lang: OnboardingLang
 }
@@ -54,7 +54,7 @@ export const KINDS: {
       generateBotInstructions({
         basics,
         goal,
-        action_page: { title: actionPage.title, cta_label: actionPage.ctaLabel },
+        action_page: { title: actionPage.title, cta_label: actionPage.ctaLabel, slug: actionPage.slug },
         flow_description: flowDescription,
         lang,
       }),

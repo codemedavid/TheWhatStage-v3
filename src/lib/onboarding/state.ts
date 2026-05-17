@@ -186,6 +186,7 @@ export interface PrimaryActionPageBrief {
   id: string
   kind: string
   title: string
+  slug: string
   config: unknown
 }
 
@@ -201,10 +202,16 @@ export const getPrimaryActionPage = cache(async (): Promise<PrimaryActionPageBri
   if (!cfg?.primary_action_page_id) return null
   const { data: page } = await supabase
     .from('action_pages')
-    .select('id, kind, title, config')
+    .select('id, kind, title, slug, config')
     .eq('id', cfg.primary_action_page_id)
     .eq('user_id', user.id)
     .maybeSingle()
   if (!page) return null
-  return { id: page.id, kind: page.kind, title: page.title, config: page.config }
+  return {
+    id: page.id,
+    kind: page.kind,
+    title: page.title,
+    slug: page.slug,
+    config: page.config,
+  }
 })

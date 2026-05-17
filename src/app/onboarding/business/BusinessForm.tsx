@@ -40,15 +40,16 @@ export function BusinessForm({ lang, initial }: Props) {
   const v = (k: keyof NonNullable<BusinessBasicsFormState['values']>) =>
     state.values?.[k] ?? (initial?.[k as keyof typeof initial] as string | undefined) ?? ''
 
+  const hasFieldErrors = state.fieldErrors && Object.keys(state.fieldErrors).length > 0
   return (
     <form action={action} className="space-y-5" key={state.values ? 'retry' : 'fresh'}>
-      {state.formError && (
+      {(state.formError || hasFieldErrors) && (
         <div
           role="alert"
           aria-live="polite"
           className="rounded-md border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-900"
         >
-          {state.formError}
+          {state.formError ?? t('business.fix_below', lang)}
         </div>
       )}
       <Field

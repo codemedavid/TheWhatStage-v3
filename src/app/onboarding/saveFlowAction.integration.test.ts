@@ -53,8 +53,8 @@ beforeEach(() => {
   markStep.mockReset().mockResolvedValue(undefined)
   getUser.mockReset().mockResolvedValue(authUser('u1'))
 
-  actionPages = chain({ data: null, error: null })
-  chatbotConfigs = chain({ data: { recommendation_rules: null }, error: null })
+  actionPages = chain({ data: { slug: 'my-page', title: 'My Page' }, error: null })
+  chatbotConfigs = chain({ data: { recommendation_rules: null, instructions: '' }, error: null })
 
   mockFrom.mockReset().mockImplementation(tableRouter({
     action_pages: actionPages,
@@ -103,6 +103,7 @@ describe('saveFlowAction', () => {
           defaultConfidenceThreshold: 0.6,
           perActionPage: { 'other-page-id': { rules: 'keep me', requiredSlots: [], confidenceThreshold: 0.5 } },
         },
+        instructions: '',
       },
       error: null,
     })

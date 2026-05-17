@@ -35,7 +35,7 @@ function RegenerateSubmit({ lang }: { lang: OnboardingLang }) {
     <button
       type="submit"
       disabled={pending}
-      className="text-sm font-medium text-emerald-700 hover:text-emerald-900 disabled:opacity-60"
+      className="ob-btn ob-btn-text"
     >
       {pending ? t('knowledge.generating', lang) : t('knowledge.regenerate', lang)}
     </button>

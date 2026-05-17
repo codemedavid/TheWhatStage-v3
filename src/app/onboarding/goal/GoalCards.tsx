@@ -50,10 +50,10 @@ export function GoalCards({ lang, businessType }: { lang: OnboardingLang; busine
             >
               <span className="text-sm font-semibold">{t(LABEL_KEY[kind], lang)}</span>
               <span className="text-xs text-[color:var(--ink-3)]">{t(BLURB_KEY[kind], lang)}</span>
-              {kind === recommended && (
+              {kind === recommended && selected !== kind && (
                 <span
-                  className="mt-1 inline-block rounded-full px-2 py-0.5 text-[10px] font-medium"
-                  style={{ background: 'var(--accent-soft)', color: 'var(--accent-ink)' }}
+                  className="mt-1 inline-block rounded-full border px-2 py-0.5 text-[10px] font-medium"
+                  style={{ background: 'transparent', color: 'var(--accent-ink)', borderColor: 'var(--accent)' }}
                 >
                   {t('goal.recommended', lang)}
                 </span>

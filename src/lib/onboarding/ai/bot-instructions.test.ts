@@ -26,10 +26,12 @@ describe('generateBotInstructions', () => {
   it('returns parsed fields', async () => {
     const r = await generateBotInstructions({
       basics, lang: 'tl', goal: 'booking',
-      action_page: { title: 'Book a tasting', cta_label: 'Book a slot' },
+      action_page: { title: 'Book a tasting', cta_label: 'Book a slot', slug: 'book-a-tasting' },
       flow_description: 'They ask price, then I send booking link.',
     })
     expect(r.bot_send_instructions).toMatch(/booking/i)
+    // Generator must guarantee the slug token so the runtime can attach the page.
+    expect(r.bot_send_instructions).toContain('!actionpage:book-a-tasting')
     expect(r.recommendation_rules).toMatch(/specific date/i)
     expect(r.required_slots).toEqual(['preferred_date'])
     expect(r.confidence_threshold).toBeCloseTo(0.6)
