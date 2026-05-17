@@ -52,6 +52,13 @@ export function FlowForm({
           placeholder={t('flow.description.ph', lang)}
           className="ob-textarea"
         />
+        <p
+          className="ob-help"
+          style={length >= 20 ? { color: 'var(--success)' } : undefined}
+          aria-live="polite"
+        >
+          {t('flow.counter', lang, { length, max: 2000 })}
+        </p>
       </label>
       {error && <p className="text-sm text-red-600">{error}</p>}
       <StepNav step="flow" lang={lang} continueSlot={
