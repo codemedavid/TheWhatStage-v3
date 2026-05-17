@@ -20,7 +20,7 @@ export function SalesContent({ lang, pageId, config }: { lang: OnboardingLang; p
       <Labeled label={t('gc.sales.name', lang)}><input name="name" defaultValue={product.name ?? ''} required maxLength={160} className="ob-input" /></Labeled>
       <Labeled label={t('gc.sales.headline', lang)}><input name="headline" defaultValue={product.headline ?? ''} maxLength={240} className="ob-input" /></Labeled>
       <Labeled label={t('gc.sales.description', lang)}><textarea name="description" rows={4} defaultValue={product.description ?? ''} maxLength={4000} className="ob-textarea" /></Labeled>
-      <Labeled label={t('gc.sales.price', lang)}><input type="number" name="price_amount" defaultValue={price.amount ?? ''} min={0} className="ob-input w-40" /></Labeled>
+      <Labeled label={t('gc.sales.price', lang)}><input type="number" name="price_amount" defaultValue={price.amount ?? ''} min={0} inputMode="numeric" className="ob-input w-40" /></Labeled>
 
       {state.error && <p className="text-sm text-red-600">{t('goal_content.error.save', lang)}</p>}
       <StepNav step="goal_content" lang={lang} continueSlot={<SaveButton pending={pending} lang={lang} />} />

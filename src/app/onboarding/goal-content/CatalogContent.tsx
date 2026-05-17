@@ -57,6 +57,7 @@ export function CatalogContent({ lang }: { lang: OnboardingLang; pageId: string 
               }
               placeholder={t('gc.product.price_ph', lang)}
               min={0}
+              inputMode="numeric"
               className="ob-input mt-2 w-40"
             />
             <textarea

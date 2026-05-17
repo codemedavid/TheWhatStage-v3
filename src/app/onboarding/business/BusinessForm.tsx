@@ -58,6 +58,7 @@ export function BusinessForm({ lang, initial }: Props) {
         defaultValue={v('name')}
         error={err('name')}
         maxLength={120}
+        autoComplete="organization"
       />
       <Field
         name="offer"
@@ -73,7 +74,7 @@ export function BusinessForm({ lang, initial }: Props) {
         <legend className="ob-label">
           {t('business.type.label', lang)}
         </legend>
-        <div role="radiogroup" className="ob-choice-grid mt-2 sm:grid sm:grid-cols-4">
+        <div role="radiogroup" aria-label={t('business.type.label', lang)} className="ob-choice-grid mt-2 sm:grid sm:grid-cols-4">
           {BUSINESS_TYPES.map((type) => (
             <label key={type} className="ob-choice justify-center">
               <input
@@ -115,7 +116,7 @@ export function BusinessForm({ lang, initial }: Props) {
         <legend className="ob-label">
           {t('business.tone.label', lang)}
         </legend>
-        <div role="radiogroup" className="ob-choice-grid mt-2 sm:grid sm:grid-cols-4">
+        <div role="radiogroup" aria-label={t('business.tone.label', lang)} className="ob-choice-grid mt-2 sm:grid sm:grid-cols-4">
           {TONE_PRESETS.map((tone) => (
             <label key={tone} className="ob-choice justify-center">
               <input
@@ -156,6 +157,7 @@ function Field({
   error,
   textarea = false,
   maxLength,
+  autoComplete = 'off',
 }: {
   name: string
   label: string
@@ -164,6 +166,7 @@ function Field({
   error?: string
   textarea?: boolean
   maxLength?: number
+  autoComplete?: string
 }) {
   return (
     <label className="ob-field">
@@ -175,6 +178,7 @@ function Field({
           maxLength={maxLength}
           defaultValue={defaultValue}
           placeholder={placeholder}
+          autoComplete={autoComplete}
           className="ob-textarea"
         />
       ) : (
@@ -184,6 +188,7 @@ function Field({
           maxLength={maxLength}
           defaultValue={defaultValue}
           placeholder={placeholder}
+          autoComplete={autoComplete}
           className="ob-input"
         />
       )}
