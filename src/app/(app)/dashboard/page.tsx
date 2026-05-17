@@ -5,11 +5,16 @@ import DashboardClient, {
   type RecentSubmission,
 } from './_components/DashboardClient'
 import { LaunchChecklist } from './_components/LaunchChecklist'
+import SuperadminDashboard from './_components/SuperadminDashboard'
 
 export default async function DashboardPage() {
   const session = await getSession()
   const userId = session?.userId ?? ''
   const userName = session?.fullName ?? 'there'
+
+  if (session?.role === 'superadmin') {
+    return <SuperadminDashboard userName={userName} />
+  }
 
   const supabase = await createClient()
 
