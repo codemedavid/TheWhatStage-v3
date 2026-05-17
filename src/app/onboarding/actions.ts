@@ -18,7 +18,7 @@ import {
 import { isActionPageKind, KIND_REGISTRY, type ActionPageKind } from '@/lib/action-pages/kinds'
 import { isGenerationKind, type GenerationKind } from '@/lib/onboarding/generation/types'
 import { BusinessBasicsSchema } from '@/lib/onboarding/business-basics'
-import { LANG_COOKIE } from '@/lib/onboarding/i18n'
+import { LANG_COOKIE, t } from '@/lib/onboarding/i18n'
 import {
   ONBOARDING_STEPS,
   type OnboardingLang,
@@ -298,13 +298,14 @@ export async function saveKnowledgeAction(
 
   const { data: stateRow } = await supabase
     .from('onboarding_state')
-    .select('business_basics')
+    .select('business_basics, ui_language')
     .eq('profile_id', userId)
     .maybeSingle()
 
   const basicsParsed = BusinessBasicsSchema.safeParse(stateRow?.business_basics)
   if (!basicsParsed.success) return { error: 'no_basics' }
   const basics = basicsParsed.data
+  const lang: OnboardingLang = stateRow?.ui_language === 'en' ? 'en' : 'tl'
 
   const text = result.data.sections
     .map((s) => `${s.title}\n\n${s.body}`)
@@ -334,7 +335,7 @@ export async function saveKnowledgeAction(
 
   const { error: insertErr } = await supabase.from('knowledge_documents').insert({
     user_id: userId,
-    title: `About ${basics.name}`,
+    title: t('knowledge.doc_title', lang, { name: basics.name }),
     content_text: text,
     content_html: html,
     content_json: tiptapDoc,

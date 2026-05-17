@@ -102,6 +102,7 @@ async function KnowledgeBody({ lang }: { lang: OnboardingLang }) {
       errorMessage={t('gen.error.generic', lang)}
       skipHref="/onboarding/faqs"
       skipLabel={t('gen.skip', lang)}
+      lang={lang}
     />
   )
 }

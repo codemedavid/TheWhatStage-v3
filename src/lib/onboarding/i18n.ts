@@ -3,8 +3,8 @@ import type { OnboardingLang } from './types'
 export const LANG_COOKIE = 'ws_onboarding_lang'
 
 export const dict = {
-  'shell.skip_for_now':         { tl: 'I-skip muna',          en: 'Skip for now' },
-  'shell.skip_step':            { tl: 'I-skip ang step na ito', en: 'Skip this step' },
+  'shell.skip_for_now':         { tl: 'I-save at lumabas',    en: 'Save & exit' },
+  'shell.skip_step':            { tl: 'Laktawan ang hakbang', en: 'Skip this step' },
   'shell.back':                 { tl: 'Bumalik',              en: 'Back' },
   'shell.continue':             { tl: 'Magpatuloy',           en: 'Continue' },
   'shell.lang_toggle':          { tl: 'EN',                    en: 'TL' },
@@ -111,7 +111,7 @@ export const dict = {
   'personality.must_not.label':{ tl: 'Mga bawal na sabihin',            en: 'What it must never do' },
   'personality.must_not.ph':   { tl: 'Hal. "Huwag mag-promise ng next-day delivery"', en: "e.g. \"Don't promise next-day delivery\"" },
   'personality.save':          { tl: 'I-save ang personality',          en: 'Save personality' },
-  'personality.saving':        { tl: 'Sini-generate ng AI…',            en: 'AI is drafting…' },
+  'personality.saving':        { tl: 'Sini-save…',                      en: 'Saving…' },
   'personality.error':         { tl: 'May error. Subukan ulit o i-skip.', en: 'Could not save. Retry or skip.' },
   'personality.error.no_basics': { tl: 'Punan muna ang business basics step.', en: 'Fill in business basics first.' },
 
@@ -201,8 +201,18 @@ export const dict = {
   'gen.bot.heading':       { tl: 'Tinatapos ang bot instructions…',      en: 'Finalizing your bot instructions…' },
   'gen.bot.line1':         { tl: 'Pinagsasama-sama ang lahat ng sagot mo…', en: 'Stitching all your answers together…' },
   'gen.bot.line2':         { tl: 'Nilalagay ang tono at boundaries…',   en: 'Setting tone and boundaries…' },
-  'gen.skip':              { tl: 'I-skip muna — review later',           en: 'Skip for now — review later' },
+  'gen.skip':              { tl: 'Laktawan ang AI draft',                 en: 'Skip AI draft' },
   'gen.error.generic':     { tl: 'May error sa pag-generate. Pwede mong subukan ulit.', en: 'Generation failed. You can try again.' },
+  'generation.retry':              { tl: 'Subukan ulit',                       en: 'Retry' },
+  'generation.failure.timeout':    { tl: 'Tumagal nang labis ang pag-generate.', en: 'Generation took too long.' },
+  'generation.failure.not_enqueued': { tl: 'Hindi nasimulan ang job. Subukan ulit.', en: 'The job did not start. Try again.' },
+  'generation.failure.unknown_error': { tl: 'Hindi inaasahang error.',           en: 'Unexpected error.' },
+
+  'flow.counter':          { tl: '{{length}}/20 min · max {{max}}',       en: '{{length}}/20 min · max {{max}}' },
+
+  'goal.recommended':      { tl: 'Inirerekomenda',                        en: 'Recommended' },
+
+  'knowledge.doc_title':   { tl: 'Tungkol sa {{name}}',                   en: 'About {{name}}' },
 } as const
 
 export type DictKey = keyof typeof dict

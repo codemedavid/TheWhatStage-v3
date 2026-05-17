@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
 import type { GenerationKind } from '@/lib/onboarding/generation/types'
 import { GenerationAnimation } from './GenerationAnimation'
+import { t, type DictKey } from '@/lib/onboarding/i18n'
+import type { OnboardingLang } from '@/lib/onboarding/types'
 
 interface Props {
   kind: GenerationKind
@@ -13,6 +15,18 @@ interface Props {
   errorMessage?: string
   skipHref: string
   skipLabel: string
+  lang: OnboardingLang
+}
+
+const FAILURE_KEYS: Record<string, DictKey> = {
+  timeout: 'generation.failure.timeout',
+  not_enqueued: 'generation.failure.not_enqueued',
+  unknown_error: 'generation.failure.unknown_error',
+}
+
+function failureLabel(reason: string, lang: OnboardingLang): string {
+  const key = FAILURE_KEYS[reason]
+  return key ? t(key, lang) : reason
 }
 
 type PollState =
@@ -39,6 +53,7 @@ export function GenerationGate({
   errorMessage,
   skipHref,
   skipLabel,
+  lang,
 }: Props) {
   const router = useRouter()
   const [state, setState] = useState<PollState>({ phase: 'polling' })
@@ -125,7 +140,7 @@ export function GenerationGate({
     return (
       <div className="mt-6 rounded-md border border-red-300 bg-red-50 p-4 text-sm text-red-900">
         <p>{errorMessage ?? 'Generation failed.'}</p>
-        <p className="mt-2 text-xs text-red-800/80">{state.error}</p>
+        <p className="mt-2 text-xs text-red-800/80">{failureLabel(state.error, lang)}</p>
         <div className="mt-3 flex flex-wrap gap-3">
           <button
             type="button"
@@ -135,7 +150,7 @@ export function GenerationGate({
             }}
             className="font-medium underline"
           >
-            Retry
+            {t('generation.retry', lang)}
           </button>
           <Link href={skipHref} className="font-medium underline">
             {skipLabel}

@@ -100,6 +100,7 @@ async function FaqsBody({ lang }: { lang: OnboardingLang }) {
       errorMessage={t('gen.error.generic', lang)}
       skipHref="/onboarding/personality"
       skipLabel={t('gen.skip', lang)}
+      lang={lang}
     />
   )
 }

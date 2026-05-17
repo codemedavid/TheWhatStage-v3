@@ -97,6 +97,7 @@ async function FlowBody({ lang }: { lang: OnboardingLang }) {
         errorMessage={t('gen.error.generic', lang)}
         skipHref="/onboarding/done"
         skipLabel={t('gen.skip', lang)}
+        lang={lang}
       />
     )
   }

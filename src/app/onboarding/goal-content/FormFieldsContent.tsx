@@ -102,6 +102,7 @@ export async function FormFieldsContent({
       errorMessage={t('gen.error.generic', lang)}
       skipHref="/onboarding/flow"
       skipLabel={t('gen.skip', lang)}
+      lang={lang}
     />
   )
 }
