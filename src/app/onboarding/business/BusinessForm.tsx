@@ -70,15 +70,12 @@ export function BusinessForm({ lang, initial }: Props) {
       />
 
       <fieldset>
-        <legend className="block text-sm font-medium text-zinc-900">
+        <legend className="ob-label">
           {t('business.type.label', lang)}
         </legend>
-        <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <div role="radiogroup" className="ob-choice-grid mt-2 sm:grid sm:grid-cols-4">
           {BUSINESS_TYPES.map((type) => (
-            <label
-              key={type}
-              className="flex cursor-pointer items-center justify-center rounded-md border border-zinc-300 bg-white p-3 text-sm text-zinc-900 hover:bg-zinc-50 has-[:checked]:border-emerald-600 has-[:checked]:bg-emerald-50 has-[:checked]:text-emerald-900"
-            >
+            <label key={type} className="ob-choice justify-center">
               <input
                 type="radio"
                 name="business_type"
@@ -115,15 +112,12 @@ export function BusinessForm({ lang, initial }: Props) {
       />
 
       <fieldset>
-        <legend className="block text-sm font-medium text-zinc-900">
+        <legend className="ob-label">
           {t('business.tone.label', lang)}
         </legend>
-        <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <div role="radiogroup" className="ob-choice-grid mt-2 sm:grid sm:grid-cols-4">
           {TONE_PRESETS.map((tone) => (
-            <label
-              key={tone}
-              className="flex cursor-pointer items-center justify-center rounded-md border border-zinc-300 bg-white p-3 text-sm text-zinc-900 hover:bg-zinc-50 has-[:checked]:border-emerald-600 has-[:checked]:bg-emerald-50 has-[:checked]:text-emerald-900"
-            >
+            <label key={tone} className="ob-choice justify-center">
               <input
                 type="radio"
                 name="tone"
@@ -144,7 +138,7 @@ export function BusinessForm({ lang, initial }: Props) {
           <button
             type="submit"
             disabled={pending}
-            className="inline-flex items-center rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60"
+            className="ob-btn ob-btn-primary"
           >
             {pending ? t('business.saving', lang) : t('business.save', lang)}
           </button>
@@ -171,11 +165,9 @@ function Field({
   textarea?: boolean
   maxLength?: number
 }) {
-  const cls =
-    'mt-1 block w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 placeholder:text-zinc-400 focus:border-emerald-600 focus:outline-none focus:ring-1 focus:ring-emerald-600'
   return (
-    <label className="block">
-      <span className="block text-sm font-medium text-zinc-900">{label}</span>
+    <label className="ob-field">
+      <span className="ob-label">{label}</span>
       {textarea ? (
         <textarea
           name={name}
@@ -183,7 +175,7 @@ function Field({
           maxLength={maxLength}
           defaultValue={defaultValue}
           placeholder={placeholder}
-          className={cls}
+          className="ob-textarea"
         />
       ) : (
         <input
@@ -192,7 +184,7 @@ function Field({
           maxLength={maxLength}
           defaultValue={defaultValue}
           placeholder={placeholder}
-          className={cls}
+          className="ob-input"
         />
       )}
       {error && <p className="mt-1 text-xs text-red-600">{error}</p>}

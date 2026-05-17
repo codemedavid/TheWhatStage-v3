@@ -35,15 +35,12 @@ export function PersonalityForm({ lang, initial }: Props) {
   return (
     <form action={action} className="space-y-5">
       <fieldset>
-        <legend className="block text-sm font-medium text-zinc-900">
+        <legend className="ob-label">
           {t('personality.vibe.label', lang)}
         </legend>
-        <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <div role="radiogroup" className="ob-choice-grid mt-2 sm:grid sm:grid-cols-4">
           {VIBE_PRESETS.map((vibe) => (
-            <label
-              key={vibe}
-              className="flex cursor-pointer items-center justify-center rounded-md border border-zinc-300 bg-white p-3 text-sm text-zinc-900 hover:bg-zinc-50 has-[:checked]:border-emerald-600 has-[:checked]:bg-emerald-50 has-[:checked]:text-emerald-900"
-            >
+            <label key={vibe} className="ob-choice justify-center">
               <input
                 type="radio"
                 name="vibe_preset"
@@ -75,7 +72,7 @@ export function PersonalityForm({ lang, initial }: Props) {
           <button
             type="submit"
             disabled={pending}
-            className="inline-flex items-center rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60"
+            className="ob-btn ob-btn-primary"
           >
             {pending ? t('personality.saving', lang) : t('personality.save', lang)}
           </button>
@@ -87,15 +84,15 @@ export function PersonalityForm({ lang, initial }: Props) {
 
 function Field({ name, label, placeholder, defaultValue }: { name: string; label: string; placeholder: string; defaultValue: string }) {
   return (
-    <label className="block">
-      <span className="block text-sm font-medium text-zinc-900">{label}</span>
+    <label className="ob-field">
+      <span className="ob-label">{label}</span>
       <input
         type="text"
         name={name}
         maxLength={300}
         defaultValue={defaultValue}
         placeholder={placeholder}
-        className="mt-1 block w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 placeholder:text-zinc-400 focus:border-emerald-600 focus:outline-none focus:ring-1 focus:ring-emerald-600"
+        className="ob-input"
       />
     </label>
   )

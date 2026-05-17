@@ -28,7 +28,7 @@ export function FlowPreview({
           maxLength={2000}
           value={data.bot_send_instructions}
           onChange={(e) => setData((p) => ({ ...p, bot_send_instructions: e.target.value }))}
-          className={inp}
+          className="ob-textarea"
         />
       </Section>
 
@@ -39,11 +39,11 @@ export function FlowPreview({
           maxLength={2000}
           value={data.recommendation_rules}
           onChange={(e) => setData((p) => ({ ...p, recommendation_rules: e.target.value }))}
-          className={inp}
+          className="ob-textarea"
         />
       </Section>
 
-      <div className="text-xs text-zinc-600">
+      <div className="ob-help">
         <span className="font-medium">{t('flow.preview.slots', lang)}: </span>
         {data.required_slots.length === 0 ? '—' : data.required_slots.join(', ')}
       </div>
@@ -51,7 +51,7 @@ export function FlowPreview({
       {state.error && <p className="text-sm text-red-600">{t('flow.error.save', lang)}</p>}
 
       <StepNav step="flow" lang={lang} continueSlot={
-        <button type="submit" disabled={pending} className="inline-flex items-center rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60">
+        <button type="submit" disabled={pending} className="ob-btn ob-btn-primary">
           {pending ? t('flow.saving', lang) : t('flow.save', lang)}
         </button>
       } />
@@ -59,11 +59,10 @@ export function FlowPreview({
   )
 }
 
-const inp = 'mt-1 block w-full resize-y rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm focus:border-emerald-600 focus:outline-none focus:ring-1 focus:ring-emerald-600'
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div>
-      <h3 className="text-sm font-medium text-zinc-900">{title}</h3>
+    <div className="ob-field">
+      <h3 className="ob-label">{title}</h3>
       {children}
     </div>
   )

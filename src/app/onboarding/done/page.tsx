@@ -8,19 +8,20 @@ export default async function DonePage() {
   const lang = await getOnboardingLang()
   return (
     <WizardShell lang={lang} step={null} terminal="done">
-      <h1 className="text-2xl font-semibold text-zinc-900">{t('done.title', lang)}</h1>
-      <p className="mt-3 text-zinc-700">{t('done.body', lang)}</p>
+      <p className="ob-eyebrow">{lang === 'tl' ? 'Tapos na · Done' : 'All set · Done'}</p>
+      <h1 className="ob-title">{t('done.title', lang)}</h1>
+      <p className="ob-sub">{t('done.body', lang)}</p>
       <div className="mt-8 flex flex-wrap gap-3">
         <Link
           href="/dashboard/chatbot"
-          className="inline-flex items-center rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
+          className="ob-btn ob-btn-primary"
         >
           {t('done.open_tester', lang)}
         </Link>
         <form action={completeOnboardingAction}>
           <button
             type="submit"
-            className="inline-flex items-center rounded-md border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-900 hover:bg-zinc-50"
+            className="ob-btn ob-btn-ghost"
           >
             {t('done.go_dashboard', lang)}
           </button>

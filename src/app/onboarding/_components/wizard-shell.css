@@ -166,9 +166,14 @@
   border-color: var(--accent);
   background: color-mix(in oklab, var(--accent-soft) 50%, var(--paper));
 }
-.ob-shell .ob-choice.selected {
+.ob-shell .ob-choice.selected,
+.ob-shell .ob-choice:has(input:checked) {
   border-color: var(--accent); background: var(--accent-soft);
   box-shadow: 0 0 0 1px var(--accent);
+}
+.ob-shell .ob-choice:has(input:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .ob-shell .ob-chip {

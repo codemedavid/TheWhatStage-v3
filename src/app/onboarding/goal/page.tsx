@@ -3,6 +3,7 @@ import { GoalCards } from './GoalCards'
 import { getOnboardingLang } from '@/lib/onboarding/lang'
 import { getBusinessBasics } from '@/lib/onboarding/state'
 import { t } from '@/lib/onboarding/i18n'
+import { stepEyebrow } from '../_components/stepEyebrow'
 
 export const dynamic = 'force-dynamic'
 
@@ -10,11 +11,10 @@ export default async function GoalPage() {
   const [lang, basics] = await Promise.all([getOnboardingLang(), getBusinessBasics()])
   return (
     <WizardShell lang={lang} step="goal">
-      <h1 className="text-2xl font-semibold text-zinc-900">{t('goal.heading', lang)}</h1>
-      <p className="mt-1 text-sm text-zinc-600">{t('goal.subheading', lang)}</p>
-      <div className="mt-6">
-        <GoalCards lang={lang} businessType={basics?.business_type ?? null} />
-      </div>
+      <p className="ob-eyebrow">{stepEyebrow('goal', lang)}</p>
+      <h1 className="ob-title">{t('goal.heading', lang)}</h1>
+      <p className="ob-sub">{t('goal.subheading', lang)}</p>
+      <GoalCards lang={lang} businessType={basics?.business_type ?? null} />
     </WizardShell>
   )
 }

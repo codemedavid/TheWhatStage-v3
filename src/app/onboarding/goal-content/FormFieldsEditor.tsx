@@ -23,7 +23,7 @@ export function FormFieldsEditor({
 
       <ul className="space-y-2">
         {blocks.map((b, i) => (
-          <li key={b.id} className="rounded-md border border-zinc-200 bg-white p-3">
+          <li key={b.id}>
             <input
               type="text"
               value={(kind === 'qualification' ? b.prompt : b.label) ?? ''}
@@ -39,7 +39,7 @@ export function FormFieldsEditor({
                 )
               }
               maxLength={300}
-              className="w-full border-0 bg-transparent text-sm font-medium text-zinc-900 focus:outline-none"
+              className="ob-input"
               placeholder={t('gc.form.label_ph', lang)}
             />
           </li>
@@ -49,7 +49,7 @@ export function FormFieldsEditor({
       {state.error && <p className="text-sm text-red-600">{t('goal_content.error.save', lang)}</p>}
 
       <StepNav step="goal_content" lang={lang} continueSlot={
-        <button type="submit" disabled={pending} className="inline-flex items-center rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60">
+        <button type="submit" disabled={pending} className="ob-btn ob-btn-primary">
           {pending ? t('goal_content.saving', lang) : t('goal_content.save', lang)}
         </button>
       } />

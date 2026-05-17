@@ -10,7 +10,7 @@ import './welcome.css'
 export default async function WelcomePage() {
   const lang = await getOnboardingLang()
 
-  const eyebrow = lang === 'tl' ? 'Tara, i-set up natin' : "Let's set you up"
+  const eyebrow = lang === 'tl' ? 'Step 00 · Welcome' : 'Step 00 · Welcome'
   const hello = lang === 'tl' ? 'Kumusta,' : 'Welcome,'
   const takes = lang === 'tl' ? '~5 min · pwedeng i-skip ang lahat' : '~5 min · everything is skippable'
   const noteEyebrow = lang === 'tl' ? 'Mensahe galing kay Niño' : 'A note from Niño'

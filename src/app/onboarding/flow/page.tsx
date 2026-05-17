@@ -18,6 +18,7 @@ import { t } from '@/lib/onboarding/i18n'
 import type { ActionPageKind } from '@/lib/action-pages/kinds'
 import { parseBotInstructionsResult } from '@/lib/onboarding/ai/result-schemas'
 import type { OnboardingLang } from '@/lib/onboarding/types'
+import { stepEyebrow } from '../_components/stepEyebrow'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -26,8 +27,9 @@ export default async function FlowPage() {
   const lang = await getOnboardingLang()
   return (
     <WizardShell lang={lang} step="flow">
-      <h1 className="text-2xl font-semibold text-zinc-900">{t('flow.heading', lang)}</h1>
-      <p className="mt-1 text-sm text-zinc-600">{t('flow.subheading', lang)}</p>
+      <p className="ob-eyebrow">{stepEyebrow('flow', lang)}</p>
+      <h1 className="ob-title">{t('flow.heading', lang)}</h1>
+      <p className="ob-sub">{t('flow.subheading', lang)}</p>
       <Suspense fallback={<GateSkeleton />}>
         <FlowBody lang={lang} />
       </Suspense>
@@ -78,7 +80,7 @@ async function FlowBody({ lang }: { lang: OnboardingLang }) {
         await runGeneration(profileId, 'bot_instructions', {
           basics,
           goal: page.kind as ActionPageKind,
-          actionPage: { title: page.title, ctaLabel },
+          actionPage: { title: page.title, ctaLabel, slug: page.slug },
           flowDescription,
           lang,
         })

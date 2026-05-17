@@ -4,6 +4,7 @@ import { getOnboardingLang } from '@/lib/onboarding/lang'
 import { getOnboardingState } from '@/lib/onboarding/state'
 import { t } from '@/lib/onboarding/i18n'
 import type { VibePreset } from '@/lib/onboarding/ai/personality'
+import { stepEyebrow } from '../_components/stepEyebrow'
 
 export const dynamic = 'force-dynamic'
 
@@ -31,11 +32,10 @@ export default async function PersonalityPage() {
 
   return (
     <WizardShell lang={lang} step="personality">
-      <h1 className="text-2xl font-semibold text-zinc-900">{t('personality.heading', lang)}</h1>
-      <p className="mt-1 text-sm text-zinc-600">{t('personality.subheading', lang)}</p>
-      <div className="mt-6">
-        <PersonalityForm lang={lang} initial={initial} />
-      </div>
+      <p className="ob-eyebrow">{stepEyebrow('personality', lang)}</p>
+      <h1 className="ob-title">{t('personality.heading', lang)}</h1>
+      <p className="ob-sub">{t('personality.subheading', lang)}</p>
+      <PersonalityForm lang={lang} initial={initial} />
     </WizardShell>
   )
 }

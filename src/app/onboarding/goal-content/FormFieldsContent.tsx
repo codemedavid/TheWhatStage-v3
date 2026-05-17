@@ -26,10 +26,10 @@ export async function FormFieldsContent({
   if (existing.length > 0) {
     return (
       <div>
-        <h2 className="text-sm font-medium text-zinc-700">
+        <h2 className="ob-label">
           {kind === 'qualification' ? t('gc.qualification.heading', lang) : t('gc.form.heading', lang)}
         </h2>
-        <p className="mt-1 text-xs text-zinc-500">{t('gc.form.subheading', lang)}</p>
+        <p className="ob-help mt-1">{t('gc.form.subheading', lang)}</p>
         <FormFieldsEditor lang={lang} pageId={pageId} initialBlocks={existing} kind={kind} />
       </div>
     )
@@ -45,10 +45,10 @@ export async function FormFieldsContent({
   if (parsedBlocks) {
     return (
       <div>
-        <h2 className="text-sm font-medium text-zinc-700">
+        <h2 className="ob-label">
           {kind === 'qualification' ? t('gc.qualification.heading', lang) : t('gc.form.heading', lang)}
         </h2>
-        <p className="mt-1 text-xs text-zinc-500">{t('gc.form.subheading', lang)}</p>
+        <p className="ob-help mt-1">{t('gc.form.subheading', lang)}</p>
         <FormFieldsEditor lang={lang} pageId={pageId} initialBlocks={parsedBlocks.blocks} kind={kind} />
       </div>
     )

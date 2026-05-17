@@ -40,22 +40,22 @@ export function GoalCards({ lang, businessType }: { lang: OnboardingLang; busine
     <form action={action} className="space-y-5">
       <input type="hidden" name="kind" value={selected} />
 
-      <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      <ul className="ob-choice-grid sm:grid sm:grid-cols-2">
         {ACTION_PAGE_KINDS.map((kind) => (
           <li key={kind}>
             <button
               type="button"
               onClick={() => setSelected(kind)}
-              className={`flex w-full flex-col items-start gap-1 rounded-lg border p-4 text-left transition ${
-                selected === kind
-                  ? 'border-emerald-600 bg-emerald-50'
-                  : 'border-zinc-200 bg-white hover:border-zinc-300'
-              }`}
+              className={`ob-choice w-full flex-col items-start ${selected === kind ? 'selected' : ''}`}
             >
-              <span className="text-sm font-semibold text-zinc-900">{t(LABEL_KEY[kind], lang)}</span>
-              <span className="text-xs text-zinc-600">{t(BLURB_KEY[kind], lang)}</span>
+              <span className="text-sm font-semibold">{t(LABEL_KEY[kind], lang)}</span>
+              <span className="text-xs text-[color:var(--ink-3)]">{t(BLURB_KEY[kind], lang)}</span>
               {kind === recommended && (
-                <span className="mt-1 inline-block rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-medium text-emerald-800">
+                // TODO: i18n — copy lives in B3 sweep
+                <span
+                  className="mt-1 inline-block rounded-full px-2 py-0.5 text-[10px] font-medium"
+                  style={{ background: 'var(--accent-soft)', color: 'var(--accent-ink)' }}
+                >
                   Recommended
                 </span>
               )}
@@ -73,7 +73,7 @@ export function GoalCards({ lang, businessType }: { lang: OnboardingLang; busine
           <button
             type="submit"
             disabled={pending}
-            className="inline-flex items-center rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60"
+            className="ob-btn ob-btn-primary"
           >
             {pending ? t('goal.saving', lang) : t('goal.save', lang)}
           </button>

@@ -3,6 +3,7 @@ import { BusinessForm } from './BusinessForm'
 import { getOnboardingLang } from '@/lib/onboarding/lang'
 import { getBusinessBasics } from '@/lib/onboarding/state'
 import { t } from '@/lib/onboarding/i18n'
+import { stepEyebrow } from '../_components/stepEyebrow'
 
 export const maxDuration = 60
 
@@ -13,7 +14,7 @@ export default async function BusinessPage() {
   ])
   return (
     <WizardShell lang={lang} step="business">
-      <p className="ob-eyebrow">01 · {t('business.heading', lang)}</p>
+      <p className="ob-eyebrow">{stepEyebrow('business', lang)}</p>
       <h1 className="ob-title">{t('business.heading', lang)}</h1>
       <p className="ob-sub">{t('business.subheading', lang)}</p>
       <BusinessForm lang={lang} initial={initial} />

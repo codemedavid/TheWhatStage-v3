@@ -14,6 +14,7 @@ import { getBusinessBasics } from '@/lib/onboarding/state'
 import { t } from '@/lib/onboarding/i18n'
 import { parseKnowledgeResult } from '@/lib/onboarding/ai/result-schemas'
 import type { OnboardingLang } from '@/lib/onboarding/types'
+import { stepEyebrow } from '../_components/stepEyebrow'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -24,8 +25,9 @@ export default async function KnowledgePage() {
   const lang = await getOnboardingLang()
   return (
     <WizardShell lang={lang} step="knowledge">
-      <h1 className="text-2xl font-semibold text-zinc-900">{t('knowledge.heading', lang)}</h1>
-      <p className="mt-1 text-sm text-zinc-600">{t('knowledge.subheading', lang)}</p>
+      <p className="ob-eyebrow">{stepEyebrow('knowledge', lang)}</p>
+      <h1 className="ob-title">{t('knowledge.heading', lang)}</h1>
+      <p className="ob-sub">{t('knowledge.subheading', lang)}</p>
       <Suspense fallback={<GateSkeleton />}>
         <KnowledgeBody lang={lang} />
       </Suspense>

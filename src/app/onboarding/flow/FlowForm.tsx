@@ -37,9 +37,9 @@ export function FlowForm({
 
   return (
     <form action={handleSubmit} className="space-y-4">
-      <p className="text-xs text-zinc-500">{pageTitle}</p>
-      <label className="block">
-        <span className="block text-sm font-medium text-zinc-900">{t('flow.description.label', lang)}</span>
+      <p className="ob-help">{pageTitle}</p>
+      <label className="ob-field">
+        <span className="ob-label">{t('flow.description.label', lang)}</span>
         <textarea
           ref={textareaRef}
           name="flow_description"
@@ -50,12 +50,12 @@ export function FlowForm({
           defaultValue={initialDescription}
           onInput={(e) => setLength((e.target as HTMLTextAreaElement).value.trim().length)}
           placeholder={t('flow.description.ph', lang)}
-          className="mt-1 block w-full resize-y rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm focus:border-emerald-600 focus:outline-none focus:ring-1 focus:ring-emerald-600"
+          className="ob-textarea"
         />
       </label>
       {error && <p className="text-sm text-red-600">{error}</p>}
       <StepNav step="flow" lang={lang} continueSlot={
-        <button type="submit" disabled={!canSubmit} className="inline-flex items-center rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60">
+        <button type="submit" disabled={!canSubmit} className="ob-btn ob-btn-primary">
           {pending ? t('flow.generating', lang) : t('flow.generate', lang)}
         </button>
       } />

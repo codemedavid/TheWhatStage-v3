@@ -35,20 +35,20 @@ export function KnowledgeEditor({ lang, initial }: Props) {
       <input type="hidden" name="sections_json" value={JSON.stringify(sections)} />
 
       {sections.map((s, i) => (
-        <div key={i} className="rounded-md border border-zinc-200 bg-white p-4">
+        <div key={i} className="ob-card">
           <div className="flex items-start justify-between gap-2">
             <input
               type="text"
               value={s.title}
               onChange={(e) => updateSection(i, { title: e.target.value })}
               maxLength={120}
-              className="w-full border-0 border-b border-transparent bg-transparent text-base font-medium text-zinc-900 focus:border-emerald-600 focus:outline-none"
+              className="ob-input"
               placeholder={t('knowledge.section_title_ph', lang)}
             />
             <button
               type="button"
               onClick={() => removeSection(i)}
-              className="text-xs text-zinc-500 hover:text-red-600"
+              className="ob-btn ob-btn-text"
               aria-label={t('knowledge.remove', lang)}
             >
               {t('knowledge.remove', lang)}
@@ -59,7 +59,7 @@ export function KnowledgeEditor({ lang, initial }: Props) {
             onChange={(e) => updateSection(i, { body: e.target.value })}
             rows={4}
             maxLength={4000}
-            className="mt-2 w-full resize-y border-0 bg-transparent text-sm text-zinc-800 focus:outline-none"
+            className="ob-textarea mt-2"
             placeholder={t('knowledge.section_body_ph', lang)}
           />
         </div>
@@ -68,7 +68,7 @@ export function KnowledgeEditor({ lang, initial }: Props) {
       <button
         type="button"
         onClick={addSection}
-        className="text-sm font-medium text-emerald-700 hover:text-emerald-900"
+        className="ob-btn ob-btn-text"
       >
         {t('knowledge.add_section', lang)}
       </button>
@@ -84,7 +84,7 @@ export function KnowledgeEditor({ lang, initial }: Props) {
           <button
             type="submit"
             disabled={pending || sections.length === 0}
-            className="inline-flex items-center rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60"
+            className="ob-btn ob-btn-primary"
           >
             {pending ? t('knowledge.saving', lang) : t('knowledge.save', lang)}
           </button>

@@ -42,10 +42,10 @@ export function FaqChecklist({ lang, suggestions }: Props) {
       <input type="hidden" name="items_json" value={JSON.stringify(items)} />
 
       <section>
-        <h2 className="text-sm font-medium text-zinc-700">{t('faqs.suggestion_label', lang)}</h2>
+        <h2 className="ob-label">{t('faqs.suggestion_label', lang)}</h2>
         <ul className="mt-2 space-y-2">
           {editable.map((item, i) => (
-            <li key={i} className="rounded-md border border-zinc-200 bg-white p-3">
+            <li key={i} className="ob-card">
               <label className="flex items-start gap-3">
                 <input
                   type="checkbox"
@@ -53,16 +53,16 @@ export function FaqChecklist({ lang, suggestions }: Props) {
                   onChange={(e) =>
                     setChecked((prev) => prev.map((c, j) => (j === i ? e.target.checked : c)))
                   }
-                  className="mt-1 h-4 w-4 rounded border-zinc-300 text-emerald-600 focus:ring-emerald-600"
+                  className="mt-1 h-4 w-4 rounded border-zinc-300 accent-[var(--accent)]"
                 />
-                <div className="flex-1 space-y-1">
+                <div className="flex-1 space-y-2">
                   <input
                     type="text"
                     value={item.question}
                     onChange={(e) => patchSuggestion(i, { question: e.target.value })}
                     maxLength={300}
                     disabled={!checked[i]}
-                    className="w-full border-0 bg-transparent text-sm font-medium text-zinc-900 focus:outline-none disabled:text-zinc-400"
+                    className="ob-input"
                   />
                   <textarea
                     value={item.answer}
@@ -70,7 +70,7 @@ export function FaqChecklist({ lang, suggestions }: Props) {
                     rows={2}
                     maxLength={4000}
                     disabled={!checked[i]}
-                    className="w-full resize-y border-0 bg-transparent text-sm text-zinc-700 focus:outline-none disabled:text-zinc-400"
+                    className="ob-textarea"
                   />
                 </div>
               </label>
@@ -80,10 +80,10 @@ export function FaqChecklist({ lang, suggestions }: Props) {
       </section>
 
       <section>
-        <h2 className="text-sm font-medium text-zinc-700">{t('faqs.custom_label', lang)}</h2>
+        <h2 className="ob-label">{t('faqs.custom_label', lang)}</h2>
         <ul className="mt-2 space-y-2">
           {custom.map((item, i) => (
-            <li key={i} className="rounded-md border border-zinc-200 bg-white p-3">
+            <li key={i} className="ob-card">
               <div className="flex items-start justify-between gap-2">
                 <input
                   type="text"
@@ -91,12 +91,12 @@ export function FaqChecklist({ lang, suggestions }: Props) {
                   onChange={(e) => patchCustom(i, { question: e.target.value })}
                   maxLength={300}
                   placeholder={t('faqs.question_ph', lang)}
-                  className="w-full border-0 bg-transparent text-sm font-medium text-zinc-900 focus:outline-none"
+                  className="ob-input"
                 />
                 <button
                   type="button"
                   onClick={() => removeCustom(i)}
-                  className="text-xs text-zinc-500 hover:text-red-600"
+                  className="ob-btn ob-btn-text"
                 >
                   {t('faqs.remove', lang)}
                 </button>
@@ -107,7 +107,7 @@ export function FaqChecklist({ lang, suggestions }: Props) {
                 rows={2}
                 maxLength={4000}
                 placeholder={t('faqs.answer_ph', lang)}
-                className="mt-1 w-full resize-y border-0 bg-transparent text-sm text-zinc-700 focus:outline-none"
+                className="ob-textarea mt-2"
               />
             </li>
           ))}
@@ -115,7 +115,7 @@ export function FaqChecklist({ lang, suggestions }: Props) {
         <button
           type="button"
           onClick={() => setCustom((prev) => [...prev, { question: '', answer: '' }])}
-          className="mt-2 text-sm font-medium text-emerald-700 hover:text-emerald-900"
+          className="ob-btn ob-btn-text mt-2"
         >
           {t('faqs.add', lang)}
         </button>
@@ -130,7 +130,7 @@ export function FaqChecklist({ lang, suggestions }: Props) {
           <button
             type="submit"
             disabled={pending}
-            className="inline-flex items-center rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60"
+            className="ob-btn ob-btn-primary"
           >
             {pending ? t('faqs.saving', lang) : t('faqs.save', lang)}
           </button>
