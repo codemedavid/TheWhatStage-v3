@@ -2,7 +2,7 @@ import { z } from 'zod'
 import type { GeneratedKnowledge } from '@/lib/onboarding/ai/knowledge'
 import type { GeneratedFaqs } from '@/lib/onboarding/ai/faqs'
 import type { GeneratedBotInstructions } from '@/lib/onboarding/ai/bot-instructions'
-import type { SuggestedBlock } from '@/lib/onboarding/ai/form-fields'
+import { BlockSchema, type SuggestedBlock } from '@/lib/onboarding/ai/form-fields-shared'
 import type { GeneratedPersonality } from '@/lib/onboarding/ai/personality-shared'
 
 /**
@@ -71,10 +71,10 @@ export function parsePersonalityResult(v: unknown): GeneratedPersonality | null 
 }
 
 const FormFieldsResultSchema = z.object({
-  blocks: z.array(z.object({ kind: z.string() }).passthrough()),
+  blocks: z.array(BlockSchema),
 })
 
 export function parseFormFieldsResult(v: unknown): { blocks: SuggestedBlock[] } | null {
   const r = FormFieldsResultSchema.safeParse(v)
-  return r.success ? (r.data as { blocks: SuggestedBlock[] }) : null
+  return r.success ? r.data : null
 }

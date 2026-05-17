@@ -3,34 +3,11 @@ import { z } from 'zod'
 import { HfRouterLlm } from '@/lib/rag'
 import type { BusinessBasics } from '@/lib/onboarding/business-basics'
 import type { OnboardingLang } from '@/lib/onboarding/types'
+import { extractJson, withJsonRetry } from '@/lib/onboarding/ai/json-extract'
+import { BlockSchema, type SuggestedBlock } from '@/lib/onboarding/ai/form-fields-shared'
 
-export type FormFieldKind = 'short_text' | 'long_text' | 'email' | 'phone' | 'number' | 'single_choice'
+export type { FormFieldKind, SuggestedBlock } from '@/lib/onboarding/ai/form-fields-shared'
 
-export interface SuggestedBlock {
-  id: string
-  type: 'field' | 'heading'
-  key?: string
-  label?: string
-  text?: string
-  level?: number
-  field_kind?: FormFieldKind
-  required?: boolean
-  options?: { label: string; value: string }[]
-  prompt?: string
-}
-
-const BlockSchema = z.object({
-  id: z.string(),
-  type: z.enum(['field', 'heading']),
-  key: z.string().optional(),
-  label: z.string().optional(),
-  text: z.string().optional(),
-  level: z.number().int().optional(),
-  field_kind: z.enum(['short_text','long_text','email','phone','number','single_choice']).optional(),
-  required: z.boolean().optional(),
-  options: z.array(z.object({ label: z.string(), value: z.string() })).optional(),
-  prompt: z.string().optional(),
-})
 const ResponseSchema = z.object({ blocks: z.array(BlockSchema).min(1).max(15) })
 
 function sys(kind: 'form' | 'qualification', lang: OnboardingLang) {
@@ -55,7 +32,7 @@ function usr(b: BusinessBasics) {
   return [`Business: ${b.name}`, `Offer: ${b.offer}`, `Audience: ${b.audience}`, `Pain: ${b.pain}`].join('\n')
 }
 
-export async function generateFormFields(input: {
+async function callOnce(input: {
   basics: BusinessBasics
   kind: 'form' | 'qualification'
   lang: OnboardingLang
@@ -69,8 +46,16 @@ export async function generateFormFields(input: {
     )
   } catch (err) { throw new Error('generation_failed: llm_call', { cause: err }) }
   let parsed: unknown
-  try { parsed = JSON.parse(raw) } catch { throw new Error('generation_failed: invalid_json') }
+  try { parsed = extractJson(raw) } catch { throw new Error('generation_failed: invalid_json') }
   const r = ResponseSchema.safeParse(parsed)
   if (!r.success) throw new Error('generation_failed: schema_mismatch')
   return r.data
+}
+
+export async function generateFormFields(input: {
+  basics: BusinessBasics
+  kind: 'form' | 'qualification'
+  lang: OnboardingLang
+}): Promise<{ blocks: SuggestedBlock[] }> {
+  return withJsonRetry(() => callOnce(input))
 }
