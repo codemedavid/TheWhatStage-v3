@@ -24,8 +24,8 @@ import {
   type OnboardingLang,
   type OnboardingStep,
 } from '@/lib/onboarding/types'
-import { randomUUID } from 'node:crypto'
 import { nextStepRoute } from '@/lib/onboarding/steps'
+import { uniqueSlug } from './slug'
 import { generateKnowledge, type GeneratedKnowledge } from '@/lib/onboarding/ai/knowledge'
 import { generateFaqs, type GeneratedFaqs } from '@/lib/onboarding/ai/faqs'
 import { VIBE_PRESETS, type VibePreset } from '@/lib/onboarding/ai/personality'
@@ -536,21 +536,6 @@ export async function savePersonalityAction(
 
 export type GoalStepError = 'invalid_kind' | 'save_failed'
 export type GoalFormState = { error?: GoalStepError }
-
-/**
- * Build a URL-safe slug from a free-text seed plus a high-entropy suffix.
- * Uses `crypto.randomUUID()` (~128 bits) instead of `Math.random()` (~31 bits)
- * so slug collisions across users are effectively impossible without a unique
- * constraint guarding inserts.
- */
-export function uniqueSlug(seed: string, fallback = 'page'): string {
-  const base = seed
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 40) || fallback
-  return `${base}-${randomUUID().replace(/-/g, '').slice(0, 8)}`
-}
 
 export async function saveGoalAction(
   _prev: GoalFormState | undefined,

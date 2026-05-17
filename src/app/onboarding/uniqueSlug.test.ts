@@ -25,7 +25,7 @@ vi.mock('@/lib/supabase/server', () => ({
 }))
 vi.mock('@/lib/supabase/admin', () => ({ createAdminClient: () => ({}) }))
 
-import { uniqueSlug } from './actions'
+import { uniqueSlug } from './slug'
 
 describe('uniqueSlug (Fix 3: high-entropy suffix)', () => {
   it('produces a kebab-case base from the seed plus an 8-char hex suffix', () => {
