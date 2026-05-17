@@ -16,6 +16,8 @@ import {
 import { recommendProperty } from '@/lib/chatbot/recommend-property'
 import { handleCampaignSend } from '@/lib/messenger/campaignSend'
 import { handleReminderFire } from '@/lib/reminders/fire'
+import { maybeScheduleFollowup } from '@/lib/followups/seed'
+import { handleFollowupSendJob } from '@/lib/followups/fire'
 import { extractReminder } from '@/lib/reminders/extract'
 import { resolveTopics, type PendingReminder } from '@/lib/reminders/resolve'
 import { deeplinkActionPageUrl } from '@/lib/action-pages/urls'
@@ -258,6 +260,14 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
     return
   }
 
+  if (job.kind === 'followup_send') {
+    await handleFollowupSendJob(admin, {
+      id: job.id,
+      payload: job.payload as { schedule_id: string } | null,
+    })
+    return
+  }
+
   try {
     // Read the inbound message + its parent thread in a single FK-joined query.
     // This avoids a first-touch race where the worker beats the webhook's
@@ -310,6 +320,20 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
       .update({ last_inbound_at: inboundAt })
       .eq('id', thread.id)
     thread.last_inbound_at = inboundAt
+
+    // Auto follow-up: cancel any pending schedule and (if gates pass) seed a
+    // fresh one. Lead inbound is the cancel trigger; the seed re-checks both
+    // gates inline. Fire-and-forget — must never break the inbound reply.
+    if (thread.lead_id) {
+      const leadIdForFu = thread.lead_id
+      void maybeScheduleFollowup(admin, {
+        threadId: thread.id,
+        leadId: leadIdForFu,
+        userId: thread.user_id,
+        pageId: thread.page_id,
+        lastInboundAt: inboundAt,
+      }).catch((e) => console.warn('[messenger.worker] followup seed failed', e))
+    }
 
     // Auto-detect phone numbers and emails shared by the lead in their message.
     if (thread.lead_id) {
