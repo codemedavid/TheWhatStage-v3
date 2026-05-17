@@ -8,16 +8,16 @@ vi.mock('@/lib/supabase/admin', () => ({
 import { GET } from './route'
 
 beforeEach(() => {
-  process.env.NODE_ENV = 'test'
-  process.env.CRON_SECRET = 'secret'
-  process.env.NEXT_PUBLIC_APP_URL = 'http://localhost'
-  process.env.MESSENGER_WORKER_SECRET = 'wsecret'
+  vi.stubEnv('NODE_ENV', 'test')
+  vi.stubEnv('CRON_SECRET', 'secret')
+  vi.stubEnv('NEXT_PUBLIC_APP_URL', 'http://localhost')
+  vi.stubEnv('MESSENGER_WORKER_SECRET', 'wsecret')
   adminFromMock.mockReset()
 })
 
 describe('followups-tick route', () => {
   it('rejects unauthorized requests in production', async () => {
-    process.env.NODE_ENV = 'production'
+    vi.stubEnv('NODE_ENV', 'production')
     const res = await GET(new Request('http://x/api/cron/followups-tick'))
     expect(res.status).toBe(401)
   })
