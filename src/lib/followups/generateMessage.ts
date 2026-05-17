@@ -105,23 +105,6 @@ async function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   ])
 }
 
-/**
- * Instantiate HfRouterLlm in a way that works both in production (real class,
- * requires `new`) and in test environments where the module mock may use an
- * arrow-function implementation that cannot be called as a constructor.
- */
-function createLlm(opts: { model: string }): InstanceType<typeof HfRouterLlm> {
-  try {
-    return new HfRouterLlm(opts)
-  } catch (e) {
-    if (e instanceof TypeError && (e.message.includes('not a constructor') || e.message.includes('constructor'))) {
-      // Test mock uses arrow function implementation — call without new.
-      return (HfRouterLlm as unknown as (o: typeof opts) => InstanceType<typeof HfRouterLlm>)(opts)
-    }
-    throw e
-  }
-}
-
 export async function generateFollowupMessage(args: GenerateArgs): Promise<string> {
   // Offset 0 is always the fixed light check-in regardless of kind.
   if (args.offsetIdx === 0) {
@@ -129,7 +112,7 @@ export async function generateFollowupMessage(args: GenerateArgs): Promise<strin
   }
 
   try {
-    const llm = createLlm({ model: ragConfig.classifierModel })
+    const llm = new HfRouterLlm({ model: ragConfig.classifierModel })
     const raw = await withTimeout(
       llm.complete(
         [

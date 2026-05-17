@@ -3,7 +3,9 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
 const completeMock = vi.fn<(messages: unknown, opts?: unknown) => Promise<string>>()
 
 vi.mock('@/lib/rag/llm', () => ({
-  HfRouterLlm: vi.fn().mockImplementation(() => ({ complete: completeMock })),
+  HfRouterLlm: class {
+    complete = completeMock
+  },
 }))
 vi.mock('@/lib/rag/config', () => ({
   ragConfig: { classifierModel: 'fake-model' },
