@@ -1,21 +1,41 @@
 'use client'
 
-import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
 import type { GenerationKind } from '@/lib/onboarding/generation/types'
 import { GenerationAnimation } from './GenerationAnimation'
 import { t, type DictKey } from '@/lib/onboarding/i18n'
-import type { OnboardingLang } from '@/lib/onboarding/types'
+import type { OnboardingLang, OnboardingStep } from '@/lib/onboarding/types'
+import { skipStepAction } from '../actions'
 
 interface Props {
   kind: GenerationKind
   animationLines: string[]
   animationHeading: string
   errorMessage?: string
-  skipHref: string
+  /** @deprecated kept for backward-compat; skip now routes through skipStepAction */
+  skipHref?: string
   skipLabel: string
   lang: OnboardingLang
+}
+
+/**
+ * Each generation kind belongs to exactly one onboarding step. Skip must
+ * route through `skipStepAction(<step>)` so the step's `*_completed_at`
+ * column is set (audit-trailed via the markStep RPC) and the dashboard
+ * progress stays consistent — a bare <Link> bypasses that and leaves the
+ * step NULL forever.
+ */
+const STEP_BY_KIND: Record<GenerationKind, OnboardingStep> = {
+  knowledge: 'knowledge',
+  faqs: 'faqs',
+  personality_seed: 'personality',
+  form_fields: 'goal_content',
+  bot_instructions: 'flow',
+}
+
+export function stepForGenerationKind(kind: GenerationKind): OnboardingStep {
+  return STEP_BY_KIND[kind]
 }
 
 const FAILURE_KEYS: Record<string, DictKey> = {
@@ -51,10 +71,11 @@ export function GenerationGate({
   animationLines,
   animationHeading,
   errorMessage,
-  skipHref,
   skipLabel,
   lang,
 }: Props) {
+  const step = stepForGenerationKind(kind)
+  const skipAction = skipStepAction.bind(null, step)
   const router = useRouter()
   const [state, setState] = useState<PollState>({ phase: 'polling' })
   const cancelled = useRef(false)
@@ -152,9 +173,11 @@ export function GenerationGate({
           >
             {t('generation.retry', lang)}
           </button>
-          <Link href={skipHref} className="font-medium underline">
-            {skipLabel}
-          </Link>
+          <form action={skipAction}>
+            <button type="submit" className="font-medium underline">
+              {skipLabel}
+            </button>
+          </form>
         </div>
       </div>
     )
@@ -164,9 +187,11 @@ export function GenerationGate({
     <div>
       <GenerationAnimation lines={animationLines} heading={animationHeading} />
       <div className="mt-2 text-center">
-        <Link href={skipHref} className="text-sm text-zinc-600 underline">
-          {skipLabel}
-        </Link>
+        <form action={skipAction}>
+          <button type="submit" className="text-sm text-zinc-600 underline">
+            {skipLabel}
+          </button>
+        </form>
       </div>
     </div>
   )

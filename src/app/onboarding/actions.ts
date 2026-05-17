@@ -483,9 +483,28 @@ export async function savePersonalityAction(
   const lang = stateRow?.ui_language === 'en' ? 'en' : 'tl'
 
   // Persist seeds + ensure a chatbot_configs row exists so downstream steps
-  // (goal, flow) can attach to it even before generation finishes.
+  // (goal, flow) can attach to it even before generation finishes. We also
+  // derive a minimal persona / do / dont from the seeds so the bot is usable
+  // immediately. The async after() hook below refines these with AI output.
+  const vibeBlurb: Record<VibePreset, string> = {
+    friendly_kuya_ate: 'a friendly, helpful kuya/ate',
+    professional_consultant: 'a polished, professional consultant',
+    hype_closer: 'an energetic, persuasive closer',
+    calm_expert: 'a calm, reassuring expert',
+  }
+  const vibeText = seeds.vibe_preset ? vibeBlurb[seeds.vibe_preset] : 'a friendly, helpful assistant'
+  const personaParts: string[] = [`Acts like ${vibeText} for ${basics.name}.`]
+  if (seeds.greet) personaParts.push(`Opening greeting style: ${seeds.greet}`)
+  const doRules = seeds.must_use ? [seeds.must_use] : []
+  const dontRules = seeds.must_not ? [seeds.must_not] : []
   const { error: upsertErr } = await supabase.from('chatbot_configs').upsert(
-    { user_id: userId, personality_source: 'custom' },
+    {
+      user_id: userId,
+      personality_source: 'custom',
+      persona: personaParts.join(' '),
+      do_rules: doRules,
+      dont_rules: dontRules,
+    },
     { onConflict: 'user_id' },
   )
   if (upsertErr) {
@@ -648,8 +667,17 @@ export async function saveCatalogProductsAction(
   if (!auth.user) return { error: 'save_failed' }
 
   if (result.data.products.length > 0) {
+    // Catalog products must be linked to the user's primary action_page so
+    // the published catalog page renders them at runtime. Without
+    // action_page_id, the join returns zero rows and the page looks empty.
+    const page = await getPrimaryActionPage()
+    if (!page) {
+      console.error('[saveCatalogProductsAction] no primary action_page; redirecting to /onboarding/goal')
+      redirect('/onboarding/goal')
+    }
     const rows = result.data.products.map((p) => ({
       user_id: auth.user!.id,
+      action_page_id: page.id,
       kind: 'product' as const,
       status: 'published' as const,
       title: p.title,

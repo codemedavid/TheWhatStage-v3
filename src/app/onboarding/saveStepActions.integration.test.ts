@@ -43,7 +43,9 @@ import {
   saveFaqsAction,
   savePersonalityAction,
   saveSalesContentAction,
+  saveCatalogProductsAction,
 } from './actions'
+import { stepForGenerationKind } from './_components/GenerationGate'
 
 const goodBasics = {
   name: 'Aling Nena Bakery',
@@ -156,6 +158,93 @@ describe('savePersonalityAction routes through markStep RPC', () => {
     expect(payload).not.toHaveProperty('ai_generations')
 
     expect(markStep).toHaveBeenCalledWith('personality')
+  })
+})
+
+describe('saveCatalogProductsAction (B1): links products to the primary action_page', () => {
+  it('includes action_page_id in every business_items insert', async () => {
+    const businessItems = chain({ data: null, error: null })
+    mockFrom.mockReset().mockImplementation(tableRouter({ business_items: businessItems }))
+
+    const state = await import('@/lib/onboarding/state')
+    ;(state.getPrimaryActionPage as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: 'page-uuid-1',
+      kind: 'catalog',
+      slug: 'shop',
+      title: 'Shop',
+      config: {},
+    })
+
+    await expect(saveCatalogProductsAction(undefined, fd({
+      products_json: JSON.stringify([
+        { title: 'Ensaymada', price_amount: 50, summary: 'Soft and buttery' },
+        { title: 'Pandesal', price_amount: null },
+      ]),
+    }))).rejects.toThrowError(/NEXT_REDIRECT:\/onboarding\/flow/)
+
+    expect(businessItems.insert).toHaveBeenCalledTimes(1)
+    const rows = businessItems.insert.mock.calls[0][0] as Array<Record<string, unknown>>
+    expect(rows).toHaveLength(2)
+    for (const r of rows) {
+      expect(r.action_page_id).toBe('page-uuid-1')
+      expect(r.user_id).toBe('u1')
+    }
+    expect(markStep).toHaveBeenCalledWith('goal_content')
+  })
+
+  it('redirects to /onboarding/goal when no primary action_page exists (defensive)', async () => {
+    const businessItems = chain({ data: null, error: null })
+    mockFrom.mockReset().mockImplementation(tableRouter({ business_items: businessItems }))
+
+    const state = await import('@/lib/onboarding/state')
+    ;(state.getPrimaryActionPage as ReturnType<typeof vi.fn>).mockResolvedValue(null)
+
+    await expect(saveCatalogProductsAction(undefined, fd({
+      products_json: JSON.stringify([{ title: 'X', price_amount: 1 }]),
+    }))).rejects.toThrowError(/NEXT_REDIRECT:\/onboarding\/goal/)
+
+    expect(businessItems.insert).not.toHaveBeenCalled()
+  })
+})
+
+describe('savePersonalityAction (B2): seeds-based chatbot_configs upsert is enriched', () => {
+  it('writes persona/do_rules/dont_rules derived from seeds, not just personality_source', async () => {
+    const onboardingState = chain({
+      data: { business_basics: goodBasics, ui_language: 'tl' },
+      error: null,
+    })
+    const chatbotConfigs = chain({ data: null, error: null })
+
+    mockFrom.mockReset().mockImplementation(tableRouter({
+      onboarding_state: onboardingState,
+      chatbot_configs: chatbotConfigs,
+    }))
+
+    await expect(savePersonalityAction(undefined, fd({
+      vibe_preset: 'hype_closer',
+      greet: 'Yo, what is up!',
+      must_use: 'Always mention free shipping.',
+      must_not: 'Never discuss competitors.',
+    }))).rejects.toThrowError(/NEXT_REDIRECT:\/onboarding\/goal/)
+
+    expect(chatbotConfigs.upsert).toHaveBeenCalled()
+    const upsertPayload = chatbotConfigs.upsert.mock.calls[0][0] as Record<string, unknown>
+    expect(upsertPayload.user_id).toBe('u1')
+    expect(upsertPayload.personality_source).toBe('custom')
+    expect(typeof upsertPayload.persona).toBe('string')
+    expect((upsertPayload.persona as string).toLowerCase()).toContain('closer')
+    expect(upsertPayload.do_rules).toEqual(['Always mention free shipping.'])
+    expect(upsertPayload.dont_rules).toEqual(['Never discuss competitors.'])
+  })
+})
+
+describe('stepForGenerationKind (B3): every generation kind maps to its owning step', () => {
+  it('maps each kind to the step whose skipStepAction sets the right *_completed_at', () => {
+    expect(stepForGenerationKind('knowledge')).toBe('knowledge')
+    expect(stepForGenerationKind('faqs')).toBe('faqs')
+    expect(stepForGenerationKind('personality_seed')).toBe('personality')
+    expect(stepForGenerationKind('form_fields')).toBe('goal_content')
+    expect(stepForGenerationKind('bot_instructions')).toBe('flow')
   })
 })
 
