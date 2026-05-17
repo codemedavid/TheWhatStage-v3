@@ -78,9 +78,26 @@ export async function updateActionPage(formData: FormData): Promise<void> {
   let pipeline_rules: unknown
   try {
     const raw = JSON.parse(String(formData.get('pipeline_rules') ?? '[]'))
-    // Filter out incomplete rules (empty outcome) so they don't block the save.
+    // Filter out incomplete rules (empty outcome) and normalize fields so that
+    // stale rows from older schemas (e.g. missing to_stage_id) don't block save.
     pipeline_rules = Array.isArray(raw)
-      ? raw.filter((r: { outcome?: string }) => typeof r.outcome === 'string' && r.outcome.trim().length > 0)
+      ? raw
+          .filter(
+            (r: { outcome?: unknown }) =>
+              typeof r.outcome === 'string' && r.outcome.trim().length > 0,
+          )
+          .map((r: Record<string, unknown>) => {
+            const out: Record<string, unknown> = {
+              outcome: r.outcome,
+              to_stage_id:
+                typeof r.to_stage_id === 'string' && r.to_stage_id.length > 0
+                  ? r.to_stage_id
+                  : null,
+            }
+            if (typeof r.reason === 'string') out.reason = r.reason
+            if (typeof r.notify_text === 'string') out.notify_text = r.notify_text
+            return out
+          })
       : []
   } catch {
     pipeline_rules = []
@@ -116,10 +133,13 @@ export async function updateActionPage(formData: FormData): Promise<void> {
   const parsed = UpdateActionPageInput.safeParse(raw)
   if (!parsed.success) {
     const id = String(formData.get('id') ?? '')
+    const issue = parsed.error.issues[0]
+    const path = issue?.path?.join('.') ?? ''
+    const detail = path
+      ? `${path}: ${issue?.message ?? 'invalid input'}`
+      : (issue?.message ?? 'invalid input')
     redirect(
-      `/dashboard/action-pages/${id}?error=invalid&detail=${encodeURIComponent(
-        parsed.error.issues[0]?.message ?? 'invalid input',
-      )}`,
+      `/dashboard/action-pages/${id}?error=invalid&detail=${encodeURIComponent(detail)}`,
     )
   }
 
