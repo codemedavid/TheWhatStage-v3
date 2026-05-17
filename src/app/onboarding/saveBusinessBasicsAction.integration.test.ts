@@ -14,7 +14,9 @@ vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }))
 const afterMock = vi.hoisted(() => vi.fn(async (cb: () => unknown) => { await cb() }))
 vi.mock('next/server', () => ({ after: afterMock }))
 
-const runGeneration = vi.hoisted(() => vi.fn(async () => {}))
+const runGeneration = vi.hoisted(() =>
+  vi.fn<(profileId: string, kind: string, input: unknown) => Promise<void>>(async () => {}),
+)
 vi.mock('@/lib/onboarding/generation/runner', () => ({ runGeneration }))
 
 const markStep = vi.hoisted(() => vi.fn(async () => {}))

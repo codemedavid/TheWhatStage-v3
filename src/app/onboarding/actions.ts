@@ -21,10 +21,10 @@ import { BusinessBasicsSchema } from '@/lib/onboarding/business-basics'
 import { LANG_COOKIE } from '@/lib/onboarding/i18n'
 import {
   ONBOARDING_STEPS,
-  type OnboardingAuditEntry,
   type OnboardingLang,
   type OnboardingStep,
 } from '@/lib/onboarding/types'
+import { randomUUID } from 'node:crypto'
 import { nextStepRoute } from '@/lib/onboarding/steps'
 import { generateKnowledge, type GeneratedKnowledge } from '@/lib/onboarding/ai/knowledge'
 import { generateFaqs, type GeneratedFaqs } from '@/lib/onboarding/ai/faqs'
@@ -298,7 +298,7 @@ export async function saveKnowledgeAction(
 
   const { data: stateRow } = await supabase
     .from('onboarding_state')
-    .select('business_basics, ai_generations')
+    .select('business_basics')
     .eq('profile_id', userId)
     .maybeSingle()
 
@@ -348,16 +348,11 @@ export async function saveKnowledgeAction(
     return { error: 'save_failed' }
   }
 
-  const now = new Date().toISOString()
-  const audit: OnboardingAuditEntry[] = Array.isArray(stateRow?.ai_generations)
-    ? (stateRow!.ai_generations as OnboardingAuditEntry[])
-    : []
-  audit.push({ step: 'knowledge', at: now, skipped: false })
-  const { error: stepErr } = await supabase
-    .from('onboarding_state')
-    .update({ knowledge_completed_at: now, ai_generations: audit })
-    .eq('profile_id', userId)
-  if (stepErr) console.error('[saveKnowledgeAction] markStep', stepErr)
+  try {
+    await markStep('knowledge')
+  } catch (err) {
+    console.error('[saveKnowledgeAction] markStep', err)
+  }
 
   redirect('/onboarding/faqs')
 }
@@ -437,21 +432,11 @@ export async function saveFaqsAction(
     }
   }
 
-  const { data: stateRow } = await supabase
-    .from('onboarding_state')
-    .select('ai_generations')
-    .eq('profile_id', userId)
-    .maybeSingle()
-  const now = new Date().toISOString()
-  const audit: OnboardingAuditEntry[] = Array.isArray(stateRow?.ai_generations)
-    ? (stateRow!.ai_generations as OnboardingAuditEntry[])
-    : []
-  audit.push({ step: 'faqs', at: now, skipped: false })
-  const { error: stepErr } = await supabase
-    .from('onboarding_state')
-    .update({ faqs_completed_at: now, ai_generations: audit })
-    .eq('profile_id', userId)
-  if (stepErr) console.error('[saveFaqsAction] markStep', stepErr)
+  try {
+    await markStep('faqs')
+  } catch (err) {
+    console.error('[saveFaqsAction] markStep', err)
+  }
 
   redirect('/onboarding/personality')
 }
@@ -487,7 +472,7 @@ export async function savePersonalityAction(
 
   const { data: stateRow } = await supabase
     .from('onboarding_state')
-    .select('business_basics, ai_generations, ui_language')
+    .select('business_basics, ui_language')
     .eq('profile_id', userId)
     .maybeSingle()
 
@@ -507,20 +492,17 @@ export async function savePersonalityAction(
     return { error: 'save_failed' }
   }
 
-  const now = new Date().toISOString()
-  const audit: OnboardingAuditEntry[] = Array.isArray(stateRow?.ai_generations)
-    ? (stateRow!.ai_generations as OnboardingAuditEntry[])
-    : []
-  audit.push({ step: 'personality', at: now, skipped: false })
   const { error: stateErr } = await supabase
     .from('onboarding_state')
-    .update({
-      personality_seeds: seeds,
-      personality_completed_at: now,
-      ai_generations: audit,
-    })
+    .update({ personality_seeds: seeds })
     .eq('profile_id', userId)
   if (stateErr) console.error('[savePersonalityAction] state update', stateErr)
+
+  try {
+    await markStep('personality')
+  } catch (err) {
+    console.error('[savePersonalityAction] markStep', err)
+  }
 
   // Generate the persona in the background — the user moves on immediately.
   // Routed through runGeneration so we get a generation_jobs row (visibility,
@@ -555,13 +537,19 @@ export async function savePersonalityAction(
 export type GoalStepError = 'invalid_kind' | 'save_failed'
 export type GoalFormState = { error?: GoalStepError }
 
-function uniqueSlug(seed: string): string {
+/**
+ * Build a URL-safe slug from a free-text seed plus a high-entropy suffix.
+ * Uses `crypto.randomUUID()` (~128 bits) instead of `Math.random()` (~31 bits)
+ * so slug collisions across users are effectively impossible without a unique
+ * constraint guarding inserts.
+ */
+export function uniqueSlug(seed: string, fallback = 'page'): string {
   const base = seed
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
-    .slice(0, 40) || 'page'
-  return `${base}-${Math.random().toString(36).slice(2, 8)}`
+    .slice(0, 40) || fallback
+  return `${base}-${randomUUID().replace(/-/g, '').slice(0, 8)}`
 }
 
 export async function saveGoalAction(
@@ -679,7 +667,7 @@ export async function saveCatalogProductsAction(
       kind: 'product' as const,
       status: 'published' as const,
       title: p.title,
-      slug: `${p.title.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,40) || 'item'}-${Math.random().toString(36).slice(2,7)}`,
+      slug: uniqueSlug(p.title, 'item'),
       summary: p.summary ?? null,
       price_amount: p.price_amount,
       currency: 'PHP',
@@ -735,7 +723,7 @@ export async function saveSalesContentAction(
 
   const { error } = await supabase
     .from('action_pages')
-    .update({ config: newConfig, status: 'published' })
+    .update({ config: newConfig })
     .eq('id', parsed.data.pageId)
     .eq('user_id', auth.user.id)
   if (error) {
@@ -811,7 +799,7 @@ export async function saveRealestatePropertyAction(
   const { data: auth } = await supabase.auth.getUser()
   if (!auth.user) return { error: 'save_failed' }
 
-  const slug = `${parsed.data.title.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,40) || 'property'}-${Math.random().toString(36).slice(2,7)}`
+  const slug = uniqueSlug(parsed.data.title, 'property')
 
   const { error } = await supabase.from('business_items').insert({
     user_id: auth.user.id,
