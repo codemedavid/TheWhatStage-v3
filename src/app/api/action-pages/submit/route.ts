@@ -209,6 +209,22 @@ export async function POST(req: NextRequest) {
     }
     psid = v.claims!.psid
     fbPageId = v.claims!.pageId
+
+    // The deeplink HMAC verifies but the referenced facebook_pages row may
+    // have been deleted (page disconnected, env switched). Soft-drop the
+    // attribution so downstream inserts that FK to facebook_pages.id (e.g.
+    // business_orders.page_id) don't 500 the checkout.
+    if (fbPageId) {
+      const { data: fbPage } = await admin
+        .from('facebook_pages')
+        .select('id')
+        .eq('id', fbPageId)
+        .maybeSingle<{ id: string }>()
+      if (!fbPage) {
+        psid = null
+        fbPageId = null
+      }
+    }
   }
 
   // Resolve lead from messenger thread when we have an attributed PSID + page.
