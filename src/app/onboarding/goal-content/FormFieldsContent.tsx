@@ -7,17 +7,9 @@ import { runGeneration } from '@/lib/onboarding/generation/runner'
 import { createClient } from '@/lib/supabase/server'
 import { getBusinessBasics } from '@/lib/onboarding/state'
 import { t } from '@/lib/onboarding/i18n'
+import { parseFormFieldsResult } from '@/lib/onboarding/ai/result-schemas'
+import type { SuggestedBlock } from '@/lib/onboarding/ai/form-fields-shared'
 import type { OnboardingLang } from '@/lib/onboarding/types'
-
-interface SuggestedBlockShape {
-  id: string
-  label?: string
-  prompt?: string
-}
-
-function isBlocks(v: unknown): v is { blocks: SuggestedBlockShape[] } {
-  return !!v && typeof v === 'object' && Array.isArray((v as { blocks?: unknown }).blocks)
-}
 
 export async function FormFieldsContent({
   lang,
@@ -30,7 +22,7 @@ export async function FormFieldsContent({
   kind: 'form' | 'qualification'
   config: unknown
 }) {
-  const existing = ((config as { blocks?: unknown[] })?.blocks ?? []) as SuggestedBlockShape[]
+  const existing = ((config as { blocks?: unknown[] })?.blocks ?? []) as SuggestedBlock[]
   if (existing.length > 0) {
     return (
       <div>
@@ -47,14 +39,17 @@ export async function FormFieldsContent({
   const { data: auth } = await supabase.auth.getUser()
   const job = auth.user ? await getJob(auth.user.id, 'form_fields') : null
 
-  if (job?.status === 'done' && isBlocks(job.result)) {
+  // Use the canonical Zod-backed parser so a malformed persisted row falls
+  // through to the regenerate/gate paths instead of crashing the editor.
+  const parsedBlocks = job?.status === 'done' ? parseFormFieldsResult(job.result) : null
+  if (parsedBlocks) {
     return (
       <div>
         <h2 className="text-sm font-medium text-zinc-700">
           {kind === 'qualification' ? t('gc.qualification.heading', lang) : t('gc.form.heading', lang)}
         </h2>
         <p className="mt-1 text-xs text-zinc-500">{t('gc.form.subheading', lang)}</p>
-        <FormFieldsEditor lang={lang} pageId={pageId} initialBlocks={job.result.blocks} kind={kind} />
+        <FormFieldsEditor lang={lang} pageId={pageId} initialBlocks={parsedBlocks.blocks} kind={kind} />
       </div>
     )
   }

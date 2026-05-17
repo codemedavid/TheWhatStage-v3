@@ -53,7 +53,7 @@ async function FaqsBody({ lang }: { lang: OnboardingLang }) {
   if (parsedFaqs) {
     return (
       <div className="mt-6">
-        <div className="mb-3 flex justify-end"><RegenerateButton lang={lang} /></div>
+        <div className="mb-3 flex justify-end"><RegenerateButton lang={lang} kind="faqs" /></div>
         <FaqChecklist lang={lang} suggestions={parsedFaqs.suggestions} />
       </div>
     )

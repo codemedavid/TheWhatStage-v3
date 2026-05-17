@@ -55,7 +55,7 @@ async function KnowledgeBody({ lang }: { lang: OnboardingLang }) {
   if (parsedKnowledge) {
     return (
       <div className="mt-6">
-        <div className="mb-3 flex justify-end"><RegenerateButton lang={lang} /></div>
+        <div className="mb-3 flex justify-end"><RegenerateButton lang={lang} kind="knowledge" /></div>
         <KnowledgeEditor lang={lang} initial={parsedKnowledge.sections} />
       </div>
     )

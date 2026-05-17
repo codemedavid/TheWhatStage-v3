@@ -141,6 +141,25 @@ export async function markFailed(
 }
 
 /**
+ * Delete the job row for (profile, kind) so the next enqueue is forced to
+ * re-run the generator instead of returning 'already_done' from the RPC. Used
+ * by the "Regenerate" CTA on knowledge/faqs pages, where the existing job is
+ * 'done' with a matching input hash and would otherwise be a no-op.
+ */
+export async function clearJob(
+  profileId: string,
+  kind: GenerationKind,
+): Promise<void> {
+  const admin = createAdminClient()
+  const { error } = await admin
+    .from(TABLE)
+    .delete()
+    .eq('profile_id', profileId)
+    .eq('kind', kind)
+  if (error) console.error('[generation.repo.clearJob]', error)
+}
+
+/**
  * Sweep stuck rows: anything in 'running' for > 90s is converted to 'failed'.
  */
 export async function sweepStaleForProfile(profileId: string): Promise<void> {

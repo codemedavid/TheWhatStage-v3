@@ -30,7 +30,7 @@ import { generateKnowledge, type GeneratedKnowledge } from '@/lib/onboarding/ai/
 import { generateFaqs, type GeneratedFaqs } from '@/lib/onboarding/ai/faqs'
 import { VIBE_PRESETS, type VibePreset } from '@/lib/onboarding/ai/personality'
 import type { GeneratedPersonality } from '@/lib/onboarding/ai/personality-shared'
-import { getJob } from '@/lib/onboarding/generation/repo'
+import { clearJob, getJob } from '@/lib/onboarding/generation/repo'
 import { generateFormFields, type SuggestedBlock } from '@/lib/onboarding/ai/form-fields'
 import { generateBotInstructions, type GeneratedBotInstructions } from '@/lib/onboarding/ai/bot-instructions'
 import { getPrimaryActionPage } from '@/lib/onboarding/state'
@@ -75,6 +75,12 @@ export async function retryGenerationAction(formData: FormData): Promise<void> {
     .maybeSingle()
   const lang: OnboardingLang = stateRow?.ui_language === 'en' ? 'en' : 'tl'
 
+  // Clear the existing job row so the enqueue RPC actually re-runs the
+  // generator. Without this, a 'done' row with a matching input hash makes the
+  // RPC short-circuit with 'already_done' and the user sees the same result —
+  // making the Regenerate CTA a no-op.
+  await clearJob(profileId, kind)
+
   if (kind === 'knowledge' || kind === 'faqs') {
     after(async () => {
       await runGeneration(profileId, kind, { basics, lang })
@@ -108,7 +114,7 @@ export async function retryGenerationAction(formData: FormData): Promise<void> {
       await runGeneration(profileId, 'bot_instructions', {
         basics,
         goal: page.kind as ActionPageKind,
-        actionPage: { title: page.title, ctaLabel },
+        actionPage: { title: page.title, ctaLabel, slug: page.slug },
         flowDescription,
         lang,
       })
@@ -307,12 +313,31 @@ export async function saveKnowledgeAction(
     .map((s) => `<h3>${escapeHtml(s.title)}</h3><p>${escapeHtml(s.body).replace(/\n/g, '<br>')}</p>`)
     .join('')
 
+  // Tiptap-compatible ProseMirror doc so the dashboard editor renders the
+  // sections instead of falling into an empty editor (the old shape stored a
+  // `{sections,source}` object that Tiptap silently rejected).
+  const tiptapDoc = {
+    type: 'doc',
+    content: result.data.sections.flatMap((s) => [
+      {
+        type: 'heading',
+        attrs: { level: 3, textAlign: 'left' },
+        content: [{ type: 'text', text: s.title }],
+      },
+      {
+        type: 'paragraph',
+        attrs: { textAlign: 'left' },
+        content: [{ type: 'text', text: s.body }],
+      },
+    ]),
+  }
+
   const { error: insertErr } = await supabase.from('knowledge_documents').insert({
     user_id: userId,
     title: `About ${basics.name}`,
     content_text: text,
     content_html: html,
-    content_json: { sections: result.data.sections, source: 'onboarding' },
+    content_json: tiptapDoc,
     has_unsaved_changes: false,
     version: 1,
     published_at: new Date().toISOString(),
@@ -924,7 +949,7 @@ export async function startFlowGenerationAction(formData: FormData): Promise<{ e
     await runGeneration(profileId, 'bot_instructions', {
       basics,
       goal: page.kind as ActionPageKind,
-      actionPage: { title: page.title, ctaLabel },
+      actionPage: { title: page.title, ctaLabel, slug: page.slug },
       flowDescription: parsed.data.flow_description,
       lang,
     })
@@ -965,7 +990,7 @@ export async function generateFlowAction(
     const data = await generateBotInstructions({
       basics,
       goal: page.kind as ActionPageKind,
-      action_page: { title: page.title, cta_label: ctaLabel },
+      action_page: { title: page.title, cta_label: ctaLabel, slug: page.slug },
       flow_description: parsed.data.flow_description,
       lang,
     })
@@ -1006,6 +1031,20 @@ export async function saveFlowAction(
   const { data: auth } = await supabase.auth.getUser()
   if (!auth.user) return { error: 'save_failed' }
 
+  // Need the slug so we can inject `!actionpage:<slug>` into the chatbot's
+  // global instructions — that token is the only way the messenger runtime
+  // knows which page to send during a conversation.
+  const { data: pageRow, error: pageFetchErr } = await supabase
+    .from('action_pages')
+    .select('slug, title')
+    .eq('id', parsed.data.pageId)
+    .eq('user_id', auth.user.id)
+    .maybeSingle()
+  if (pageFetchErr || !pageRow) {
+    console.error('[saveFlowAction] action_pages fetch', pageFetchErr)
+    return { error: 'save_failed' }
+  }
+
   const { error: pageErr } = await supabase
     .from('action_pages')
     .update({ bot_send_instructions: parsed.data.bot_send_instructions })
@@ -1018,7 +1057,7 @@ export async function saveFlowAction(
 
   const { data: cfgRow } = await supabase
     .from('chatbot_configs')
-    .select('recommendation_rules')
+    .select('recommendation_rules, instructions')
     .eq('user_id', auth.user.id)
     .maybeSingle()
   const existing = (cfgRow?.recommendation_rules as Record<string, unknown> | null) ?? {}
@@ -1035,9 +1074,39 @@ export async function saveFlowAction(
     },
   }
 
+  // Merge the action-page reference into the chatbot's global instructions
+  // so the messenger runtime resolves `!actionpage:<slug>` and the bot can
+  // actually send the page mid-conversation. Idempotent: replaces any prior
+  // block delimited by the marker comments below.
+  const slug = pageRow.slug as string
+  const pageTitle = (pageRow.title as string) ?? slug
+  const ruleBlock = [
+    `<!-- whatstage:action-page:${slug} -->`,
+    `Primary action page: "${pageTitle}".`,
+    `When the conversation reaches the send moment, include the token !actionpage:${slug} in your reply so the page link is attached.`,
+    parsed.data.bot_send_instructions.trim(),
+    `<!-- /whatstage:action-page:${slug} -->`,
+  ].join('\n')
+
+  const existingInstr = typeof cfgRow?.instructions === 'string' ? cfgRow.instructions : ''
+  const blockRe = new RegExp(
+    `<!-- whatstage:action-page:${slug.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')} -->[\\s\\S]*?<!-- /whatstage:action-page:${slug.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')} -->`,
+    'g',
+  )
+  const mergedInstr = blockRe.test(existingInstr)
+    ? existingInstr.replace(blockRe, ruleBlock)
+    : `${existingInstr ? existingInstr.trim() + '\n\n' : ''}${ruleBlock}`
+
   const { error: cfgErr } = await supabase
     .from('chatbot_configs')
-    .upsert({ user_id: auth.user.id, recommendation_rules: next }, { onConflict: 'user_id' })
+    .upsert(
+      {
+        user_id: auth.user.id,
+        recommendation_rules: next,
+        instructions: mergedInstr,
+      },
+      { onConflict: 'user_id' },
+    )
   if (cfgErr) {
     console.error('[saveFlowAction] chatbot_configs', cfgErr)
     return { error: 'save_failed' }
