@@ -9,6 +9,7 @@ import BookingRenderer from '../booking/Renderer'
 import QualificationRenderer from '../qualification/Renderer'
 import { SalesGalleryClient } from './GalleryClient'
 import { SalesRevealForm } from './SalesConvertClient'
+import PaymentBlockClient from './PaymentBlockClient'
 
 const KIND_CTA_LABEL: Record<string, string> = {
   form: 'Fill out the form',
@@ -312,6 +313,22 @@ export default async function SalesRenderer(props: KindRendererProps) {
           />
         </aside>
       </div>
+
+      {config.payment.enabled && props.paymentMethods && props.paymentMethods.length > 0 ? (
+        <div className="mx-auto max-w-6xl px-4 pb-8">
+          <section className="rounded-2xl border border-[#E5E7EB] bg-white p-5 sm:p-7">
+            <PaymentBlockClient
+              slug={props.page.slug}
+              pageId={props.page.id}
+              methods={props.paymentMethods}
+              accent={config.theme.accent_color}
+              claims={props.claims}
+              rawToken={props.rawToken}
+              defaultCurrency={config.price.currency ?? 'PHP'}
+            />
+          </section>
+        </div>
+      ) : null}
     </main>
   )
 }

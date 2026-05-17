@@ -16,6 +16,8 @@ import {
 import type { PipelineRule } from '@/app/(app)/dashboard/action-pages/_lib/schemas'
 import { deeplinkActionPageUrl } from '@/lib/action-pages/urls'
 import { getDefaultStageKind, resolveDefaultStageId } from '@/lib/action-pages/default-stage'
+import { createFromSubmission, snapshotMethod } from '@/lib/order-payments/server'
+import type { PaymentMethod } from '@/lib/payment-methods/types'
 
 export const dynamic = 'force-dynamic'
 
@@ -426,6 +428,82 @@ export async function POST(req: NextRequest) {
         leadId,
         err: e instanceof Error ? e.message : String(e),
       })
+    }
+  }
+
+  // Payment proof handling — applies when the buyer selected a payment method.
+  const paymentMethodId =
+    typeof parsed.data.payment_method_id === 'string'
+      ? parsed.data.payment_method_id
+      : null
+  if (subInsert?.id && paymentMethodId) {
+    const proofUrl =
+      typeof parsed.data.payment_proof_url === 'string'
+        ? parsed.data.payment_proof_url
+        : null
+    if (!proofUrl) {
+      return NextResponse.json(
+        { error: 'payment_proof_required' },
+        { status: 400 },
+      )
+    }
+
+    const cfgPayment =
+      (page.config as Record<string, unknown>).payment as
+        | { enabled?: boolean; excluded_method_ids?: string[] }
+        | undefined
+    const excluded = new Set(cfgPayment?.excluded_method_ids ?? [])
+    if (cfgPayment?.enabled === false || excluded.has(paymentMethodId)) {
+      return NextResponse.json(
+        { error: 'payment_method_not_allowed' },
+        { status: 400 },
+      )
+    }
+
+    const { data: pm } = await admin
+      .from('payment_methods')
+      .select('id, kind, name, enabled, user_id')
+      .eq('id', paymentMethodId)
+      .maybeSingle<Pick<PaymentMethod, 'id' | 'kind' | 'name' | 'enabled'> & { user_id: string }>()
+    if (!pm || !pm.enabled || pm.user_id !== page.user_id) {
+      return NextResponse.json(
+        { error: 'payment_method_not_found' },
+        { status: 400 },
+      )
+    }
+
+    try {
+      await createFromSubmission(admin, {
+        user_id: page.user_id,
+        submission_id: subInsert.id,
+        business_order_id: businessOrderId,
+        action_page_id: page.id,
+        payment_method_id: pm.id,
+        ...snapshotMethod(pm),
+        proof_url: proofUrl,
+        proof_file_id:
+          typeof parsed.data.payment_proof_file_id === 'string'
+            ? parsed.data.payment_proof_file_id
+            : null,
+        amount:
+          typeof parsed.data.payment_amount === 'number'
+            ? parsed.data.payment_amount
+            : null,
+        currency:
+          typeof parsed.data.payment_currency === 'string'
+            ? parsed.data.payment_currency
+            : null,
+        note:
+          typeof parsed.data.payment_note === 'string'
+            ? parsed.data.payment_note
+            : null,
+      })
+    } catch (e) {
+      console.error('[action-pages.submit] order_payments insert failed', e)
+      return NextResponse.json(
+        { error: 'payment_record_failed' },
+        { status: 500 },
+      )
     }
   }
 

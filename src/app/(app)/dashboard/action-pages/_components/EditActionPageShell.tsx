@@ -5,6 +5,7 @@ import { useRef, useState, type ReactNode } from 'react'
 import { useFormStatus } from 'react-dom'
 import { KIND_REGISTRY } from '@/lib/action-pages/kinds'
 import type { ActionPageOption, ActionPageRow, PipelineStageOption } from '../_lib/queries'
+import type { PaymentMethod } from '@/lib/payment-methods/types'
 import type { PipelineRule } from '../_lib/schemas'
 import { updateActionPage, deleteActionPage } from '../actions/crud'
 import { ActionPagePreview } from './ActionPagePreview'
@@ -42,6 +43,7 @@ export function EditActionPageShell({
   embedSnippet,
   saved,
   errorBanner,
+  paymentMethods = [],
 }: {
   page: ActionPageRow
   stages: PipelineStageOption[]
@@ -51,6 +53,7 @@ export function EditActionPageShell({
   embedSnippet: string
   saved: boolean
   errorBanner: string | null
+  paymentMethods?: PaymentMethod[]
 }) {
   if (page.kind === 'catalog') {
     return (
@@ -62,6 +65,7 @@ export function EditActionPageShell({
         embedSnippet={embedSnippet}
         saved={saved}
         errorBanner={errorBanner}
+        paymentMethods={paymentMethods}
       />
     )
   }
@@ -90,6 +94,7 @@ export function EditActionPageShell({
       embedSnippet={embedSnippet}
       saved={saved}
       errorBanner={errorBanner}
+      paymentMethods={paymentMethods}
     />
   )
 }
@@ -103,6 +108,7 @@ function EditActionPageShellInner({
   embedSnippet,
   saved,
   errorBanner,
+  paymentMethods = [],
 }: {
   page: ActionPageRow
   stages: PipelineStageOption[]
@@ -112,6 +118,7 @@ function EditActionPageShellInner({
   embedSnippet: string
   saved: boolean
   errorBanner: string | null
+  paymentMethods?: PaymentMethod[]
 }) {
   const meta = KIND_REGISTRY[page.kind]
   const [step, setStep] = useState<number>(0)
@@ -261,7 +268,7 @@ function EditActionPageShellInner({
                     <p>The fields below control the live public page.</p>
                   </div>
                   <div className="ap-section-body">
-                    <KindEditor page={page} stages={stages} actionPages={actionPages} />
+                    <KindEditor page={page} stages={stages} actionPages={actionPages} paymentMethods={paymentMethods} />
                   </div>
                 </div>
               </Panel>

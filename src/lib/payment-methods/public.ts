@@ -66,3 +66,45 @@ export async function loadPublicPaymentMethods(
   }
   return out
 }
+
+export function filterAllowedIds(allIds: string[], excluded: string[]): string[] {
+  const set = new Set(excluded)
+  return allIds.filter((id) => !set.has(id))
+}
+
+/**
+ * Load all enabled payment methods for a user, minus excluded ids.
+ * Used at SSR time on sales/catalog action pages when the page-level
+ * payment block has no explicit include list.
+ */
+export async function loadEnabledPaymentMethodsForPage(
+  userId: string,
+  excluded: string[],
+): Promise<PublicPaymentMethod[]> {
+  const admin = createAdminClient()
+  const { data, error } = await admin
+    .from('payment_methods')
+    .select('id, kind, name, instructions, details, enabled, position')
+    .eq('user_id', userId)
+    .eq('enabled', true)
+    .order('position', { ascending: true })
+    .order('created_at', { ascending: true })
+  if (error || !data) return []
+  const set = new Set(excluded)
+  const out: PublicPaymentMethod[] = []
+  for (const r of data as (Row & { position: number })[]) {
+    if (set.has(r.id)) continue
+    out.push({
+      id: r.id,
+      kind: r.kind,
+      name: r.name,
+      instructions: r.instructions,
+      account_name: pick(r.details, 'account_name'),
+      account_number: pick(r.details, 'account_number'),
+      bank_name: pick(r.details, 'bank_name'),
+      branch: pick(r.details, 'branch'),
+      qr_image_url: pick(r.details, 'qr_image_url'),
+    })
+  }
+  return out
+}

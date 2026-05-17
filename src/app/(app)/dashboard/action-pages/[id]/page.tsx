@@ -4,6 +4,7 @@ import { fetchActionPage, fetchPipelineStages, fetchActionPageOptions } from '..
 import { seedDefaultStagesIfEmpty } from '../../leads/_lib/seed'
 import { EditActionPageShell } from '../_components/EditActionPageShell'
 import { PublishedPrimaryGoalBanner } from '../_components/PublishedPrimaryGoalBanner'
+import { loadPaymentMethods } from '../../payment-methods/actions'
 
 export default async function ActionPageEditor({
   params,
@@ -40,6 +41,8 @@ export default async function ActionPageEditor({
     fetchActionPageOptions(supabase, user.id),
   ])
   if (!page) notFound()
+
+  const paymentMethods = page.kind === 'sales' || page.kind === 'catalog' ? await loadPaymentMethods() : []
 
   let currentGoalTitle: string | null = null
   if (justPublished && offerMode === 'switch') {
@@ -81,6 +84,7 @@ export default async function ActionPageEditor({
         embedSnippet={embedSnippet}
         saved={saved}
         errorBanner={errorBanner}
+        paymentMethods={paymentMethods}
       />
     </>
   )

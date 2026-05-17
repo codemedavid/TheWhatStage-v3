@@ -965,10 +965,36 @@ function CartDrawer({
   const [paymentMethodId, setPaymentMethodId] = useState<string>(() =>
     paymentMethods.length === 1 ? paymentMethods[0].id : '',
   )
+  const [proofUrl, setProofUrl] = useState('')
+  const [proofFileId, setProofFileId] = useState('')
+  const [uploadingProof, setUploadingProof] = useState(false)
+  const [proofError, setProofError] = useState<string | null>(null)
+  const [paymentNote, setPaymentNote] = useState('')
   const selectedMethod = useMemo(
     () => paymentMethods.find((m) => m.id === paymentMethodId) ?? null,
     [paymentMethods, paymentMethodId],
   )
+  const paymentEnabled =
+    (page.config as { payment?: { enabled?: boolean } }).payment?.enabled !== false
+
+  async function uploadProof(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setUploadingProof(true); setProofError(null)
+    try {
+      const fd = new FormData(); fd.append('file', file)
+      const res = await fetch(`/api/action-pages/${page.slug}/payment-proofs`, {
+        method: 'POST', body: fd,
+      })
+      const b = await res.json()
+      if (!res.ok) throw new Error(b?.error ?? 'upload_failed')
+      setProofUrl(b.url); setProofFileId(b.fileId)
+    } catch (err) {
+      setProofError(err instanceof Error ? err.message : 'upload_failed')
+    } finally {
+      setUploadingProof(false)
+    }
+  }
   return (
     <>
       <div
@@ -1344,7 +1370,7 @@ function CartDrawer({
                   })}
                 </div>
 
-                {paymentMethods.length > 0 ? (
+                {paymentEnabled && paymentMethods.length > 0 ? (
                   <div style={{ marginTop: 22 }}>
                     <div className="shop-eyebrow" style={{ marginBottom: 10 }}>
                       Payment
@@ -1358,6 +1384,35 @@ function CartDrawer({
                     {selectedMethod ? (
                       <PaymentMethodDetails method={selectedMethod} />
                     ) : null}
+                    <div style={{ padding: '0 0 14px' }}>
+                      <label className="grid gap-1 text-sm" style={{ display: 'grid', gap: 6 }}>
+                        <span style={{ fontWeight: 500 }}>Payment screenshot (required)</span>
+                        <input
+                          type="file"
+                          accept="image/jpeg,image/png,image/webp"
+                          onChange={uploadProof}
+                          disabled={uploadingProof}
+                        />
+                        {uploadingProof ? <span>Uploading…</span> : null}
+                        {proofError ? <span style={{ color: '#b91c1c' }}>{proofError}</span> : null}
+                        {proofUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={proofUrl} alt="Proof" style={{ width: 120, height: 120, borderRadius: 8, objectFit: 'cover', marginTop: 6 }} />
+                        ) : null}
+                      </label>
+                      <label className="grid gap-1 text-sm" style={{ display: 'grid', gap: 6, marginTop: 10 }}>
+                        <span style={{ fontWeight: 500 }}>Note (optional)</span>
+                        <textarea
+                          value={paymentNote}
+                          onChange={(e) => setPaymentNote(e.target.value)}
+                          maxLength={500}
+                          style={{ minHeight: 60, borderRadius: 8, border: `1px solid ${S.border}`, padding: 8 }}
+                        />
+                      </label>
+                      {proofUrl ? <input type="hidden" name="data.payment_proof_url" value={proofUrl} /> : null}
+                      {proofFileId ? <input type="hidden" name="data.payment_proof_file_id" value={proofFileId} /> : null}
+                      {paymentNote ? <input type="hidden" name="data.payment_note" value={paymentNote} /> : null}
+                    </div>
                   </div>
                 ) : null}
               </div>
@@ -1403,7 +1458,7 @@ function CartDrawer({
             </p>
             <button
               type="submit"
-              disabled={count === 0}
+              disabled={count === 0 || (paymentEnabled && paymentMethods.length > 0 && (!paymentMethodId || !proofUrl))}
               className="shop-btn-primary"
               style={{ width: '100%', padding: '13px 18px', fontSize: 14 }}
             >

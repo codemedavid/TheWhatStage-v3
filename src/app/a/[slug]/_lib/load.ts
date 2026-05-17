@@ -15,6 +15,7 @@ type LoadedActionPage = ActionPageRow & { user_id: string }
 
 export interface PublicLoadResult {
   page: ActionPageRow
+  userId: string
   claims: DeeplinkClaims | null
   attribution_error: 'missing' | 'expired' | 'bad_signature' | null
   products?: PublicProductCard[]
@@ -113,8 +114,8 @@ export async function loadPublicActionPage(
     const paymentMethods = paymentMethodIds.length
       ? await loadPublicPaymentMethods(userId, paymentMethodIds)
       : []
-    return { page: publicPage, claims, attribution_error, products, paymentMethods }
+    return { page: publicPage, userId, claims, attribution_error, products, paymentMethods }
   }
 
-  return { page: publicPage, claims, attribution_error }
+  return { page: publicPage, userId, claims, attribution_error }
 }
