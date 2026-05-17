@@ -98,13 +98,15 @@ async function callOnce(input: {
         { role: 'system', content: sys(input.lang, input.goal, input.action_page.slug) },
         { role: 'user', content: usr(input.basics, input.action_page, input.flow_description) },
       ],
-      // maxTokens trimmed 1100 -> 700: each rule field is 2-4 sentences,
-      // 1100 was wasteful and contributed to the 120s ceiling.
-      { responseFormat: 'json_object', temperature: 0.5, maxTokens: 700 },
+      // maxTokens 900 is the sweet spot: 1100 risked the 120s wall-time
+      // ceiling (~36s observed), 700 was too tight and truncated the JSON
+      // (ended `error=invalid_json`). 900 leaves headroom for all four
+      // fields without re-introducing the timeout.
+      { responseFormat: 'json_object', temperature: 0.5, maxTokens: 900 },
     )
   } catch (err) { throw new Error('generation_failed: llm_call', { cause: err }) }
   let parsed: unknown
-  try { parsed = extractJson(raw) } catch { throw new Error('generation_failed: invalid_json') }
+  try { parsed = extractJson(raw, { kind: 'bot_instructions' }) } catch { throw new Error('generation_failed: invalid_json') }
   const r = ResponseSchema.safeParse(parsed)
   if (!r.success) throw new Error('generation_failed: schema_mismatch')
 

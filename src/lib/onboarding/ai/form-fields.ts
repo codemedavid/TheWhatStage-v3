@@ -46,7 +46,7 @@ async function callOnce(input: {
     )
   } catch (err) { throw new Error('generation_failed: llm_call', { cause: err }) }
   let parsed: unknown
-  try { parsed = extractJson(raw) } catch { throw new Error('generation_failed: invalid_json') }
+  try { parsed = extractJson(raw, { kind: 'form_fields' }) } catch { throw new Error('generation_failed: invalid_json') }
   const r = ResponseSchema.safeParse(parsed)
   if (!r.success) throw new Error('generation_failed: schema_mismatch')
   return r.data
