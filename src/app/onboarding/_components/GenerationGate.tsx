@@ -158,11 +158,18 @@ export function GenerationGate({
   }, [kind, router])
 
   if (state.phase === 'failed') {
+    // Both controls live in ONE <form action={skipAction}>. The retry button
+    // is type="button" so its onClick fires WITHOUT submitting; the skip
+    // button is the form's natural type="submit". The previous structure put
+    // the skip <form> as a sibling inside a flex container — in practice the
+    // surrounding flex layout + React server-action binding combination made
+    // the skip-form's submit unreliable (only form.requestSubmit() fired it).
+    // Collapsing to a single form removes the ambiguity.
     return (
       <div className="mt-6 rounded-md border border-red-300 bg-red-50 p-4 text-sm text-red-900">
         <p>{errorMessage ?? 'Generation failed.'}</p>
         <p className="mt-2 text-xs text-red-800/80">{failureLabel(state.error, lang)}</p>
-        <div className="mt-3 flex flex-wrap gap-3">
+        <form action={skipAction} className="mt-3 flex flex-wrap gap-3">
           <button
             type="button"
             onClick={() => {
@@ -173,12 +180,10 @@ export function GenerationGate({
           >
             {t('generation.retry', lang)}
           </button>
-          <form action={skipAction}>
-            <button type="submit" className="font-medium underline">
-              {skipLabel}
-            </button>
-          </form>
-        </div>
+          <button type="submit" className="font-medium underline">
+            {skipLabel}
+          </button>
+        </form>
       </div>
     )
   }
