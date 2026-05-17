@@ -13,14 +13,29 @@ export interface GeneratedBotInstructions {
   confidence_threshold: number
 }
 
+// required_slots: the model regularly returns `[{ name: 'preferred_date' }]`
+// or `[{ name, description }]` instead of bare strings. Pre-process to a
+// string[] so a stylistic drift doesn't tank the whole generation.
+const SlotItem = z.preprocess((v) => {
+  if (typeof v === 'string') return v
+  if (v && typeof v === 'object') {
+    const o = v as Record<string, unknown>
+    const cand = o.name ?? o.slot ?? o.key ?? o.id
+    if (typeof cand === 'string') return cand
+  }
+  return v
+}, z.string().trim().min(1).max(60))
+
 const ResponseSchema = z.object({
   // min relaxed 20 -> 10: schema misses on the strict 4-field + literal-token
   // contract were doubling wall time via withJsonRetry. The slug token is
   // re-injected post-hoc below, so we don't need a perfect first-pass length.
   bot_send_instructions: z.string().trim().min(10).max(2000),
   recommendation_rules: z.string().trim().min(10).max(2000),
-  required_slots: z.array(z.string().trim().min(1).max(60)).max(10).default([]),
-  confidence_threshold: z.number().min(0).max(1).default(0.55),
+  required_slots: z.array(SlotItem).max(10).default([]),
+  // z.coerce.number handles the common `"0.6"` string drift from Llama JSON
+  // mode without losing the 0..1 clamp.
+  confidence_threshold: z.coerce.number().min(0).max(1).default(0.55),
 })
 
 /**
@@ -108,7 +123,10 @@ async function callOnce(input: {
   let parsed: unknown
   try { parsed = extractJson(raw, { kind: 'bot_instructions' }) } catch { throw new Error('generation_failed: invalid_json') }
   const r = ResponseSchema.safeParse(parsed)
-  if (!r.success) throw new Error('generation_failed: schema_mismatch')
+  if (!r.success) {
+    console.error('[ai.bot_instructions.schema_mismatch]', r.error.flatten())
+    throw new Error('generation_failed: schema_mismatch')
+  }
 
   // Belt-and-suspenders: the model occasionally forgets the slug token even
   // with strong instructions. Append it inline so the runtime can always

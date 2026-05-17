@@ -77,12 +77,22 @@ describe('withJsonRetry', () => {
     expect(fn).toHaveBeenCalledTimes(2)
   })
 
-  it('rethrows when both attempts fail', async () => {
+  it('rethrows when all attempts fail', async () => {
     const fn = vi.fn()
       .mockRejectedValueOnce(new Error('invalid_json'))
       .mockRejectedValueOnce(new Error('invalid_json'))
+      .mockRejectedValueOnce(new Error('invalid_json'))
     await expect(withJsonRetry(fn)).rejects.toThrowError(/invalid_json/)
-    expect(fn).toHaveBeenCalledTimes(2)
+    expect(fn).toHaveBeenCalledTimes(3)
+  })
+
+  it('recovers on the third attempt', async () => {
+    const fn = vi.fn()
+      .mockRejectedValueOnce(new Error('invalid_json'))
+      .mockRejectedValueOnce(new Error('schema_mismatch'))
+      .mockResolvedValueOnce('recovered')
+    await expect(withJsonRetry(fn)).resolves.toBe('recovered')
+    expect(fn).toHaveBeenCalledTimes(3)
   })
 
   it('does not retry on unrelated errors', async () => {

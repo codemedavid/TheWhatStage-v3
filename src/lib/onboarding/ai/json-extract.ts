@@ -61,19 +61,29 @@ const RETRYABLE_FRAGMENTS = [
 ] as const
 
 /**
- * Run an LLM-backed generator with one retry on transient failures: JSON
- * parse / schema mismatch (very common formatting blip) and LLM transport
+ * Run an LLM-backed generator with up to two retries on transient failures:
+ * JSON parse / schema mismatch (very common formatting blip) and LLM transport
  * errors (5xx, connection reset, rate-limit). Non-transient errors propagate
  * unchanged.
+ *
+ * Two retries (3 attempts total) — the strict-shape generators (notably
+ * bot_instructions with 4 required fields + literal slug token) drift often
+ * enough that a single retry was leaving the user to manually re-trigger
+ * the whole gate. The total wall-time budget is still bounded by the
+ * 90s sweepStale window on the job row.
  */
 export async function withJsonRetry<T>(fn: () => Promise<T>): Promise<T> {
-  try {
-    return await fn()
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : ''
-    if (RETRYABLE_FRAGMENTS.some((f) => msg.includes(f))) {
+  const MAX_ATTEMPTS = 3
+  let lastErr: unknown
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
       return await fn()
+    } catch (err) {
+      lastErr = err
+      const msg = err instanceof Error ? err.message : ''
+      const retryable = RETRYABLE_FRAGMENTS.some((f) => msg.includes(f))
+      if (!retryable || attempt === MAX_ATTEMPTS) throw err
     }
-    throw err
   }
+  throw lastErr
 }
