@@ -31,11 +31,28 @@ describe('hasTimeMarker', () => {
     "I'll think about it",
   ]
 
+  const chattyFalsePositives = [
+    'may itatanong pa po ba kayo',
+    'may tanong ako',
+    'may bago ba?',
+    'may discount ba?',
+    'magandang umaga po',
+    'magandang hapon po',
+    'magandang gabi po',
+    'tara sa 5 piso',
+    'sa 5 piso',
+    'meet sa 7-eleven',
+  ]
+
   it.each(positives)('returns true for: %s', (msg) => {
     expect(hasTimeMarker(msg)).toBe(true)
   })
 
   it.each(negatives)('returns false for: %s', (msg) => {
+    expect(hasTimeMarker(msg)).toBe(false)
+  })
+
+  it.each(chattyFalsePositives)('returns false for chatty false positive: %s', (msg) => {
     expect(hasTimeMarker(msg)).toBe(false)
   })
 
