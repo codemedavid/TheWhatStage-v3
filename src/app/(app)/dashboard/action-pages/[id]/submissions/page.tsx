@@ -9,7 +9,9 @@ import PropertySubmissionsView, {
   type PropertySubmissionRow,
 } from './PropertySubmissionsView'
 import CatalogOrdersView, { type CatalogOrderEntry } from './CatalogOrdersView'
-import SalesPaymentsView, { type SalesPaymentRow } from './SalesPaymentsView'
+import SalesSubmissionsView, {
+  type SalesSubmissionRow,
+} from './SalesSubmissionsView'
 import type { OrderPayment } from '@/lib/order-payments/types'
 import { listBySubmissionIds } from '@/lib/order-payments/server'
 
@@ -103,11 +105,13 @@ export default async function SubmissionsPage({
   // id via meta.source_sales_page_id, plus any direct submissions on the
   // sales page itself (fallback form path).
   if (page.kind === 'sales') {
+    const leadSelect =
+      'id, name, email, phone, messenger_threads(picture_url, psid, page_id)'
     const [taggedRes, directRes] = await Promise.all([
       supabase
         .from('action_page_submissions')
         .select(
-          'id, outcome, data, meta, created_at, lead_id, action_page_id, leads(name)',
+          `id, outcome, data, meta, created_at, lead_id, action_page_id, leads(${leadSelect})`,
         )
         .eq('user_id', user.id)
         .filter('meta->>source_sales_page_id', 'eq', id)
@@ -116,7 +120,7 @@ export default async function SubmissionsPage({
       supabase
         .from('action_page_submissions')
         .select(
-          'id, outcome, data, meta, created_at, lead_id, action_page_id, leads(name)',
+          `id, outcome, data, meta, created_at, lead_id, action_page_id, leads(${leadSelect})`,
         )
         .eq('user_id', user.id)
         .eq('action_page_id', id)
@@ -124,6 +128,18 @@ export default async function SubmissionsPage({
         .limit(200),
     ])
 
+    type ThreadInfo = {
+      picture_url: string | null
+      psid: string | null
+      page_id: string | null
+    }
+    type LeadInfo = {
+      id: string
+      name: string | null
+      email: string | null
+      phone: string | null
+      messenger_threads: ThreadInfo | ThreadInfo[] | null
+    }
     type Row = {
       id: string
       outcome: string | null
@@ -132,7 +148,7 @@ export default async function SubmissionsPage({
       created_at: string
       lead_id: string | null
       action_page_id: string
-      leads: { name?: string } | { name?: string }[] | null
+      leads: LeadInfo | LeadInfo[] | null
     }
 
     const seen = new Set<string>()
@@ -171,8 +187,16 @@ export default async function SubmissionsPage({
       }
     }
 
-    const submissionRows: PropertySubmissionRow[] = merged.map((r) => {
+    const submissionIds = merged.map((r) => r.id)
+    const paymentsMap = await listBySubmissionIds(supabase, user.id, submissionIds)
+
+    const submissionRows: SalesSubmissionRow[] = merged.map((r) => {
       const lead = Array.isArray(r.leads) ? r.leads[0] : r.leads
+      const thread = lead
+        ? Array.isArray(lead.messenger_threads)
+          ? lead.messenger_threads[0]
+          : lead.messenger_threads
+        : null
       return {
         id: r.id,
         outcome: r.outcome ?? null,
@@ -180,43 +204,29 @@ export default async function SubmissionsPage({
         meta: r.meta ?? null,
         created_at: r.created_at,
         lead_id: r.lead_id ?? null,
-        lead_name: lead?.name ?? null,
+        lead: lead
+          ? {
+              id: lead.id,
+              name: lead.name ?? null,
+              email: lead.email ?? null,
+              phone: lead.phone ?? null,
+              picture_url: thread?.picture_url ?? null,
+              psid: thread?.psid ?? null,
+              fb_page_id: thread?.page_id ?? null,
+            }
+          : null,
         source_action_page: sourceById.get(r.action_page_id) ?? null,
+        payment: paymentsMap.get(r.id) ?? null,
       }
     })
 
-    // Fetch order payments keyed by submission_id
-    const submissionIds = merged.map((r) => r.id)
-    const paymentsMap = await listBySubmissionIds(supabase, user.id, submissionIds)
-
-    // Build payments rows — only submissions that have a payment record
-    const salesPaymentRows: SalesPaymentRow[] = merged
-      .filter((r) => paymentsMap.has(r.id))
-      .map((r) => ({
-        payment: paymentsMap.get(r.id)!,
-        submission: {
-          id: r.id,
-          created_at: r.created_at,
-          data: r.data ?? {},
-        },
-      }))
-
     return (
-      <div className="mx-auto max-w-5xl space-y-6 pb-16 px-4 pt-4">
-        {salesPaymentRows.length > 0 && (
-          <SalesPaymentsView payments={salesPaymentRows} actionPageId={id} />
-        )}
-        <PropertySubmissionsView
-          pageId={id}
-          pageTitle={page.title}
-          pageStatus={page.status}
-          submissions={submissionRows}
-          breadcrumbLabel="Sales submissions"
-          editLabel="Edit sales page"
-          description="Forms, bookings, qualifications, and direct submissions collected from this sales page."
-          emptyMessage="No submissions yet. When buyers fill out the form (or a linked action page) on this sales page, their submissions will appear here."
-        />
-      </div>
+      <SalesSubmissionsView
+        pageId={id}
+        pageTitle={page.title}
+        pageStatus={page.status}
+        submissions={submissionRows}
+      />
     )
   }
 
