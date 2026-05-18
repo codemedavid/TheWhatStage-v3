@@ -15,6 +15,20 @@ export interface ReminderRow {
   fired_at: string | null
   resolved_at: string | null
   created_at: string
+  sequence_id: string | null
+  sequence_position: number | null
+}
+
+export interface SequenceRow {
+  id: string
+  lead_id: string
+  lead_name: string | null
+  anchor_at: string
+  topic: string
+  status: 'active' | 'resolved' | 'cancelled'
+  resolved_at: string | null
+  cancelled_at: string | null
+  created_at: string
 }
 
 const TZ = 'Asia/Manila'
@@ -53,14 +67,42 @@ function bucketize(rows: ReminderRow[]) {
   return { overdue, today, upcoming, done }
 }
 
-export function RemindersClient({ initial }: { initial: ReminderRow[] }) {
+export function RemindersClient({
+  initial,
+  sequences: initialSequences,
+}: {
+  initial: ReminderRow[]
+  sequences: SequenceRow[]
+}) {
   const [rows, setRows] = useState<ReminderRow[]>(initial)
+  const [sequences, setSequences] = useState<SequenceRow[]>(initialSequences)
   const [tab, setTab] = useState<'active' | 'done'>('active')
   const [busyId, setBusyId] = useState<string | null>(null)
   const [, startTransition] = useTransition()
   const router = useRouter()
 
-  const { overdue, today, upcoming, done } = useMemo(() => bucketize(rows), [rows])
+  const { looseRows, sequenceRowsById } = useMemo(() => {
+    const byId = new Map<string, ReminderRow[]>()
+    const loose: ReminderRow[] = []
+    for (const r of rows) {
+      if (r.sequence_id) {
+        const arr = byId.get(r.sequence_id) ?? []
+        arr.push(r)
+        byId.set(r.sequence_id, arr)
+      } else {
+        loose.push(r)
+      }
+    }
+    for (const arr of byId.values()) {
+      arr.sort((a, b) => (a.sequence_position ?? 0) - (b.sequence_position ?? 0))
+    }
+    return { looseRows: loose, sequenceRowsById: byId }
+  }, [rows])
+
+  const { overdue, today, upcoming, done } = useMemo(() => bucketize(looseRows), [looseRows])
+
+  const activeSequences = sequences.filter((s) => s.status === 'active')
+  const doneSequences = sequences.filter((s) => s.status !== 'active')
 
   async function patch(id: string, body: Record<string, unknown>) {
     setBusyId(id)
@@ -106,6 +148,31 @@ export function RemindersClient({ initial }: { initial: ReminderRow[] }) {
     void patch(id, { scheduled_at: next, status: 'pending' })
   }
 
+  async function cancelSequence(sequenceId: string) {
+    setBusyId(sequenceId)
+    try {
+      const res = await fetch(`/api/reminders/sequences/${sequenceId}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ status: 'cancelled' }),
+      })
+      if (!res.ok) throw new Error(await res.text())
+      setSequences((ss) =>
+        ss.map((s) =>
+          s.id === sequenceId
+            ? { ...s, status: 'cancelled', cancelled_at: new Date().toISOString() }
+            : s,
+        ),
+      )
+      startTransition(() => router.refresh())
+    } catch (e) {
+      console.error(e)
+      alert('Cancel failed')
+    } finally {
+      setBusyId(null)
+    }
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex gap-3 text-sm">
@@ -113,18 +180,40 @@ export function RemindersClient({ initial }: { initial: ReminderRow[] }) {
           onClick={() => setTab('active')}
           className={`px-3 py-1.5 rounded-md ${tab === 'active' ? 'bg-neutral-900 text-white' : 'bg-neutral-100'}`}
         >
-          Active ({overdue.length + today.length + upcoming.length})
+          Active ({overdue.length + today.length + upcoming.length + activeSequences.length})
         </button>
         <button
           onClick={() => setTab('done')}
           className={`px-3 py-1.5 rounded-md ${tab === 'done' ? 'bg-neutral-900 text-white' : 'bg-neutral-100'}`}
         >
-          History ({done.length})
+          History ({done.length + doneSequences.length})
         </button>
       </div>
 
       {tab === 'active' && (
         <div className="space-y-6">
+          {activeSequences.length > 0 && (
+            <div>
+              <div className="flex items-center gap-2 mb-2">
+                <span className="inline-block w-2 h-2 rounded-full bg-indigo-500" />
+                <h2 className="text-sm font-medium text-neutral-700">
+                  Sequences{' '}
+                  <span className="text-neutral-400 font-normal">· {activeSequences.length}</span>
+                </h2>
+              </div>
+              <ul className="space-y-2">
+                {activeSequences.map((s) => (
+                  <SequenceCard
+                    key={s.id}
+                    sequence={s}
+                    touchpoints={sequenceRowsById.get(s.id) ?? []}
+                    busy={busyId === s.id}
+                    onCancel={() => cancelSequence(s.id)}
+                  />
+                ))}
+              </ul>
+            </div>
+          )}
           <Section title="Overdue" rows={overdue} accent="red" empty="Nothing overdue.">
             {(r) => (
               <ActiveActions
@@ -174,9 +263,33 @@ export function RemindersClient({ initial }: { initial: ReminderRow[] }) {
       )}
 
       {tab === 'done' && (
-        <Section title="Recent" rows={done.slice(0, 200)} accent="neutral" empty="No history yet.">
-          {(r) => <DoneActions row={r} />}
-        </Section>
+        <div className="space-y-6">
+          {doneSequences.length > 0 && (
+            <div>
+              <div className="flex items-center gap-2 mb-2">
+                <span className="inline-block w-2 h-2 rounded-full bg-indigo-500" />
+                <h2 className="text-sm font-medium text-neutral-700">
+                  Sequences{' '}
+                  <span className="text-neutral-400 font-normal">· {doneSequences.length}</span>
+                </h2>
+              </div>
+              <ul className="space-y-2">
+                {doneSequences.map((s) => (
+                  <SequenceCard
+                    key={s.id}
+                    sequence={s}
+                    touchpoints={sequenceRowsById.get(s.id) ?? []}
+                    busy={busyId === s.id}
+                    onCancel={() => cancelSequence(s.id)}
+                  />
+                ))}
+              </ul>
+            </div>
+          )}
+          <Section title="Recent" rows={done.slice(0, 200)} accent="neutral" empty="No history yet.">
+            {(r) => <DoneActions row={r} />}
+          </Section>
+        </div>
       )}
     </div>
   )
@@ -307,6 +420,91 @@ function ActiveActions({
         Cancel
       </button>
     </>
+  )
+}
+
+function SequenceCard({
+  sequence,
+  touchpoints,
+  busy,
+  onCancel,
+}: {
+  sequence: SequenceRow
+  touchpoints: ReminderRow[]
+  busy: boolean
+  onCancel: () => void
+}) {
+  const statusTone =
+    sequence.status === 'active'
+      ? 'text-indigo-700 bg-indigo-50'
+      : sequence.status === 'resolved'
+        ? 'text-emerald-700 bg-emerald-50'
+        : 'text-neutral-500 bg-neutral-100'
+  const statusLabel =
+    sequence.status === 'active'
+      ? 'Active'
+      : sequence.status === 'resolved'
+        ? 'Resolved'
+        : 'Cancelled'
+  return (
+    <li className="p-3 rounded-lg border border-neutral-200 bg-white">
+      <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <Link
+              href={`/dashboard/leads?lead=${sequence.lead_id}`}
+              className="text-sm font-medium text-neutral-900 hover:underline truncate"
+            >
+              {sequence.lead_name ?? 'Unknown lead'}
+            </Link>
+            <span className="text-xs text-neutral-500">{fmtLocal(sequence.anchor_at)}</span>
+            <span className={`text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded ${statusTone}`}>
+              {statusLabel}
+            </span>
+          </div>
+          <div className="text-sm text-neutral-700 mt-0.5">{sequence.topic}</div>
+        </div>
+        {sequence.status === 'active' && (
+          <div className="flex flex-wrap gap-1.5">
+            <button
+              onClick={onCancel}
+              disabled={busy}
+              className="text-xs px-2.5 py-1.5 rounded bg-neutral-100 text-neutral-500 disabled:opacity-50"
+            >
+              Cancel sequence
+            </button>
+          </div>
+        )}
+      </div>
+      {touchpoints.length > 0 && (
+        <ul className="mt-3 pt-3 border-t border-neutral-100 space-y-1">
+          {touchpoints.map((t) => {
+            const pillTone =
+              t.status === 'sent' || t.status === 'resolved'
+                ? 'text-emerald-700 bg-emerald-50'
+                : t.status === 'failed'
+                  ? 'text-red-700 bg-red-50'
+                  : t.status === 'cancelled'
+                    ? 'text-neutral-500 bg-neutral-100'
+                    : 'text-neutral-600 bg-neutral-100'
+            return (
+              <li
+                key={t.id}
+                className="flex items-center gap-2 text-xs text-neutral-600"
+              >
+                <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-neutral-100 text-[10px] font-medium text-neutral-500">
+                  {(t.sequence_position ?? 0) + 1}
+                </span>
+                <span className="text-neutral-700">{fmtLocal(t.scheduled_at)}</span>
+                <span className={`text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded ${pillTone}`}>
+                  {t.status}
+                </span>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+    </li>
   )
 }
 
