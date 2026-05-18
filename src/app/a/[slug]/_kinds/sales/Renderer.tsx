@@ -111,6 +111,42 @@ export default async function SalesRenderer(props: KindRendererProps) {
             )}
           </div>
 
+          <section id="convert" className="mt-6 scroll-mt-6">
+            {linked.length > 0 ? (
+              <>
+                <h2 className="mb-4 text-[20px] font-semibold text-[#111827]">
+                  Get started
+                </h2>
+                <LinkedConversions
+                  linked={linked}
+                  claims={props.claims}
+                  rawToken={props.rawToken}
+                  sourceContext={sourceContext}
+                />
+              </>
+            ) : (
+              <SalesCheckoutModal
+                slug={props.page.slug}
+                pageId={props.page.id}
+                ctaLabel={config.cta.primary_label}
+                submitButtonLabel={config.fallback_form.submit_button_label}
+                successMessage={config.fallback_form.success_message}
+                fields={config.fallback_form.fields}
+                paymentEnabled={config.payment.enabled}
+                paymentMethods={props.paymentMethods ?? []}
+                defaultCurrency={config.price.currency ?? 'PHP'}
+                priceAmount={config.price.amount}
+                priceLabel={priceLabel?.primary ?? null}
+                productName={productName}
+                productTypeLabel={productTypeLabel}
+                accent={config.theme.accent_color}
+                ctaFg={config.theme.button_text_color}
+                claims={props.claims}
+                rawToken={props.rawToken}
+              />
+            )}
+          </section>
+
           {config.product.description && (
             <p className="mt-6 whitespace-pre-wrap text-[15px] leading-relaxed text-[#374151]">
               {config.product.description}
@@ -265,41 +301,6 @@ export default async function SalesRenderer(props: KindRendererProps) {
             </Section>
           )}
 
-          <section id="convert" className="mt-10 scroll-mt-6">
-            {linked.length > 0 ? (
-              <>
-                <h2 className="mb-4 text-[20px] font-semibold text-[#111827]">
-                  Get started
-                </h2>
-                <LinkedConversions
-                  linked={linked}
-                  claims={props.claims}
-                  rawToken={props.rawToken}
-                  sourceContext={sourceContext}
-                />
-              </>
-            ) : (
-              <SalesCheckoutModal
-                slug={props.page.slug}
-                pageId={props.page.id}
-                ctaLabel={config.cta.primary_label}
-                submitButtonLabel={config.fallback_form.submit_button_label}
-                successMessage={config.fallback_form.success_message}
-                fields={config.fallback_form.fields}
-                paymentEnabled={config.payment.enabled}
-                paymentMethods={props.paymentMethods ?? []}
-                defaultCurrency={config.price.currency ?? 'PHP'}
-                priceAmount={config.price.amount}
-                priceLabel={priceLabel?.primary ?? null}
-                productName={productName}
-                productTypeLabel={productTypeLabel}
-                accent={config.theme.accent_color}
-                ctaFg={config.theme.button_text_color}
-                claims={props.claims}
-                rawToken={props.rawToken}
-              />
-            )}
-          </section>
         </article>
 
         {/* ─── Sticky sidebar ─── */}
