@@ -18,8 +18,10 @@ import { handleCampaignSend } from '@/lib/messenger/campaignSend'
 import { handleReminderFire } from '@/lib/reminders/fire'
 import { maybeScheduleFollowup } from '@/lib/followups/seed'
 import { handleFollowupSendJob } from '@/lib/followups/fire'
-import { extractReminder } from '@/lib/reminders/extract'
+import { extractReminder, type ExtractedReminder } from '@/lib/reminders/extract'
 import { resolveTopics, type PendingReminder } from '@/lib/reminders/resolve'
+import { seedReminderSequence } from '@/lib/reminders/sequence-seed'
+import { resolveActiveSequence } from '@/lib/reminders/sequence-resolve'
 import { deeplinkActionPageUrl } from '@/lib/action-pages/urls'
 import { fetchPublicCatalogProducts, type PublicProductCard } from '@/lib/business/public-dto'
 import type { MessengerGenericElement } from '@/lib/facebook/messenger'
@@ -338,10 +340,31 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
       leadId: thread.lead_id,
     }).catch((e) => console.warn('[messenger.worker] resolveCommentBridges failed', e))
 
-    // Auto follow-up: cancel any pending schedule and (if gates pass) seed a
-    // fresh one. Lead inbound is the cancel trigger; the seed re-checks both
-    // gates inline. Fire-and-forget — must never break the inbound reply.
-    if (thread.lead_id) {
+    // Synchronous reminder detection BEFORE bot reply, so we know whether to
+    // suppress the default auto silent-followup for this lead. The hasTimeMarker
+    // pre-filter inside extractReminder keeps median-latency cost ~0.
+    const extractedReminder: ExtractedReminder | null = await extractReminder(message).catch(
+      (e) => {
+        console.warn('[messenger.worker] extractReminder failed', e)
+        return null
+      },
+    )
+
+    // Skip the auto silent-followup if (a) the customer just asked for a
+    // dated follow-up OR (b) an active reminder sequence already exists.
+    let activeSequenceExists = false
+    if (thread.lead_id && !extractedReminder) {
+      const { data: activeSeq } = await admin
+        .from('lead_reminder_sequences')
+        .select('id')
+        .eq('lead_id', thread.lead_id)
+        .eq('status', 'active')
+        .maybeSingle<{ id: string }>()
+      activeSequenceExists = !!activeSeq
+    }
+    const suppressFollowup = !!extractedReminder || activeSequenceExists
+
+    if (thread.lead_id && !suppressFollowup) {
       const leadIdForFu = thread.lead_id
       void maybeScheduleFollowup(admin, {
         threadId: thread.id,
@@ -350,6 +373,19 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
         pageId: thread.page_id,
         lastInboundAt: inboundAt,
       }).catch((e) => console.warn('[messenger.worker] followup seed failed', e))
+    } else if (thread.lead_id) {
+      // Cancel any active default auto-followup row for this thread — it
+      // would otherwise duplicate the reminder sequence's outreach.
+      const threadIdForCancel = thread.id
+      void admin
+        .from('lead_followup_schedules')
+        .update({ status: 'cancelled' })
+        .eq('thread_id', threadIdForCancel)
+        .in('status', ['pending', 'running'])
+        .then(
+          () => {},
+          (e) => console.warn('[messenger.worker] followup cancel failed', e),
+        )
     }
 
     // Auto-detect phone numbers and emails shared by the lead — defer; the
@@ -632,12 +668,19 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
         const inboundMsgId = job.inbound_msg_id
         const userId = thread.user_id
         const threadId = thread.id
+        const personalityBlock = [config?.persona, config?.instructions]
+          .filter((s): s is string => typeof s === 'string' && s.trim().length > 0)
+          .join('\n\n')
+        const leadName = thread.full_name ?? null
         void processReminderHooks(admin, {
           userId,
           leadId,
           threadId,
           inboundText: message,
           inboundMsgId,
+          extracted: extractedReminder,
+          leadName,
+          personalityBlock,
         }).catch((e) => console.warn('[messenger.worker] reminder hooks failed', e))
       }
 
@@ -1774,16 +1817,29 @@ async function processReminderHooks(
     threadId: string
     inboundText: string
     inboundMsgId: string | null
+    extracted: ExtractedReminder | null
+    leadName: string | null
+    personalityBlock: string
   },
 ): Promise<void> {
-  const { userId, leadId, threadId, inboundText, inboundMsgId } = args
+  const {
+    userId,
+    leadId,
+    threadId,
+    inboundText,
+    inboundMsgId,
+    extracted,
+    leadName,
+    personalityBlock,
+  } = args
 
-  // 1. Resolve any pending reminders this message addresses.
+  // 1. Resolve any one-off pending reminders the customer's new message addresses.
   const { data: pending } = await admin
     .from('lead_reminders')
     .select('id, topic')
     .eq('lead_id', leadId)
     .eq('status', 'pending')
+    .is('sequence_id', null)
     .limit(20)
 
   const pendingList = (pending ?? []) as PendingReminder[]
@@ -1801,18 +1857,24 @@ async function processReminderHooks(
     }
   }
 
-  // 2. Detect a new follow-up request in this inbound message.
-  const extracted = await extractReminder(inboundText)
-  if (!extracted) return
+  // 2. If there is an active sequence, see whether this message resolves it.
+  await resolveActiveSequence(admin, { leadId, inboundText })
 
-  await admin.from('lead_reminders').insert({
-    user_id: userId,
-    lead_id: leadId,
-    thread_id: threadId,
-    scheduled_at: extracted.scheduled_at,
-    topic: extracted.topic,
-    source_message_id: inboundMsgId,
-    auto_send: false,
-    status: 'pending',
-  })
+  // 3. If a fresh reminder was extracted (in the pre-reply step), seed a new
+  //    sequence (cancels prior active automatically).
+  if (extracted) {
+    const seedResult = await seedReminderSequence(admin, {
+      userId,
+      leadId,
+      threadId,
+      anchor: new Date(extracted.scheduled_at),
+      topic: extracted.topic,
+      leadName,
+      personalityBlock,
+      sourceMessageId: inboundMsgId,
+    })
+    if (!seedResult.ok) {
+      console.warn('[messenger.worker] sequence seed failed', seedResult.reason)
+    }
+  }
 }
