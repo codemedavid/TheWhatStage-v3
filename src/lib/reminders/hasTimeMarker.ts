@@ -21,14 +21,14 @@ const TIME_WORD_RE = new RegExp(
     // "sa" only counts when followed by a recognized time word (weekday/time-of-day), not a bare digit
     '\\bsa\\s+(umaga|hapon|gabi|tanghali|lunes|martes|miyerkules|miyerkoles|huwebes|biyernes|sabado|linggo|monday|tuesday|wednesday|thursday|friday|saturday|sunday|week|weekend|month)\\b',
     // Time-of-day only counts when paired with a relative qualifier
-    '\\b(mamayang|kaninang|kanina\\s+lang|bukas|sa|next|this)\\s+(umaga|hapon|gabi|tanghali|madaling\\s+araw)\\b',
+    '\\b(mamayang|kaninang|kanina\\s+lang|ngayong|bukas|sa|next|this)\\s+(umaga|hapon|gabi|tanghali|madaling\\s+araw)\\b',
     // Numeric clock times: "2pm", "3:30", "14:30"
     '\\b\\d{1,2}\\s*(am|pm)\\b',
     '\\b\\d{1,2}:\\d{2}\\b',
     // English/Spanish-loaned clock markers require AM/PM or colon-minutes after the number
     '\\b(at|by)\\s+\\d{1,2}(\\s*(am|pm)|:\\d{2})\\b',
     // "alas <digit>" is unambiguous Tagalog clock time (alas tres, alas singko)
-    '\\balas\\s+\\d{1,2}\\b',
+    '\\balas\\s+(\\d{1,2}|una|dos|tres|kuwatro|kwatro|singko|sais|seis|siyete|siete|otso|ocho|nuwebe|nuebe|nueve|diyes|dies|onse|once|dose|doce)\\b',
     // "follow up", "ping me back", "message me later", "chat me back"
     '\\b(follow\\s*up|ping\\s+me|chat\\s+me|message\\s+me|hit\\s+me\\s+up|reach\\s+out|kausapin|tawagan|balikan|balik\\s+mo)\\b',
   ].join('|'),

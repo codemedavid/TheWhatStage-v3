@@ -18,6 +18,12 @@ describe('hasTimeMarker', () => {
     'sa Sabado ng umaga',
     "let's talk tonight",
     'try me again sa Linggo',
+    'alas otso',
+    'alas tres ng hapon',
+    'alas singko',
+    'ngayong gabi',
+    'ngayong umaga',
+    'ngayong hapon',
   ]
 
   const negatives = [
