@@ -46,7 +46,8 @@ describe('buildPrompt', () => {
 
   it('uses legacy freeform persona override', () => {
     const r = buildPrompt({ userQuery: 'q', buckets: buckets(), persona: 'CUSTOM PERSONA' });
-    expect(r.system.startsWith('CUSTOM PERSONA')).toBe(true);
+    expect(r.system).toContain('CUSTOM PERSONA');
+    expect(r.system).toContain('# Knowledge base context');
   });
 
   it('renders structured config sections', () => {
@@ -74,6 +75,19 @@ describe('buildPrompt', () => {
     const r = buildPrompt({ userQuery: 'q', buckets: buckets() });
     expect(r.system).toContain('# Identity');
     expect(r.system).toContain('# Grounding');
+  });
+
+  describe('current time injection', () => {
+    it('includes a "Current time" line at the top of the system prompt', () => {
+      const { system } = buildPrompt({
+        userQuery: 'hello',
+        buckets: { useful: [], ambiguous: [], reject: [] },
+        config: {},
+        maxContext: 5,
+      });
+      expect(system.startsWith('Current time:')).toBe(true);
+      expect(system).toContain('Asia/Manila');
+    });
   });
 
   describe('prompt layout', () => {

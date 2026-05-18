@@ -1,3 +1,4 @@
+import { manilaNowBlock } from '@/lib/time/manilaNow';
 import { ragConfig } from './config';
 import type { GradedBuckets } from './grader';
 import type { RetrievedChunk } from './retriever';
@@ -166,6 +167,8 @@ function assembleSystemPrompt(p: ChatbotPersona, contextBlock: string, conversat
     // then summary, then KB context. Pinned via RAG_PROMPT_LAYOUT=legacy
     // as a one-release safety toggle.
     return [
+      manilaNowBlock(),
+      '',
       ...goalSection,
       ...instructionsSection,
       ...stable,
@@ -177,6 +180,8 @@ function assembleSystemPrompt(p: ChatbotPersona, contextBlock: string, conversat
   // cache_friendly: stable prefix first so providers can cache it, then
   // every volatile per-turn section.
   return [
+    manilaNowBlock(),
+    '',
     ...stable,
     ...goalSection,
     ...instructionsSection,
@@ -196,7 +201,7 @@ export function buildPrompt(args: BuildPromptArgs): BuiltPrompt {
 
   // Legacy escape hatch: full freeform persona block.
   if (args.persona) {
-    const system = `${args.persona}\n\n# Knowledge base context\n${contextBlock}`;
+    const system = `${manilaNowBlock()}\n\n${args.persona}\n\n# Knowledge base context\n${contextBlock}`;
     return { system, user: args.userQuery, contextChunkIds: ranked.map((c) => c.id), contextChunks };
   }
 
