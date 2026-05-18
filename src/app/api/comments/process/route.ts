@@ -124,9 +124,9 @@ async function runJob(admin: AdminClient, job: CommentJob): Promise<void> {
   try {
     const { data: page, error: pageErr } = await admin
       .from('facebook_pages')
-      .select('id, name, page_access_token')
+      .select('id, name, fb_page_id, page_access_token')
       .eq('id', job.page_id)
-      .single<{ id: string; name: string; page_access_token: string }>()
+      .single<{ id: string; name: string; fb_page_id: string; page_access_token: string }>()
     if (pageErr || !page) {
       throw new Error(`page ${job.page_id} missing`)
     }
@@ -136,6 +136,13 @@ async function runJob(admin: AdminClient, job: CommentJob): Promise<void> {
       pageAccessToken: pageToken,
       commentId: job.fb_comment_id,
     })
+    // Belt-and-braces self-filter — the webhook already drops bot-authored
+    // events, but a future code path that enqueues a job manually shouldn't
+    // be able to trigger a self-reply loop either.
+    if (comment.commenterId && comment.commenterId === page.fb_page_id) {
+      await markDone(admin, job.id, 'skipped', 'own comment')
+      return
+    }
     if (!comment.message.trim()) {
       await markDone(admin, job.id, 'skipped', 'empty comment')
       return
@@ -227,17 +234,19 @@ async function runJob(admin: AdminClient, job: CommentJob): Promise<void> {
     }
 
     if (shouldPersistComment({ leadId, attemptedPrivateReply, failedAction: graphStatus === 'failed' })) {
-      if (leadId) {
-        await persistLeadComment(admin, {
-          job,
-          leadId,
-          comment,
-          decision,
-          action,
-          graphStatus,
-          graphError,
-        })
-      } else if (attemptedPrivateReply) {
+      await persistLeadComment(admin, {
+        job,
+        leadId,
+        comment,
+        decision,
+        action,
+        graphStatus,
+        graphError,
+      })
+      if (attemptedPrivateReply) {
+        // Bridge keeps the private_reply_message_id and serves as the
+        // (page_id, commenter_id) pointer that resolveCommentBridgesForThread
+        // uses to back-fill lead_id on the comment when the commenter DMs.
         await persistBridge(admin, {
           job,
           comment,
@@ -303,7 +312,7 @@ async function persistLeadComment(
   admin: AdminClient,
   args: {
     job: CommentJob
-    leadId: string
+    leadId: string | null
     comment: FacebookComment
     decision: CommentDecision
     action: GraphAction
@@ -330,7 +339,7 @@ async function persistLeadComment(
       graph_status: args.graphStatus,
       graph_error: args.graphError,
     },
-    { onConflict: 'fb_comment_id' },
+    { onConflict: 'fb_comment_id', ignoreDuplicates: false },
   )
 }
 

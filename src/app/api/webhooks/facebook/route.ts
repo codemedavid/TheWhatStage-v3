@@ -335,6 +335,10 @@ async function handleFeedChange(
   if (!value || value.item !== 'comment') return null
   if (!value.comment_id) return null
   if (value.verb && !['add', 'edited'].includes(value.verb)) return null
+  // The bot's own public replies come back as feed events with from.id == page.
+  // Without this guard the worker reprocesses them and the page ends up
+  // replying to itself in a loop.
+  if (value.from?.id && value.from.id === fbPageId) return null
 
   const { data: page, error: pageErr } = await admin
     .from('facebook_pages')

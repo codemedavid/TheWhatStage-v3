@@ -1735,13 +1735,23 @@ export async function resolveCommentBridgesForThread(
   args: { pageId: string; psid: string; leadId: string | null },
 ): Promise<void> {
   if (!args.leadId) return
+  const resolvedAt = new Date().toISOString()
   await admin
     .from('facebook_comment_bridges')
-    .update({ lead_id: args.leadId, resolved_at: new Date().toISOString() })
+    .update({ lead_id: args.leadId, resolved_at: resolvedAt })
     .eq('page_id', args.pageId)
     .eq('commenter_id', args.psid)
     .is('resolved_at', null)
-    .gt('expires_at', new Date().toISOString())
+    .gt('expires_at', resolvedAt)
+  // Back-fill the canonical comment rows that were stored before this
+  // commenter had a lead. The drawer queries facebook_lead_comments by
+  // lead_id, so without this stamp those comments stay invisible.
+  await admin
+    .from('facebook_lead_comments')
+    .update({ lead_id: args.leadId })
+    .eq('page_id', args.pageId)
+    .eq('commenter_id', args.psid)
+    .is('lead_id', null)
 }
 
 async function markDone(

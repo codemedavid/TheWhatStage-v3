@@ -214,6 +214,46 @@ describe('facebook webhook comment events', () => {
     })
   })
 
+  it("ignores the page's own comment replies to break the self-reply loop", async () => {
+    // Wire a stricter mock: if the webhook tries to enqueue this comment we
+    // want the test to fail loudly, not silently pass through.
+    mocks.from.mockImplementation((table: string) => {
+      if (table === 'facebook_comment_jobs') {
+        throw new Error('should not enqueue own-page comment')
+      }
+      throw new Error(`unexpected table ${table}`)
+    })
+
+    const res = await postWebhook({
+      object: 'page',
+      entry: [
+        {
+          id: 'fb-page-1',
+          changes: [
+            {
+              field: 'feed',
+              value: {
+                item: 'comment',
+                verb: 'add',
+                comment_id: 'self-comment-1',
+                parent_id: 'parent-1',
+                post_id: 'post-1',
+                from: { id: 'fb-page-1', name: 'WhatStage' },
+                message: 'Bot reply to its own comment',
+              },
+            },
+          ],
+        },
+      ],
+    })
+
+    expect(res.status).toBe(200)
+    await expect(res.json()).resolves.toEqual({ received: true })
+    expect(mocks.from).not.toHaveBeenCalledWith('facebook_comment_jobs')
+    expect(mocks.after).not.toHaveBeenCalled()
+    expect(global.fetch).not.toHaveBeenCalled()
+  })
+
   it('ignores non-comment feed events', async () => {
     const res = await postWebhook({
       object: 'page',

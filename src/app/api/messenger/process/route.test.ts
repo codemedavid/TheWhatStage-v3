@@ -623,18 +623,33 @@ function makeWorkerAdminMockWithAllSold() {
 }
 
 describe('resolveCommentBridgesForThread', () => {
-  it('links unresolved same-page bridge rows to an existing lead', async () => {
-    const updates: unknown[] = []
+  it('links unresolved same-page bridge rows and back-fills lead-comment lead_id', async () => {
+    const bridgeUpdates: unknown[] = []
+    const commentUpdates: unknown[] = []
     const admin = {
       from: vi.fn((table: string) => {
         if (table === 'facebook_comment_bridges') {
           return {
             update: (payload: unknown) => {
-              updates.push(payload)
+              bridgeUpdates.push(payload)
               return {
                 eq: () => ({
                   eq: () => ({
                     is: () => ({ gt: async () => ({ error: null }) }),
+                  }),
+                }),
+              }
+            },
+          }
+        }
+        if (table === 'facebook_lead_comments') {
+          return {
+            update: (payload: unknown) => {
+              commentUpdates.push(payload)
+              return {
+                eq: () => ({
+                  eq: () => ({
+                    is: async () => ({ error: null }),
                   }),
                 }),
               }
@@ -651,7 +666,8 @@ describe('resolveCommentBridgesForThread', () => {
       leadId: 'lead-1',
     })
 
-    expect(updates).toEqual([{ lead_id: 'lead-1', resolved_at: expect.any(String) }])
+    expect(bridgeUpdates).toEqual([{ lead_id: 'lead-1', resolved_at: expect.any(String) }])
+    expect(commentUpdates).toEqual([{ lead_id: 'lead-1' }])
   })
 
   it('does nothing when leadId is null', async () => {
