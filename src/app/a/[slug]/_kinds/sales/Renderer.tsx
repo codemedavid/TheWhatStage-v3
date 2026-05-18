@@ -373,8 +373,19 @@ function Sidebar({
         <h2 className="text-[18px] font-bold text-[#111827]">{title}</h2>
         <p className="mt-0.5 truncate text-[12px] text-[#6B7280]">/{slug}</p>
 
+        <a
+          href="#convert"
+          className="mt-4 flex w-full items-center justify-center rounded-md px-5 py-3 text-[14px] font-semibold uppercase tracking-wide shadow-sm"
+          style={{
+            backgroundColor: accent,
+            color: ctaFg,
+          }}
+        >
+          {ctaLabel}
+        </a>
+
         {description && (
-          <p className="mt-3 whitespace-pre-wrap text-[13px] leading-relaxed text-[#374151]">
+          <p className="mt-4 whitespace-pre-wrap text-[13px] leading-relaxed text-[#374151]">
             {description}
           </p>
         )}
@@ -427,17 +438,6 @@ function Sidebar({
             )}
           </div>
         )}
-
-        <a
-          href="#convert"
-          className="mt-4 flex w-full items-center justify-center rounded-md px-5 py-3 text-[14px] font-semibold uppercase tracking-wide shadow-sm"
-          style={{
-            backgroundColor: accent,
-            color: ctaFg,
-          }}
-        >
-          {ctaLabel}
-        </a>
 
         {tagline && (
           <p className="mt-3 text-center text-[11px] text-[#9CA3AF]">
