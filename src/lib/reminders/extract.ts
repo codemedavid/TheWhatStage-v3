@@ -1,40 +1,24 @@
 import { HfRouterLlm } from '@/lib/rag/llm'
 import { ragConfig } from '@/lib/rag/config'
 import { z } from 'zod'
+import { manilaNow } from '@/lib/time/manilaNow'
+import { hasTimeMarker } from './hasTimeMarker'
 
 export const REMINDER_TZ = 'Asia/Manila'
 
 export interface ExtractedReminder {
-  scheduled_at: string // UTC ISO string
+  scheduled_at: string
   topic: string
   confidence: 'low' | 'medium' | 'high'
 }
 
 const Schema = z.object({
   has_request: z.boolean(),
-  when_local: z.string().nullable(), // "YYYY-MM-DD HH:mm" in Asia/Manila
+  when_local: z.string().nullable(),
   topic: z.string().nullable(),
   confidence: z.enum(['low', 'medium', 'high']).nullable(),
 })
 
-function nowInManila(): { iso: string; weekday: string } {
-  const fmt = new Intl.DateTimeFormat('en-CA', {
-    timeZone: REMINDER_TZ,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-    weekday: 'long',
-  })
-  const parts = Object.fromEntries(fmt.formatToParts(new Date()).map((p) => [p.type, p.value]))
-  const iso = `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}`
-  return { iso, weekday: parts.weekday ?? '' }
-}
-
-// Convert "YYYY-MM-DD HH:mm" interpreted in Asia/Manila to a UTC ISO string.
-// Manila has no DST and is fixed UTC+08:00, so we append the offset.
 function manilaLocalToUtcIso(localStr: string): string | null {
   const m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})$/.exec(localStr.trim())
   if (!m) return null
@@ -76,9 +60,10 @@ export async function extractReminder(
 ): Promise<ExtractedReminder | null> {
   const text = inboundText.trim()
   if (text.length < 4) return null
+  if (!hasTimeMarker(text)) return null
 
   const client = llm ?? new HfRouterLlm({ model: ragConfig.classifierModel })
-  const now = nowInManila()
+  const now = manilaNow()
 
   let raw: string
   try {
@@ -108,7 +93,6 @@ export async function extractReminder(
 
   const utc = manilaLocalToUtcIso(data.when_local)
   if (!utc) return null
-
   if (new Date(utc).getTime() <= Date.now() + 60_000) return null
 
   return {
