@@ -19,14 +19,21 @@ const Schema = z.object({
   confidence: z.enum(['low', 'medium', 'high']).nullable(),
 })
 
+// Tolerant of the variations small LLMs emit: optional seconds, optional
+// zero-padding on date/time components, `T` or space separator.
 function manilaLocalToUtcIso(localStr: string): string | null {
-  const m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})$/.exec(localStr.trim())
+  const m = localStr
+    .trim()
+    .match(/^(\d{4})-(\d{1,2})-(\d{1,2})[ T](\d{1,2}):(\d{1,2})(?::\d{1,2})?$/)
   if (!m) return null
-  const iso = `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:00+08:00`
+  const pad = (v: string): string => v.padStart(2, '0')
+  const iso = `${m[1]}-${pad(m[2])}-${pad(m[3])}T${pad(m[4])}:${pad(m[5])}:00+08:00`
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return null
   return d.toISOString()
 }
+
+const DAY_MS = 86_400_000
 
 function buildSystem(now: { iso: string; weekday: string }): string {
   return `You detect when a customer has asked to be contacted again at a specific later time.
@@ -83,20 +90,51 @@ export async function extractReminder(
   try {
     parsed = JSON.parse(raw)
   } catch {
+    console.warn('[reminders.extract] LLM returned non-JSON', { raw: raw.slice(0, 200) })
     return null
   }
 
   const result = Schema.safeParse(parsed)
-  if (!result.success) return null
+  if (!result.success) {
+    console.warn('[reminders.extract] schema mismatch', { parsed })
+    return null
+  }
   const data = result.data
-  if (!data.has_request || !data.when_local || !data.topic) return null
+  if (!data.has_request) return null
+  if (!data.when_local || !data.topic) {
+    console.warn('[reminders.extract] has_request=true but missing fields', {
+      when_local: data.when_local,
+      topic: data.topic,
+    })
+    return null
+  }
 
   const utc = manilaLocalToUtcIso(data.when_local)
-  if (!utc) return null
-  if (new Date(utc).getTime() <= Date.now() + 60_000) return null
+  if (!utc) {
+    console.warn('[reminders.extract] unparseable when_local', { when_local: data.when_local })
+    return null
+  }
+
+  // Auto-bump bare clock times the LLM mistakenly anchored to today instead
+  // of tomorrow. The prompt asks for next-day on a past time, but the 8B
+  // classifier doesn't always follow. Cap the bump at one day so a clearly
+  // wrong date (week-old) still surfaces as an error rather than silent drift.
+  let scheduledMs = new Date(utc).getTime()
+  const nowMs = Date.now()
+  const pastMs = nowMs - scheduledMs
+  if (pastMs > 60_000 && pastMs <= DAY_MS) {
+    scheduledMs += DAY_MS
+  }
+  if (scheduledMs <= nowMs + 60_000) {
+    console.warn('[reminders.extract] when_local in past', {
+      when_local: data.when_local,
+      past_ms: pastMs,
+    })
+    return null
+  }
 
   return {
-    scheduled_at: utc,
+    scheduled_at: new Date(scheduledMs).toISOString(),
     topic: data.topic.trim().slice(0, 500),
     confidence: data.confidence ?? 'medium',
   }
