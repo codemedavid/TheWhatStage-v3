@@ -5,6 +5,7 @@ import { isInsideWindow } from '@/lib/agent/classifyPolicy'
 import { HfRouterLlm } from '@/lib/rag/llm'
 import { ragConfig } from '@/lib/rag/config'
 import { manilaNowBlock } from '@/lib/time/manilaNow'
+import { generateSequenceMessage } from './sequence-generate'
 
 interface ReminderRow {
   id: string
@@ -14,6 +15,17 @@ interface ReminderRow {
   topic: string
   status: string
   auto_send: boolean
+  sequence_id: string | null
+  sequence_position: number | null
+  pre_generated_text: string | null
+  fallback_text: string | null
+}
+
+interface SequenceRow {
+  id: string
+  status: 'active' | 'resolved' | 'cancelled' | 'exhausted'
+  topic: string
+  anchor_at: string
 }
 
 interface ThreadRow {
@@ -73,7 +85,9 @@ export async function fireReminder(
 ): Promise<FireResult> {
   const { data: reminder } = await admin
     .from('lead_reminders')
-    .select('id, user_id, lead_id, thread_id, topic, status, auto_send')
+    .select(
+      'id, user_id, lead_id, thread_id, topic, status, auto_send, sequence_id, sequence_position, pre_generated_text, fallback_text',
+    )
     .eq('id', reminderId)
     .maybeSingle<ReminderRow>()
 
@@ -84,6 +98,27 @@ export async function fireReminder(
   if (!reminder.thread_id) {
     await markFailed(admin, reminder.id, 'no thread')
     return { ok: false, reason: 'no thread' }
+  }
+
+  // Parent sequence gate.
+  let sequence: SequenceRow | null = null
+  if (reminder.sequence_id) {
+    const { data: seq } = await admin
+      .from('lead_reminder_sequences')
+      .select('id, status, topic, anchor_at')
+      .eq('id', reminder.sequence_id)
+      .maybeSingle<SequenceRow>()
+    sequence = seq ?? null
+    if (!sequence || sequence.status !== 'active') {
+      await admin
+        .from('lead_reminders')
+        .update({
+          status: 'cancelled',
+          cancelled_at: new Date().toISOString(),
+        })
+        .eq('id', reminder.id)
+      return { ok: false, reason: `sequence_${sequence?.status ?? 'missing'}` }
+    }
   }
 
   const { data: thread } = await admin
@@ -112,7 +147,49 @@ export async function fireReminder(
     .eq('id', reminder.lead_id)
     .maybeSingle<{ name: string | null }>()
 
-  const text = await generateFollowUpText(reminder.topic, lead?.name ?? null)
+  let text: string
+  if (sequence && reminder.sequence_position !== null) {
+    const { data: chatbot } = await admin
+      .from('chatbot_configs')
+      .select('persona, instructions')
+      .eq('user_id', reminder.user_id)
+      .maybeSingle<{ persona: string | null; instructions: string | null }>()
+    const personalityBlock = [chatbot?.persona, chatbot?.instructions]
+      .filter((s) => typeof s === 'string' && s.trim())
+      .join('\n\n')
+
+    const { data: msgs } = await admin
+      .from('messenger_messages')
+      .select('direction, body, created_at')
+      .eq('thread_id', reminder.thread_id)
+      .order('created_at', { ascending: false })
+      .limit(20)
+    const recentMessages = ((msgs ?? []) as Array<{ direction: string; body: string }>)
+      .reverse()
+      .filter((m) => m.body?.trim())
+      .map((m) => ({
+        role: m.direction === 'outbound' ? ('assistant' as const) : ('user' as const),
+        content: m.body,
+      }))
+
+    const fresh = await generateSequenceMessage({
+      now: new Date(),
+      anchor: new Date(sequence.anchor_at),
+      position: reminder.sequence_position,
+      topic: sequence.topic,
+      leadName: lead?.name ?? null,
+      personalityBlock,
+      recentMessages,
+    })
+    text = fresh ?? reminder.pre_generated_text ?? reminder.fallback_text ?? ''
+  } else {
+    text = await generateFollowUpText(reminder.topic, lead?.name ?? null)
+  }
+
+  if (!text) {
+    await markFailed(admin, reminder.id, 'empty body')
+    return { ok: false, reason: 'empty body' }
+  }
 
   const insideWindow = isInsideWindow(thread.last_inbound_at)
   const sendKind = insideWindow ? 'bot' : 'workflow_human_agent'
@@ -150,6 +227,13 @@ export async function fireReminder(
       fired_at: new Date().toISOString(),
     })
     .eq('id', reminder.id)
+
+  if (sequence && reminder.sequence_position === 6) {
+    await admin
+      .from('lead_reminder_sequences')
+      .update({ status: 'exhausted' })
+      .eq('id', sequence.id)
+  }
 
   await admin
     .from('messenger_messages')
