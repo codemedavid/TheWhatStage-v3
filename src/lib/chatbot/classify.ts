@@ -5,7 +5,6 @@ import {
   HfRouterLlm,
   buildPrompt,
   createEmbedder,
-  createReranker,
   retrieve,
 } from '@/lib/rag'
 import { ragConfig } from '@/lib/rag/config'
@@ -95,7 +94,7 @@ export async function answerWithClassification(
     activeRealestatePageId?: string | null
   } = {},
 ): Promise<AnswerWithClassificationResult> {
-  const baseConfig = await getChatbotConfig(supabase, userId)
+  const baseConfig = options.preloadedConfig ?? (await getChatbotConfig(supabase, userId))
   const cp = options.campaignPersona
   const config = cp
     ? {
@@ -109,14 +108,12 @@ export async function answerWithClassification(
     : baseConfig
 
   const embedder = createEmbedder()
-  const reranker = createReranker()
   const llm = new HfRouterLlm()
 
   const ctx = await retrieve(
     {
       client: supabase,
       embedder,
-      reranker,
       rewriteQuery: (q) => llm.rewriteQuery(q),
       rpcName: options.rpcName,
     },

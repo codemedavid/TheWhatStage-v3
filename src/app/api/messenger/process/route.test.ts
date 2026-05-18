@@ -13,6 +13,8 @@ vi.mock('@/lib/chatbot/deep-reclassify', () => ({
 const mocks = vi.hoisted(() => ({
   admin: null as unknown,
   answer: vi.fn(async () => ({ text: 'Fallback reply', sourceTitles: [] })),
+  shouldRollSummary: vi.fn(() => false),
+  summarizeConversation: vi.fn(async () => ''),
   answerWithClassification: vi.fn(async () => ({
     text: 'Current funnel reply',
     sourceTitles: [],
@@ -54,6 +56,8 @@ vi.mock('@/lib/supabase/admin', () => ({
 
 vi.mock('@/lib/chatbot/answer', () => ({
   answer: mocks.answer,
+  shouldRollSummary: mocks.shouldRollSummary,
+  summarizeConversation: mocks.summarizeConversation,
 }))
 
 vi.mock('@/lib/chatbot/classify', () => ({

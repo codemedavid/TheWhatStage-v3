@@ -39,6 +39,7 @@ import {
   type ActionPageBrief,
   type StageBrief,
 } from '@/lib/chatbot/classify'
+import { getChatbotConfig, type ChatbotConfig } from '@/lib/chatbot/config'
 import { loadLeadContext } from '@/lib/chatbot/leadContext'
 import { interruptWorkflowRun } from '@/lib/workflow/trigger'
 import { runDeepReclassify } from '@/lib/chatbot/deep-reclassify'
@@ -91,7 +92,16 @@ function rateLimitBackoffMs(attempt: number): number {
   const jitter = base * (Math.random() * 0.5 - 0.25)
   return Math.floor(base + jitter)
 }
-const RUNNING_STALE_MS = 5 * 60 * 1000
+// How long a job may sit in `running` without a heartbeat before another
+// worker may reclaim it. Lowered from 5 min → 90 s so the worst-case
+// wait when a worker crashes mid-job is ~90 s instead of ~5 min.
+// `runJob` calls `startHeartbeat` to bump `started_at` every 30 s so a
+// healthy long-running job (slow LLM, rate-limited upstream) is never
+// considered stale.
+const RUNNING_STALE_MS = 90 * 1000
+// How often the heartbeat ticks. Must be < RUNNING_STALE_MS / 2 so we
+// tolerate at least one missed heartbeat before stale-reclaim fires.
+const HEARTBEAT_INTERVAL_MS = 30 * 1000
 const CLASSIFY_EVERY = 4
 // Stop claiming new batches once this much wall-clock has elapsed in the
 // invocation. Leaves headroom under maxDuration=300 for the longest
@@ -268,6 +278,7 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
     return
   }
 
+  const stopHeartbeat = startHeartbeat(admin, job.id)
   try {
     // Read the inbound message + its parent thread in a single FK-joined query.
     // This avoids a first-touch race where the worker beats the webhook's
@@ -300,26 +311,32 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
       await refreshNames(admin, thread, pageToken)
     }
 
-    // Link any pending Facebook comment private-reply bridges (same page +
-    // commenter PSID) to this lead now that we know the lead id.
-    await resolveCommentBridgesForThread(admin, {
-      pageId: thread.page_id,
-      psid: thread.psid,
-      leadId: thread.lead_id,
-    })
-
     const message = inboundBody.trim()
     if (!message) {
       await markDone(admin, job.id, 'skipped', 'empty inbound body')
       return
     }
 
+    // In-memory mutation so sendOutbound's 24h check sees a fresh value; the
+    // DB write is deferred since the bot reply doesn't depend on its result.
     const inboundAt = new Date().toISOString()
-    await admin
+    thread.last_inbound_at = inboundAt
+    void admin
       .from('messenger_threads')
       .update({ last_inbound_at: inboundAt })
       .eq('id', thread.id)
-    thread.last_inbound_at = inboundAt
+      .then(
+        () => {},
+        (e) => console.warn('[messenger.worker] last_inbound_at update failed', e),
+      )
+
+    // Bridge any pending Facebook comment private-reply rows to this lead.
+    // Defer — the bot reply doesn't read this back.
+    void resolveCommentBridgesForThread(admin, {
+      pageId: thread.page_id,
+      psid: thread.psid,
+      leadId: thread.lead_id,
+    }).catch((e) => console.warn('[messenger.worker] resolveCommentBridges failed', e))
 
     // Auto follow-up: cancel any pending schedule and (if gates pass) seed a
     // fresh one. Lead inbound is the cancel trigger; the seed re-checks both
@@ -335,25 +352,38 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
       }).catch((e) => console.warn('[messenger.worker] followup seed failed', e))
     }
 
-    // Auto-detect phone numbers and emails shared by the lead in their message.
+    // Auto-detect phone numbers and emails shared by the lead — defer; the
+    // bot's reply doesn't depend on persisting these.
     if (thread.lead_id) {
       const detectedPhones = extractPhones(message)
       const detectedEmails = extractEmails(message)
       if (detectedPhones.length || detectedEmails.length) {
-        await appendLeadContacts(admin, thread.lead_id, {
+        const leadIdForContacts = thread.lead_id
+        void appendLeadContacts(admin, leadIdForContacts, {
           phones: detectedPhones,
           emails: detectedEmails,
-        })
+        }).catch((e) => console.warn('[messenger.worker] appendLeadContacts failed', e))
       }
     }
 
-    const history = await loadHistory(admin, job.thread_id, job.inbound_msg_id)
-    const classifyEnabled = await isAutoClassifyEnabled(admin, thread.user_id)
-    const { stages, currentStageId } = classifyEnabled
-      ? await loadStageContext(admin, thread.user_id, thread.lead_id)
-      : { stages: [] as StageBrief[], currentStageId: null as string | null }
-    const campaign = thread.lead_id ? await loadLeadCampaign(admin, thread.lead_id) : null
+    // Parallel context preload: chatbot_configs, pipeline_stages, lead row,
+    // history, lead-context block, sendable action_pages — then campaign +
+    // funnels in a second parallel round if the lead is on a campaign.
+    // Replaces ~7 serial round-trips (~2s) with ~2 parallel rounds (~600ms).
+    const ctx = await loadReplyContext(admin, {
+      thread,
+      inboundMsgId: job.inbound_msg_id,
+    })
+    const config = ctx.config
+    const classifyEnabled = config.autoClassifyEnabled
+    const stages = classifyEnabled ? ctx.stages : ([] as StageBrief[])
+    const currentStageId = classifyEnabled ? ctx.currentStageId : null
+    const campaign = ctx.campaign
     const activeFunnel = campaign?.activeFunnel ?? null
+    const sendablePages = ctx.sendablePages
+    const leadContextBlock = ctx.leadContextBlock
+    const history = ctx.history
+
     const campaignPersona = campaign
       ? (() => {
           const funnelInstruction = activeFunnel?.instruction?.trim() || undefined
@@ -378,42 +408,12 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
           }
         })()
       : undefined
-    const sendablePages = thread.auto_reply_enabled
-      ? await loadSendableActionPages(
-          admin,
-          thread.user_id,
-          activeFunnel?.action_page_id ?? campaign?.goal_action_page_id ?? null,
-        )
-      : []
 
-    // Pre-rendered closed-world snapshot of the lead's bookings, orders,
-    // qualification, and form submissions. Empty string when nothing on file
-    // (or no lead yet) — appended to the LLM system prompt so the bot can
-    // answer "when is my booking?" without inventing details.
-    const leadContextBlock =
-      thread.auto_reply_enabled && thread.lead_id
-        ? await loadLeadContext(admin, thread.lead_id)
-            .then((s) => s.block)
-            .catch((e) => {
-              console.warn('[messenger.worker] loadLeadContext failed', {
-                err: e instanceof Error ? e.message : String(e),
-              })
-              return ''
-            })
-        : ''
-
-    // Resolve !actionpage:slug mentions embedded in the chatbot instructions.
-    // Referenced pages are added to sendablePages so the bot can send them,
-    // and !actionpage:slug tokens are replaced with [Action Page: "Title"] in
-    // the resolved instructions string passed to the LLM.
+    // Resolve !actionpage:slug mentions in the chatbot's instructions.
+    // Uses the already-loaded config.instructions — no extra DB fetch.
     let resolvedInstructions: string | undefined
     if (thread.auto_reply_enabled) {
-      const { data: cbRow } = await admin
-        .from('chatbot_configs')
-        .select('instructions')
-        .eq('user_id', thread.user_id)
-        .maybeSingle()
-      const rawInstr = (cbRow?.instructions as string | null) ?? ''
+      const rawInstr = config.instructions ?? ''
       const mentionedSlugs = parseActionPageMentions(rawInstr)
       if (mentionedSlugs.length > 0) {
         const existingSlugs = new Set(sendablePages.map((p) => p.slug))
@@ -536,6 +536,7 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
               activeRealestatePageId,
               leadContextBlock,
               leadName: thread.full_name ?? undefined,
+              preloadedConfig: config,
             },
           )
           reply = r.text.trim()
@@ -555,6 +556,7 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
           conversationSummary,
           leadContextBlock,
           leadName: thread.full_name ?? undefined,
+          preloadedConfig: config,
         })
         reply = r.text.trim()
         selectedMedia = r.media
@@ -1155,7 +1157,171 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
         started_at: null,
       })
       .eq('id', job.id)
+  } finally {
+    stopHeartbeat()
   }
+}
+
+/**
+ * Start a heartbeat that bumps `messenger_jobs.started_at` while a job is
+ * processing. With this in place, the stale-reclaim in `claim_messenger_jobs`
+ * only fires when a worker has actually stopped emitting heartbeats — i.e.
+ * crashed or hit `maxDuration` — so a healthy slow job (long LLM call,
+ * upstream backoff) is never double-claimed.
+ *
+ * Returns a stop function the caller must invoke in `finally` so a normal
+ * completion or thrown error always tears the interval down.
+ */
+function startHeartbeat(admin: AdminClient, jobId: string): () => void {
+  const interval = setInterval(() => {
+    void admin
+      .from('messenger_jobs')
+      .update({ started_at: new Date().toISOString() })
+      .eq('id', jobId)
+      .then(
+        () => {},
+        (e) => console.warn('[messenger.worker] heartbeat update failed', jobId, e),
+      )
+  }, HEARTBEAT_INTERVAL_MS)
+  // unref so a stray interval can never block the Node event loop from exiting
+  if (typeof interval === 'object' && interval && 'unref' in interval) {
+    ;(interval as { unref: () => void }).unref()
+  }
+  return () => clearInterval(interval)
+}
+
+interface ReplyContext {
+  config: ChatbotConfig
+  history: AnswerHistory
+  stages: StageBrief[]
+  currentStageId: string | null
+  campaign: CampaignBrief | null
+  sendablePages: SendableActionPage[]
+  leadContextBlock: string
+}
+
+/**
+ * Parallel preload for everything the reply pipeline needs after the inbound
+ * thread + page lookup. Two rounds:
+ *   1. config / stages / lead-core / history / lead-context / all sendable
+ *      pages — every fetch keyed on the lead or the user, no cross deps.
+ *   2. campaign + funnels (only when the lead has a campaign_id).
+ * Then filters sendable pages down to the active funnel's / campaign's target
+ * page in JS, preserving the previous `loadSendableActionPages(target)` shape
+ * without paying for an extra round-trip.
+ */
+async function loadReplyContext(
+  admin: AdminClient,
+  args: { thread: ThreadRow; inboundMsgId: string | null },
+): Promise<ReplyContext> {
+  const { thread, inboundMsgId } = args
+  const userId = thread.user_id
+  const leadId = thread.lead_id
+
+  const [
+    config,
+    stages,
+    leadRow,
+    history,
+    leadContextBlock,
+    allSendablePages,
+  ] = await Promise.all([
+    getChatbotConfig(admin, userId),
+    fetchPipelineStages(admin, userId),
+    leadId ? fetchLeadCore(admin, leadId) : Promise.resolve(null),
+    loadHistory(admin, thread.id, inboundMsgId),
+    thread.auto_reply_enabled && leadId
+      ? loadLeadContext(admin, leadId)
+          .then((s) => s.block)
+          .catch((e) => {
+            console.warn('[messenger.worker] loadLeadContext failed', {
+              err: e instanceof Error ? e.message : String(e),
+            })
+            return ''
+          })
+      : Promise.resolve(''),
+    thread.auto_reply_enabled
+      ? loadSendableActionPages(admin, userId, null)
+      : Promise.resolve([] as SendableActionPage[]),
+  ])
+
+  const currentStageId = leadRow?.stage_id ?? null
+  const campaignId = leadRow?.campaign_id ?? null
+  const currentFunnelId = leadRow?.current_funnel_id ?? null
+
+  let campaign: CampaignBrief | null = null
+  if (campaignId) {
+    const [campaignRes, funnelRes] = await Promise.all([
+      admin
+        .from('campaigns')
+        .select('id, personality_mode, persona, do_rules, dont_rules, goal_action_page_id')
+        .eq('id', campaignId)
+        .maybeSingle<Omit<CampaignBrief, 'activeFunnel'>>(),
+      admin
+        .from('funnels')
+        .select('id, position, instruction, rules, action_page_id, next_funnel_id')
+        .eq('campaign_id', campaignId)
+        .order('position', { ascending: true }),
+    ])
+    if (campaignRes.data) {
+      const funnels = (funnelRes.data ?? []) as FunnelBrief[]
+      const activeFunnel =
+        funnels.find((f) => f.id === currentFunnelId) ?? funnels[0] ?? null
+      // Heal stale lead.current_funnel_id without blocking the reply.
+      if (leadId && activeFunnel && activeFunnel.id !== currentFunnelId) {
+        const leadIdForHeal = leadId
+        void admin
+          .from('leads')
+          .update({ current_funnel_id: activeFunnel.id })
+          .eq('id', leadIdForHeal)
+          .then(
+            () => {},
+            (e) => console.warn('[messenger.worker] current_funnel_id heal failed', e),
+          )
+      }
+      campaign = { ...campaignRes.data, activeFunnel }
+    }
+  }
+
+  const targetActionPageId =
+    campaign?.activeFunnel?.action_page_id ?? campaign?.goal_action_page_id ?? null
+  const sendablePages = targetActionPageId
+    ? allSendablePages.filter((p) => p.id === targetActionPageId)
+    : allSendablePages
+
+  return { config, history, stages, currentStageId, campaign, sendablePages, leadContextBlock }
+}
+
+async function fetchPipelineStages(
+  admin: AdminClient,
+  userId: string,
+): Promise<StageBrief[]> {
+  const { data } = await admin
+    .from('pipeline_stages')
+    .select('id, name, description, position, kind, entry_signals, exit_signals')
+    .eq('user_id', userId)
+    .order('position', { ascending: true })
+  return (data ?? []) as StageBrief[]
+}
+
+async function fetchLeadCore(
+  admin: AdminClient,
+  leadId: string,
+): Promise<{
+  stage_id: string | null
+  campaign_id: string | null
+  current_funnel_id: string | null
+} | null> {
+  const { data } = await admin
+    .from('leads')
+    .select('stage_id, campaign_id, current_funnel_id')
+    .eq('id', leadId)
+    .maybeSingle<{
+      stage_id: string | null
+      campaign_id: string | null
+      current_funnel_id: string | null
+    }>()
+  return data ?? null
 }
 
 /**
@@ -1307,45 +1473,6 @@ async function loadHistory(
     }))
 }
 
-async function isAutoClassifyEnabled(
-  admin: AdminClient,
-  userId: string,
-): Promise<boolean> {
-  try {
-    const { data } = await admin
-      .from('chatbot_configs')
-      .select('auto_classify_enabled')
-      .eq('user_id', userId)
-      .maybeSingle<{ auto_classify_enabled: boolean }>()
-    return !!data?.auto_classify_enabled
-  } catch {
-    return false
-  }
-}
-
-async function loadStageContext(
-  admin: AdminClient,
-  userId: string,
-  leadId: string | null,
-): Promise<{ stages: StageBrief[]; currentStageId: string | null }> {
-  const { data: stagesData } = await admin
-    .from('pipeline_stages')
-    .select('id, name, description, position, kind, entry_signals, exit_signals')
-    .eq('user_id', userId)
-    .order('position', { ascending: true })
-  const stages = (stagesData ?? []) as StageBrief[]
-  let currentStageId: string | null = null
-  if (leadId) {
-    const { data: lead } = await admin
-      .from('leads')
-      .select('stage_id')
-      .eq('id', leadId)
-      .maybeSingle<{ stage_id: string | null }>()
-    currentStageId = lead?.stage_id ?? null
-  }
-  return { stages, currentStageId }
-}
-
 async function countInboundMessages(
   admin: AdminClient,
   threadId: string,
@@ -1485,42 +1612,6 @@ async function pickFirstFunnelForCampaign(
     .limit(1)
     .maybeSingle<{ id: string }>()
   return data?.id ?? null
-}
-
-async function loadLeadCampaign(
-  admin: AdminClient,
-  leadId: string,
-): Promise<CampaignBrief | null> {
-  const { data: lead } = await admin
-    .from('leads')
-    .select('campaign_id, current_funnel_id')
-    .eq('id', leadId)
-    .maybeSingle<{ campaign_id: string | null; current_funnel_id: string | null }>()
-  if (!lead?.campaign_id) return null
-  const { data: campaign } = await admin
-    .from('campaigns')
-    .select('id, personality_mode, persona, do_rules, dont_rules, goal_action_page_id')
-    .eq('id', lead.campaign_id)
-    .maybeSingle<Omit<CampaignBrief, 'activeFunnel'>>()
-  if (!campaign) return null
-  const { data: funnelRows } = await admin
-    .from('funnels')
-    .select('id, position, instruction, rules, action_page_id, next_funnel_id')
-    .eq('campaign_id', campaign.id)
-    .order('position', { ascending: true })
-  const funnels = (funnelRows ?? []) as FunnelBrief[]
-  const activeFunnel =
-    funnels.find((f) => f.id === lead.current_funnel_id) ?? funnels[0] ?? null
-  if (activeFunnel && activeFunnel.id !== lead.current_funnel_id) {
-    await admin
-      .from('leads')
-      .update({ current_funnel_id: activeFunnel.id })
-      .eq('id', leadId)
-  }
-  return {
-    ...campaign,
-    activeFunnel,
-  }
 }
 
 /**

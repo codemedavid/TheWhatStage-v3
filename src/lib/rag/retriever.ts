@@ -27,7 +27,9 @@ export interface RetrievalContext {
 export interface RetrieverDeps {
   client: SupabaseLike;
   embedder: Embedder;
-  reranker: Reranker;
+  /** Optional cross-encoder reranker. When omitted, hybrid-search order is
+   *  used directly (synthetic descending scores). */
+  reranker?: Reranker;
   /** Optional one-shot rewriter. If omitted, no rewrite step runs. */
   rewriteQuery?: (q: string) => Promise<string>;
   /**
@@ -83,10 +85,10 @@ async function rankAndGrade(
   candidates: RetrievedChunk[],
   thresholds: { high: number; low: number },
 ): Promise<GradedPass> {
-  // When the candidate pool is at or below the floor, rerank can't change the
-  // outcome — every candidate would be promoted via applyFloor() anyway. Skip
-  // the (often 500ms–4s) HF rerank call and use hybrid-search order directly.
-  if (candidates.length <= ragConfig.rerankFloorK) {
+  // No reranker, or pool ≤ floor: use hybrid-search order with synthetic
+  // descending scores. The previous cross-encoder rerank added 500ms–4s of
+  // latency for marginal gain over the hybrid (BM25 + vector) ordering.
+  if (!deps.reranker || candidates.length <= ragConfig.rerankFloorK) {
     const ranked = candidates.map((c, i) => ({ id: c.id, score: 1 - i * 0.01 }));
     const byId = new Map(candidates.map((c) => [c.id, c]));
     return { buckets: gradeCandidates(ranked, byId, thresholds), ranked, byId };

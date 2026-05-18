@@ -3,10 +3,9 @@ import {
   HfRouterLlm,
   buildPrompt,
   createEmbedder,
-  createReranker,
   retrieve,
 } from '@/lib/rag'
-import { getChatbotConfig } from './config'
+import { getChatbotConfig, type ChatbotConfig } from './config'
 import { loadPrimaryGoalInstruction } from './primary-goal'
 import { selectMediaForReply, type SelectedMediaAsset } from '@/lib/media/selector'
 
@@ -47,6 +46,10 @@ export interface AnswerOptions {
   /** Full name of the lead (e.g. from Facebook profile). Only the first name
    *  is injected into the prompt so the bot can address the customer naturally. */
   leadName?: string
+  /** Preloaded chatbot config. When supplied, callers skip the per-call
+   *  getChatbotConfig fetch — used by the Messenger worker to dedupe the
+   *  chatbot_configs read across the reply pipeline. */
+  preloadedConfig?: ChatbotConfig
 }
 
 /**
@@ -61,7 +64,7 @@ export async function answer(
   history: AnswerHistory = [],
   options: AnswerOptions = {},
 ): Promise<AnswerResult> {
-  const baseConfig = await getChatbotConfig(supabase, userId)
+  const baseConfig = options.preloadedConfig ?? (await getChatbotConfig(supabase, userId))
   const cp = options.campaignPersona
 
   // Resolve the primary goal block: campaign funnelInstruction wins; otherwise
@@ -86,14 +89,12 @@ export async function answer(
       : baseConfig
 
   const embedder = createEmbedder()
-  const reranker = createReranker()
   const llm = new HfRouterLlm()
 
   const ctx = await retrieve(
     {
       client: supabase,
       embedder,
-      reranker,
       rewriteQuery: (q) => llm.rewriteQuery(q),
       rpcName: options.rpcName,
     },
