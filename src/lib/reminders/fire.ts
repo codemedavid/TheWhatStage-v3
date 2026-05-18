@@ -4,6 +4,7 @@ import { sendOutbound } from '@/lib/messenger/outbound'
 import { isInsideWindow } from '@/lib/agent/classifyPolicy'
 import { HfRouterLlm } from '@/lib/rag/llm'
 import { ragConfig } from '@/lib/rag/config'
+import { manilaNowBlock } from '@/lib/time/manilaNow'
 
 interface ReminderRow {
   id: string
@@ -36,6 +37,7 @@ export interface FireResult {
 async function generateFollowUpText(topic: string, leadName: string | null): Promise<string> {
   const llm = new HfRouterLlm({ model: ragConfig.classifierModel })
   const system =
+    `${manilaNowBlock()}\n\n` +
     'Write a single short, friendly Messenger follow-up message in the same language the topic is written in. ' +
     'Plain text only, no markdown, no emoji unless natural, max 240 characters. ' +
     'Tone: warm, conversational, professional. Mention the topic naturally. ' +

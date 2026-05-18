@@ -11,6 +11,7 @@
 
 import { HfRouterLlm } from '@/lib/rag/llm'
 import { ragConfig } from '@/lib/rag/config'
+import { manilaNowBlock } from '@/lib/time/manilaNow'
 import { sanitizeFollowup } from './sanitize'
 import { MAX_OFFSET_IDX, type ConversationKind } from './config'
 
@@ -69,9 +70,11 @@ function buildSystemPrompt(args: GenerateArgs): string {
     ? `Personality / tone:\n${args.personalityBlock.trim()}\n\n`
     : ''
   const fnHint = firstName(args.leadName) ? `Use the customer's first name once: ${firstName(args.leadName)}.\n` : ''
+  const prefix = `${manilaNowBlock()}\n\n`
 
   if (args.kind === 'generic') {
     return (
+      prefix +
       `${personality}` +
       `You are writing follow-up message #${args.offsetIdx + 1} of 7 to a Messenger lead who replied earlier ` +
       `but has gone quiet. The previous exchange had less than 4 messages from the lead, so DO NOT pretend ` +
@@ -80,6 +83,7 @@ function buildSystemPrompt(args: GenerateArgs): string {
     )
   }
   return (
+    prefix +
     `${personality}` +
     `You are writing follow-up message #${args.offsetIdx + 1} of 7 to a Messenger lead who has gone quiet ` +
     `after a real back-and-forth. Reference what was already discussed naturally and propose a concrete ` +

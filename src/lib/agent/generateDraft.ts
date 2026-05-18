@@ -1,5 +1,6 @@
 import { HfRouterLlm } from '@/lib/rag/llm'
 import { ragConfig } from '@/lib/rag/config'
+import { manilaNowBlock } from '@/lib/time/manilaNow'
 import type { AudienceLead, BulkContext, ParsedIntent } from './types'
 
 const DRAFT_TIMEOUT_MS = 8_000
@@ -22,7 +23,9 @@ function buildDraftPrompt(
     ? `Their last message to you: "${lastInbound.slice(0, 300)}"`
     : 'No previous conversation.'
 
-  const system = `You are a sales assistant writing a short Messenger follow-up for ${lead.name ?? 'a lead'}.
+  const system = `${manilaNowBlock()}
+
+You are a sales assistant writing a short Messenger follow-up for ${lead.name ?? 'a lead'}.
 Tone: ${toneDesc}.
 Keep it under 3 sentences. Do NOT use emojis excessively. Sound human, not robotic.
 Output ONLY the message text — no quotes, no preamble, no explanation.`
