@@ -27,25 +27,25 @@ describe('FOLLOWUP_SETTINGS_SCHEMA', () => {
 
   it('rejects offset_ms below 1 minute', () => {
     const bad = validSettings()
-    bad.touchpoints[0] = { enabled: true, offset_ms: 30_000 } // 30s
+    bad.touchpoints[0] = { enabled: true, offset_ms: 30_000, instruction: '' } // 30s
     expect(FOLLOWUP_SETTINGS_SCHEMA.safeParse(bad).success).toBe(false)
   })
 
   it('rejects offset_ms above 7 days', () => {
     const bad = validSettings()
-    bad.touchpoints[6] = { enabled: true, offset_ms: 8 * 24 * 3_600_000 } // 8 days
+    bad.touchpoints[6] = { enabled: true, offset_ms: 8 * 24 * 3_600_000, instruction: '' } // 8 days
     expect(FOLLOWUP_SETTINGS_SCHEMA.safeParse(bad).success).toBe(false)
   })
 
   it('rejects non-strictly-increasing enabled rows', () => {
     const bad = validSettings()
-    bad.touchpoints[1] = { enabled: true, offset_ms: 60_000 } // 1m, less than slot 0's 5m
+    bad.touchpoints[1] = { enabled: true, offset_ms: 60_000, instruction: '' } // 1m, less than slot 0's 5m
     expect(FOLLOWUP_SETTINGS_SCHEMA.safeParse(bad).success).toBe(false)
   })
 
   it('ignores ordering of disabled rows', () => {
     const ok = validSettings()
-    ok.touchpoints[1] = { enabled: false, offset_ms: 60_000 } // disabled, ignore
+    ok.touchpoints[1] = { enabled: false, offset_ms: 60_000, instruction: '' } // disabled, ignore
     expect(FOLLOWUP_SETTINGS_SCHEMA.safeParse(ok).success).toBe(true)
   })
 
@@ -124,8 +124,8 @@ describe('resolveEnabledOffsets', () => {
 
   it('sorts ascending by offset_ms even if user reordered', () => {
     const s = validSettings()
-    s.touchpoints[5] = { enabled: true, offset_ms: 86_400_000 } // 24h in slot 5
-    s.touchpoints[6] = { enabled: true, offset_ms: 64_800_000 } // 18h in slot 6
+    s.touchpoints[5] = { enabled: true, offset_ms: 86_400_000, instruction: '' } // 24h in slot 5
+    s.touchpoints[6] = { enabled: true, offset_ms: 64_800_000, instruction: '' } // 18h in slot 6
     const snap = resolveEnabledOffsets(s)
     // resolver sorts by offset_ms ascending so 18h (slot 6) comes before 24h (slot 5)
     expect(snap.map((e) => e.offset_ms)).toEqual([
@@ -149,7 +149,7 @@ describe('resolveEnabledOffsets', () => {
   it('snapshot entries default instruction to "" when unset', () => {
     const snap = resolveEnabledOffsets(DEFAULT_FOLLOWUP_SETTINGS)
     for (const e of snap) {
-      expect(typeof e.instruction).toBe('string')
+      expect(e.instruction).toBe(DEFAULT_FOLLOWUP_SETTINGS.touchpoints[e.slot].instruction)
     }
   })
 })

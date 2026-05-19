@@ -30,6 +30,7 @@ export const FOLLOWUP_SETTINGS_SCHEMA = z
     const enabled = val.touchpoints
       .map((t, idx) => ({ t, idx }))
       .filter((x) => x.t.enabled)
+    // Enabled rows must be strictly increasing in offset_ms.
     for (let i = 1; i < enabled.length; i++) {
       if (enabled[i].t.offset_ms <= enabled[i - 1].t.offset_ms) {
         ctx.addIssue({
@@ -39,6 +40,7 @@ export const FOLLOWUP_SETTINGS_SCHEMA = z
         })
       }
     }
+    // If the master toggle is ON, at least one row must be enabled.
     if (val.enabled && enabled.length === 0) {
       ctx.addIssue({
         code: 'custom',
