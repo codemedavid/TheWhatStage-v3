@@ -13,13 +13,13 @@ import { HfRouterLlm } from '@/lib/rag/llm'
 import { ragConfig } from '@/lib/rag/config'
 import { manilaNowBlock } from '@/lib/time/manilaNow'
 import { sanitizeFollowup } from './sanitize'
-import { MAX_OFFSET_IDX, type ConversationKind } from './config'
+import { OFFSETS_MS, type ConversationKind } from './config'
 
 const LLM_TIMEOUT_MS = 8_000
 
 export interface GenerateArgs {
   kind: ConversationKind
-  offsetIdx: number
+  slot: number
   leadName: string | null
   personalityBlock: string
   recentMessages: Array<{ role: 'user' | 'assistant'; content: string }>
@@ -54,9 +54,9 @@ function firstName(name: string | null): string {
   return name.trim().split(/\s+/)[0]
 }
 
-function fallback(kind: ConversationKind, idx: number, leadName: string | null): string {
-  const safeIdx = Math.max(0, Math.min(MAX_OFFSET_IDX, idx))
-  const line = FALLBACK_POOL[kind][safeIdx]
+function fallback(kind: ConversationKind, slot: number, leadName: string | null): string {
+  const safeSlot = Math.max(0, Math.min(OFFSETS_MS.length - 1, slot))
+  const line = FALLBACK_POOL[kind][safeSlot]
   const fn = firstName(leadName)
   return sanitizeFollowup(line.replace('{name}', fn || 'there'))
 }
@@ -76,7 +76,7 @@ function buildSystemPrompt(args: GenerateArgs): string {
     return (
       prefix +
       `${personality}` +
-      `You are writing follow-up message #${args.offsetIdx + 1} of 7 to a Messenger lead who replied earlier ` +
+      `You are writing follow-up message #${args.slot + 1} of 7 to a Messenger lead who replied earlier ` +
       `but has gone quiet. The previous exchange had less than 4 messages from the lead, so DO NOT pretend ` +
       `to remember specifics. Write a warm, light check-in that nudges them to reply. ` +
       `${fnHint}${rules}`
@@ -85,7 +85,7 @@ function buildSystemPrompt(args: GenerateArgs): string {
   return (
     prefix +
     `${personality}` +
-    `You are writing follow-up message #${args.offsetIdx + 1} of 7 to a Messenger lead who has gone quiet ` +
+    `You are writing follow-up message #${args.slot + 1} of 7 to a Messenger lead who has gone quiet ` +
     `after a real back-and-forth. Reference what was already discussed naturally and propose a concrete ` +
     `next step or ask one focused question. ${fnHint}${rules}`
   )
@@ -93,13 +93,13 @@ function buildSystemPrompt(args: GenerateArgs): string {
 
 function buildUserPrompt(args: GenerateArgs): string {
   if (args.kind === 'generic' || args.recentMessages.length === 0) {
-    return `Write follow-up #${args.offsetIdx + 1} now. Do not repeat earlier phrasings.`
+    return `Write follow-up #${args.slot + 1} now. Do not repeat earlier phrasings.`
   }
   const transcript = args.recentMessages
     .slice(-20)
     .map((m) => (m.role === 'user' ? `Customer: ${m.content}` : `You earlier: ${m.content}`))
     .join('\n')
-  return `Last messages in the conversation:\n${transcript}\n\nWrite follow-up #${args.offsetIdx + 1} now.`
+  return `Last messages in the conversation:\n${transcript}\n\nWrite follow-up #${args.slot + 1} now.`
 }
 
 async function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
@@ -110,11 +110,9 @@ async function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
 }
 
 export async function generateFollowupMessage(args: GenerateArgs): Promise<string> {
-  // Offset 0 is always the fixed light check-in regardless of kind.
-  if (args.offsetIdx === 0) {
+  if (args.slot === 0) {
     return fallback(args.kind, 0, args.leadName)
   }
-
   try {
     const llm = new HfRouterLlm({ model: ragConfig.classifierModel })
     const raw = await withTimeout(
@@ -131,6 +129,6 @@ export async function generateFollowupMessage(args: GenerateArgs): Promise<strin
     if (!cleaned) throw new Error('empty')
     return cleaned
   } catch {
-    return fallback(args.kind, args.offsetIdx, args.leadName)
+    return fallback(args.kind, args.slot, args.leadName)
   }
 }

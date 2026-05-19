@@ -12,7 +12,7 @@ import { sendOutbound } from '@/lib/messenger/outbound'
 import { isInsideWindow } from '@/lib/agent/classifyPolicy'
 import { shouldSeed } from './gates'
 import { generateFollowupMessage } from './generateMessage'
-import { OFFSETS_MS, MAX_OFFSET_IDX } from './config'
+import { OFFSETS_MS } from './config'
 
 interface ScheduleRow {
   id: string
@@ -122,7 +122,7 @@ export async function handleFollowupSend(
 
   const text = await generateFollowupMessage({
     kind: schedule.conversation_kind,
-    offsetIdx: schedule.next_offset_idx,
+    slot: schedule.next_offset_idx,
     leadName,
     personalityBlock,
     recentMessages,
@@ -175,7 +175,7 @@ export async function handleFollowupSend(
 }
 
 async function advanceSchedule(admin: SupabaseClient, schedule: ScheduleRow): Promise<void> {
-  if (schedule.next_offset_idx >= MAX_OFFSET_IDX) {
+  if (schedule.next_offset_idx >= OFFSETS_MS.length - 1) {
     await markDone(admin, schedule.id)
     return
   }
