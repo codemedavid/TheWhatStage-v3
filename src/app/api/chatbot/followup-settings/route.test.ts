@@ -84,13 +84,16 @@ describe('PUT /api/chatbot/followup-settings', () => {
 
   it('saves valid settings and returns them', async () => {
     getUserMock.mockResolvedValue({ data: { user: { id: 'u1' } } })
-    supabaseFromMock.mockImplementation(() => ({
-      upsert: vi.fn(async () => ({ error: null })),
-    }))
+    const upsertSpy = vi.fn(async () => ({ error: null }))
+    supabaseFromMock.mockImplementation(() => ({ upsert: upsertSpy }))
 
     const desired = { ...DEFAULT_FOLLOWUP_SETTINGS, enabled: false }
     const putRes = await PUT(makeReq({ settings: desired }))
     expect(putRes.status).toBe(200)
     expect(await asJson(putRes)).toEqual({ settings: desired })
+    expect(upsertSpy).toHaveBeenCalledWith(
+      { user_id: 'u1', followup_settings: desired },
+      { onConflict: 'user_id' },
+    )
   })
 })

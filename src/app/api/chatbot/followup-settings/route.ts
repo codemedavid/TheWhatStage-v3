@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import {
   FOLLOWUP_SETTINGS_SCHEMA,
-  DEFAULT_FOLLOWUP_SETTINGS,
+  loadFollowupSettings,
 } from '@/lib/followups/settings'
 
 export const runtime = 'nodejs'
@@ -15,26 +15,8 @@ export async function GET(_req: Request) {
   } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
 
-  const { data, error } = await supabase
-    .from('chatbot_configs')
-    .select('followup_settings')
-    .eq('user_id', user.id)
-    .maybeSingle<{ followup_settings: unknown }>()
-
-  if (error) {
-    console.warn('[followup-settings.GET] db error', error.message)
-    return NextResponse.json({ settings: DEFAULT_FOLLOWUP_SETTINGS })
-  }
-  if (!data || data.followup_settings == null) {
-    return NextResponse.json({ settings: DEFAULT_FOLLOWUP_SETTINGS })
-  }
-
-  const parsed = FOLLOWUP_SETTINGS_SCHEMA.safeParse(data.followup_settings)
-  if (!parsed.success) {
-    console.warn('[followup-settings.GET] stored value invalid', parsed.error.issues[0])
-    return NextResponse.json({ settings: DEFAULT_FOLLOWUP_SETTINGS })
-  }
-  return NextResponse.json({ settings: parsed.data })
+  const settings = await loadFollowupSettings(supabase, user.id)
+  return NextResponse.json({ settings })
 }
 
 export async function PUT(req: Request) {
