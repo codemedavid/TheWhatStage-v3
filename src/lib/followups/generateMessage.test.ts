@@ -22,7 +22,7 @@ describe('generateFollowupMessage', () => {
     completeMock.mockResolvedValueOnce('Hi Ana, kumusta na yung budget mo for the package?')
     const text = await generateFollowupMessage({
       kind: 'real',
-      offsetIdx: 2,
+      slot: 2,
       leadName: 'Ana',
       personalityBlock: 'warm and casual',
       recentMessages: [
@@ -39,7 +39,7 @@ describe('generateFollowupMessage', () => {
     completeMock.mockRejectedValueOnce(new Error('llm timeout'))
     const text = await generateFollowupMessage({
       kind: 'generic',
-      offsetIdx: 0,
+      slot: 0,
       leadName: 'Jay',
       personalityBlock: '',
       recentMessages: [],
@@ -51,7 +51,7 @@ describe('generateFollowupMessage', () => {
     completeMock.mockResolvedValueOnce(' "Hi Ana, interested pa po kayo?" ')
     const text = await generateFollowupMessage({
       kind: 'real',
-      offsetIdx: 0,
+      slot: 0,
       leadName: 'Ana',
       personalityBlock: 'warm',
       recentMessages: [
@@ -68,7 +68,7 @@ describe('generateFollowupMessage', () => {
     completeMock.mockResolvedValueOnce('Hey - any thoughts\non the proposal?')
     const text = await generateFollowupMessage({
       kind: 'real',
-      offsetIdx: 3,
+      slot: 3,
       leadName: null,
       personalityBlock: '',
       recentMessages: [],
