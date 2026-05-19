@@ -12,7 +12,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 
 const MIN_OFFSET_MS = 60_000                       // 1 minute
 const MAX_OFFSET_MS = 7 * 24 * 3_600_000           // 7 days
-export const TOUCHPOINT_COUNT = 7
+const TOUCHPOINT_COUNT = 7
 
 const TouchpointSchema = z.object({
   enabled: z.boolean(),

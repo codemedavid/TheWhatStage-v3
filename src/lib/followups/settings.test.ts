@@ -92,13 +92,15 @@ describe('resolveEnabledOffsets', () => {
 
   it('sorts ascending by offset_ms even if user reordered', () => {
     const s = validSettings()
-    // swap slot 5 and slot 6 offsets
-    s.touchpoints[5] = { enabled: true, offset_ms: 86_400_000 } // 24h
-    s.touchpoints[6] = { enabled: true, offset_ms: 64_800_000 } // 18h
-    // schema would reject this (not increasing), but resolver must not crash;
-    // it normalizes by sorting
+    s.touchpoints[5] = { enabled: true, offset_ms: 86_400_000 } // 24h in slot 5
+    s.touchpoints[6] = { enabled: true, offset_ms: 64_800_000 } // 18h in slot 6
     const snap = resolveEnabledOffsets(s)
-    expect(snap.map((e) => e.offset_ms)).toEqual([...snap.map((e) => e.offset_ms)].sort((a, b) => a - b))
+    // resolver sorts by offset_ms ascending so 18h (slot 6) comes before 24h (slot 5)
+    expect(snap.map((e) => e.offset_ms)).toEqual([
+      300_000, 3_600_000, 18_000_000, 28_800_000, 43_200_000, 64_800_000, 86_400_000,
+    ])
+    expect(snap[5].slot).toBe(6)  // 18h entry came from slot 6
+    expect(snap[6].slot).toBe(5)  // 24h entry came from slot 5
   })
 })
 
