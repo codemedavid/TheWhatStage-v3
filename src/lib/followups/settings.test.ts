@@ -60,6 +60,37 @@ describe('FOLLOWUP_SETTINGS_SCHEMA', () => {
     ok.touchpoints = ok.touchpoints.map((t) => ({ ...t, enabled: false }))
     expect(FOLLOWUP_SETTINGS_SCHEMA.safeParse(ok).success).toBe(true)
   })
+
+  it('defaults instruction to "" when missing on a touchpoint', () => {
+    const noInstr = {
+      enabled: true,
+      touchpoints: DEFAULT_FOLLOWUP_SETTINGS.touchpoints.map((t) => ({
+        enabled: t.enabled,
+        offset_ms: t.offset_ms,
+      })),
+    }
+    const parsed = FOLLOWUP_SETTINGS_SCHEMA.safeParse(noInstr)
+    expect(parsed.success).toBe(true)
+    if (parsed.success) {
+      for (const tp of parsed.data.touchpoints) {
+        expect(tp.instruction).toBe('')
+      }
+    }
+  })
+
+  it('rejects instruction longer than 200 chars', () => {
+    const bad = validSettings()
+    bad.touchpoints[0] = { ...bad.touchpoints[0], instruction: 'x'.repeat(201) }
+    expect(FOLLOWUP_SETTINGS_SCHEMA.safeParse(bad).success).toBe(false)
+  })
+
+  it('trims surrounding whitespace from instruction', () => {
+    const ok = validSettings()
+    ok.touchpoints[0] = { ...ok.touchpoints[0], instruction: '  hello  ' }
+    const parsed = FOLLOWUP_SETTINGS_SCHEMA.safeParse(ok)
+    expect(parsed.success).toBe(true)
+    if (parsed.success) expect(parsed.data.touchpoints[0].instruction).toBe('hello')
+  })
 })
 
 describe('resolveEnabledOffsets', () => {
@@ -69,6 +100,7 @@ describe('resolveEnabledOffsets', () => {
     expect(snap.map((s) => s.slot)).toEqual([0, 1, 2, 3, 4, 5, 6])
     expect(snap[0].offset_ms).toBe(300_000)
     expect(snap[6].offset_ms).toBe(86_400_000)
+    expect(snap[0].instruction).toMatch(/Quick light hello/i)
   })
 
   it('skips disabled rows and preserves original slot indices', () => {
@@ -101,6 +133,24 @@ describe('resolveEnabledOffsets', () => {
     ])
     expect(snap[5].slot).toBe(6)  // 18h entry came from slot 6
     expect(snap[6].slot).toBe(5)  // 24h entry came from slot 5
+  })
+
+  it('propagates instruction from touchpoint to snapshot entry', () => {
+    const s = validSettings()
+    s.touchpoints[0] = { ...s.touchpoints[0], instruction: 'quick hello' }
+    s.touchpoints[2] = { ...s.touchpoints[2], instruction: 'share a benefit' }
+    const snap = resolveEnabledOffsets(s)
+    const slot0 = snap.find((e) => e.slot === 0)
+    const slot2 = snap.find((e) => e.slot === 2)
+    expect(slot0?.instruction).toBe('quick hello')
+    expect(slot2?.instruction).toBe('share a benefit')
+  })
+
+  it('snapshot entries default instruction to "" when unset', () => {
+    const snap = resolveEnabledOffsets(DEFAULT_FOLLOWUP_SETTINGS)
+    for (const e of snap) {
+      expect(typeof e.instruction).toBe('string')
+    }
   })
 })
 
