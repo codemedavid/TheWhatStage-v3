@@ -5,6 +5,9 @@
 // who completes a booking between schedule creation and the next touchpoint
 // stops getting pinged. After a successful send the row is either advanced
 // to the next pending offset or marked done.
+//
+// The schedule carries its own offsets_snapshot (captured at seed time);
+// changes to the user's settings after seed do NOT affect in-flight schedules.
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { decryptToken } from '@/lib/facebook/crypto'
@@ -12,7 +15,7 @@ import { sendOutbound } from '@/lib/messenger/outbound'
 import { isInsideWindow } from '@/lib/agent/classifyPolicy'
 import { shouldSeed } from './gates'
 import { generateFollowupMessage } from './generateMessage'
-import { OFFSETS_MS } from './config'
+import type { SnapshotEntry } from './settings'
 
 interface ScheduleRow {
   id: string
@@ -24,6 +27,7 @@ interface ScheduleRow {
   next_offset_idx: number
   conversation_kind: 'generic' | 'real'
   status: string
+  offsets_snapshot: SnapshotEntry[]
 }
 
 interface ThreadRow {
@@ -44,12 +48,24 @@ export async function handleFollowupSend(
 ): Promise<void> {
   const { data: schedule } = await admin
     .from('lead_followup_schedules')
-    .select('id, user_id, lead_id, thread_id, page_id, started_at, next_offset_idx, conversation_kind, status')
+    .select('id, user_id, lead_id, thread_id, page_id, started_at, next_offset_idx, conversation_kind, status, offsets_snapshot')
     .eq('id', args.scheduleId)
     .maybeSingle<ScheduleRow>()
 
   if (!schedule) return
   if (schedule.status !== 'running' && schedule.status !== 'pending') return
+
+  const snapshot = schedule.offsets_snapshot ?? []
+  if (snapshot.length === 0) {
+    await markDone(admin, schedule.id)
+    return
+  }
+
+  const entry = snapshot[schedule.next_offset_idx]
+  if (!entry) {
+    await markDone(admin, schedule.id)
+    return
+  }
 
   // Re-check gates: a lead who booked between scheduling and firing should
   // not receive the touchpoint.
@@ -122,7 +138,7 @@ export async function handleFollowupSend(
 
   const text = await generateFollowupMessage({
     kind: schedule.conversation_kind,
-    slot: schedule.next_offset_idx,
+    slot: entry.slot,
     leadName,
     personalityBlock,
     recentMessages,
@@ -175,12 +191,15 @@ export async function handleFollowupSend(
 }
 
 async function advanceSchedule(admin: SupabaseClient, schedule: ScheduleRow): Promise<void> {
-  if (schedule.next_offset_idx >= OFFSETS_MS.length - 1) {
+  const snapshot = schedule.offsets_snapshot
+  if (schedule.next_offset_idx >= snapshot.length - 1) {
     await markDone(admin, schedule.id)
     return
   }
   const nextIdx = schedule.next_offset_idx + 1
-  const nextRunAt = new Date(Date.parse(schedule.started_at) + OFFSETS_MS[nextIdx]).toISOString()
+  const nextRunAt = new Date(
+    Date.parse(schedule.started_at) + snapshot[nextIdx].offset_ms,
+  ).toISOString()
   await admin
     .from('lead_followup_schedules')
     .update({

@@ -29,9 +29,17 @@ interface FakeRow {
   next_offset_idx: number
   conversation_kind: 'generic' | 'real'
   status: string
+  offsets_snapshot: Array<{ offset_ms: number; slot: number }>
 }
 
-function makeAdmin(seed: { schedule: FakeRow; thread: Record<string, unknown>; page: Record<string, unknown>; lead: Record<string, unknown>; chatbot: Record<string, unknown>; history: unknown[] }) {
+function makeAdmin(seed: {
+  schedule: FakeRow
+  thread: Record<string, unknown>
+  page: Record<string, unknown>
+  lead: Record<string, unknown>
+  chatbot: Record<string, unknown>
+  history: unknown[]
+}) {
   const updates: Array<{ table: string; values: unknown; match: unknown }> = []
   const inserts: Array<{ table: string; values: unknown }> = []
   const admin = {
@@ -78,6 +86,16 @@ function makeAdmin(seed: { schedule: FakeRow; thread: Record<string, unknown>; p
   return { admin, updates, inserts }
 }
 
+const DEFAULT_SNAPSHOT = [
+  { offset_ms: 300000,   slot: 0 },
+  { offset_ms: 3600000,  slot: 1 },
+  { offset_ms: 18000000, slot: 2 },
+  { offset_ms: 28800000, slot: 3 },
+  { offset_ms: 43200000, slot: 4 },
+  { offset_ms: 64800000, slot: 5 },
+  { offset_ms: 86400000, slot: 6 },
+]
+
 beforeEach(() => {
   sendOutboundMock.mockReset()
   generateMock.mockReset()
@@ -91,6 +109,7 @@ describe('handleFollowupSend', () => {
     next_offset_idx: 0,
     conversation_kind: 'generic',
     status: 'pending',
+    offsets_snapshot: DEFAULT_SNAPSHOT,
   }
   const baseSeed = {
     schedule,
@@ -101,7 +120,7 @@ describe('handleFollowupSend', () => {
     history: [],
   }
 
-  it('generates, sends, and advances to next offset', async () => {
+  it('generates, sends, and advances to next offset using snapshot', async () => {
     shouldSeedMock.mockResolvedValue({ ok: true, inboundCount: 1 })
     generateMock.mockResolvedValue('Hi Ana, interested pa po kayo?')
     sendOutboundMock.mockResolvedValue({ sent: true, messageId: 'fb1' })
@@ -110,23 +129,73 @@ describe('handleFollowupSend', () => {
     await handleFollowupSend(admin as never, { scheduleId: 's1' })
 
     expect(sendOutboundMock).toHaveBeenCalledTimes(1)
+    expect(generateMock).toHaveBeenCalledWith(
+      expect.objectContaining({ slot: 0 }),
+    )
     const upd = updates.filter((u) => u.table === 'lead_followup_schedules')
     const last = upd[upd.length - 1].values as Record<string, unknown>
     expect(last.next_offset_idx).toBe(1)
     expect(last.status).toBe('pending')
+    // next_run_at uses snapshot[1].offset_ms = 1h
+    expect(last.next_run_at).toBe(
+      new Date(Date.parse(schedule.started_at) + 3_600_000).toISOString(),
+    )
   })
 
-  it('marks done when firing the last offset (6)', async () => {
+  it('passes the original slot index (not next_offset_idx) to generateMessage', async () => {
+    // Snapshot with rows 1 and 2 disabled (slots 0, 3, 5 only). Schedule at idx=1
+    // means we're firing the row whose original slot is 3.
+    const compactSnap = [
+      { offset_ms: 300000,   slot: 0 },
+      { offset_ms: 28800000, slot: 3 },
+      { offset_ms: 64800000, slot: 5 },
+    ]
     shouldSeedMock.mockResolvedValue({ ok: true, inboundCount: 1 })
-    generateMock.mockResolvedValue('Hi Ana, balik na lang po kayo anytime kung interested.')
+    generateMock.mockResolvedValue('hi')
+    sendOutboundMock.mockResolvedValue({ sent: true, messageId: 'fb2' })
+    const { admin } = makeAdmin({
+      ...baseSeed,
+      schedule: { ...schedule, next_offset_idx: 1, offsets_snapshot: compactSnap },
+    })
+
+    await handleFollowupSend(admin as never, { scheduleId: 's1' })
+
+    expect(generateMock).toHaveBeenCalledWith(expect.objectContaining({ slot: 3 }))
+  })
+
+  it('marks done when firing the last entry in the snapshot', async () => {
+    shouldSeedMock.mockResolvedValue({ ok: true, inboundCount: 1 })
+    generateMock.mockResolvedValue('hi')
     sendOutboundMock.mockResolvedValue({ sent: true, messageId: 'fb7' })
-    const { admin, updates } = makeAdmin({ ...baseSeed, schedule: { ...schedule, next_offset_idx: 6 } })
+    const { admin, updates } = makeAdmin({
+      ...baseSeed,
+      schedule: { ...schedule, next_offset_idx: 6 },
+    })
 
     await handleFollowupSend(admin as never, { scheduleId: 's1' })
 
     const upd = updates.filter((u) => u.table === 'lead_followup_schedules')
     const last = upd[upd.length - 1].values as Record<string, unknown>
     expect(last.status).toBe('done')
+  })
+
+  it('marks done at snapshot.length - 1 even when snapshot is shorter than 7', async () => {
+    const compactSnap = [
+      { offset_ms: 300000,   slot: 0 },
+      { offset_ms: 28800000, slot: 3 },
+    ]
+    shouldSeedMock.mockResolvedValue({ ok: true, inboundCount: 1 })
+    generateMock.mockResolvedValue('hi')
+    sendOutboundMock.mockResolvedValue({ sent: true, messageId: 'fbx' })
+    const { admin, updates } = makeAdmin({
+      ...baseSeed,
+      schedule: { ...schedule, next_offset_idx: 1, offsets_snapshot: compactSnap },
+    })
+
+    await handleFollowupSend(admin as never, { scheduleId: 's1' })
+
+    const upd = updates.filter((u) => u.table === 'lead_followup_schedules')
+    expect((upd[upd.length - 1].values as Record<string, unknown>).status).toBe('done')
   })
 
   it('marks done without sending when gates fail mid-schedule', async () => {
