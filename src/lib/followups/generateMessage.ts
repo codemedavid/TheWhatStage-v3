@@ -71,7 +71,8 @@ function buildSystemPrompt(args: GenerateArgs): string {
   const fnHint = firstName(args.leadName) ? `Use the customer's first name once: ${firstName(args.leadName)}.\n` : ''
   const prefix = `${manilaNowBlock()}\n\n`
 
-  const trimmedInstr = args.instruction?.trim() ?? ''
+  // JSON.stringify escapes embedded quotes/newlines so user text can't break prompt structure.
+  const trimmedInstr = (args.instruction ?? '').trim()
   const guide = trimmedInstr
     ? `Touchpoint guide for THIS message (#${args.slot + 1} of 7):\n` +
       `${JSON.stringify(trimmedInstr)}\n` +

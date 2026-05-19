@@ -36,8 +36,7 @@ describe('generateFollowupMessage', () => {
     expect(text.split('\n').length).toBe(1)
   })
 
-  it('uses the fallback pool when LLM throws (generic, offset 0)', async () => {
-    completeMock.mockRejectedValueOnce(new Error('llm timeout'))
+  it('short-circuits slot 0 to fallback without calling LLM (no instruction)', async () => {
     const text = await generateFollowupMessage({
       kind: 'generic',
       slot: 0,
@@ -124,6 +123,9 @@ describe('generateFollowupMessage', () => {
     const system = messages.find((m) => m.role === 'system')!
     expect(system.content).toContain('Touchpoint guide for THIS message')
     expect(system.content).toContain('Share a concrete benefit or social proof.')
+    expect(system.content.indexOf('Touchpoint guide')).toBeLessThan(
+      system.content.indexOf('You are writing follow-up'),
+    )
   })
 
   it('omits the Touchpoint guide block when instruction is empty (no behavior change)', async () => {
