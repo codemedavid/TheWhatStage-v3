@@ -1045,3 +1045,33 @@
   padding-top: 6px;
   border-top: 1px solid var(--ws-border);
 }
+
+.cb-toplevel-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid #E5E7EB;
+  margin-bottom: 16px;
+}
+
+.cb-toplevel-tab {
+  position: relative;
+  margin-bottom: -1px;
+  padding: 10px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #6B7280;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: color 120ms;
+}
+
+.cb-toplevel-tab:hover {
+  color: #111827;
+}
+
+.cb-toplevel-tab.active {
+  color: #111827;
+  border-bottom-color: #059669;
+}
