@@ -24,16 +24,16 @@ function adminFor(page: ReturnType<typeof pageFixture> | null) {
   const maybySingle = vi.fn().mockResolvedValue({ data: page, error: null })
   const eq = vi.fn().mockReturnValue({ maybeSingle: maybySingle })
   const select = vi.fn().mockReturnValue({ eq })
-  return { from: vi.fn().mockReturnValue({ select }) }
+  return { from: vi.fn().mockReturnValue({ select }) } as unknown as ReturnType<typeof createAdminClient>
 }
 
 beforeEach(() => { vi.resetAllMocks() })
 
 describe('GET /api/action-pages/[slug]/cart', () => {
   it('returns empty items when claims are missing', async () => {
-    ;(createAdminClient as any).mockReturnValue(adminFor(pageFixture()))
+    vi.mocked(createAdminClient).mockReturnValue(adminFor(pageFixture()))
     const req = new Request('http://test/api/action-pages/s/cart')
-    const res = await GET(req as any, { params: Promise.resolve({ slug: 's' }) })
+    const res = await GET(req, { params: Promise.resolve({ slug: 's' }) })
     expect(res.status).toBe(200)
     const body = await res.json()
     expect(body).toEqual({ items: [] })
@@ -41,56 +41,56 @@ describe('GET /api/action-pages/[slug]/cart', () => {
   })
 
   it('returns empty items when verifyDeeplink fails', async () => {
-    ;(createAdminClient as any).mockReturnValue(adminFor(pageFixture()))
-    ;(verifyDeeplink as any).mockReturnValue({ ok: false, reason: 'expired' })
+    vi.mocked(createAdminClient).mockReturnValue(adminFor(pageFixture()))
+    vi.mocked(verifyDeeplink).mockReturnValue({ ok: false, reason: 'expired' })
     const req = new Request('http://test/api/action-pages/s/cart?p=PSID&g=fb&e=1&t=tok')
-    const res = await GET(req as any, { params: Promise.resolve({ slug: 's' }) })
+    const res = await GET(req, { params: Promise.resolve({ slug: 's' }) })
     const body = await res.json()
     expect(body).toEqual({ items: [] })
   })
 
   it('returns saved items when claims valid', async () => {
-    ;(createAdminClient as any).mockReturnValue(adminFor(pageFixture()))
-    ;(verifyDeeplink as any).mockReturnValue({ ok: true, claims: { slug: 's', psid: 'PSID', pageId: 'fb', exp: 9 } })
-    ;(loadActiveVisitorCart as any).mockResolvedValue({ items: [{ id: 'prod-1', quantity: 2 }] })
+    vi.mocked(createAdminClient).mockReturnValue(adminFor(pageFixture()))
+    vi.mocked(verifyDeeplink).mockReturnValue({ ok: true, claims: { slug: 's', psid: 'PSID', pageId: 'fb', exp: 9 } })
+    vi.mocked(loadActiveVisitorCart).mockResolvedValue({ items: [{ id: 'prod-1', quantity: 2 }] })
     const req = new Request('http://test/api/action-pages/s/cart?p=PSID&g=fb&e=9&t=tok')
-    const res = await GET(req as any, { params: Promise.resolve({ slug: 's' }) })
+    const res = await GET(req, { params: Promise.resolve({ slug: 's' }) })
     const body = await res.json()
     expect(body).toEqual({ items: [{ id: 'prod-1', quantity: 2 }] })
   })
 
   it('returns 404 when page not published', async () => {
-    ;(createAdminClient as any).mockReturnValue(adminFor(null))
+    vi.mocked(createAdminClient).mockReturnValue(adminFor(null))
     const req = new Request('http://test/api/action-pages/s/cart')
-    const res = await GET(req as any, { params: Promise.resolve({ slug: 's' }) })
+    const res = await GET(req, { params: Promise.resolve({ slug: 's' }) })
     expect(res.status).toBe(404)
   })
 })
 
 describe('PUT /api/action-pages/[slug]/cart', () => {
   it('skips when claims missing', async () => {
-    ;(createAdminClient as any).mockReturnValue(adminFor(pageFixture()))
+    vi.mocked(createAdminClient).mockReturnValue(adminFor(pageFixture()))
     const req = new Request('http://test/api/action-pages/s/cart', {
       method: 'PUT',
       body: JSON.stringify({ items: [{ id: 'prod-1', quantity: 1 }] }),
       headers: { 'content-type': 'application/json' },
     })
-    const res = await PUT(req as any, { params: Promise.resolve({ slug: 's' }) })
+    const res = await PUT(req, { params: Promise.resolve({ slug: 's' }) })
     const body = await res.json()
     expect(body).toEqual({ skipped: true })
     expect(replaceVisitorCart).not.toHaveBeenCalled()
   })
 
   it('writes when claims valid', async () => {
-    ;(createAdminClient as any).mockReturnValue(adminFor(pageFixture()))
-    ;(verifyDeeplink as any).mockReturnValue({ ok: true, claims: { slug: 's', psid: 'PSID', pageId: 'fb', exp: 9 } })
-    ;(replaceVisitorCart as any).mockResolvedValue(undefined)
+    vi.mocked(createAdminClient).mockReturnValue(adminFor(pageFixture()))
+    vi.mocked(verifyDeeplink).mockReturnValue({ ok: true, claims: { slug: 's', psid: 'PSID', pageId: 'fb', exp: 9 } })
+    vi.mocked(replaceVisitorCart).mockResolvedValue(undefined)
     const req = new Request('http://test/api/action-pages/s/cart?p=PSID&g=fb&e=9&t=tok', {
       method: 'PUT',
       body: JSON.stringify({ items: [{ id: 'prod-1', quantity: 2 }] }),
       headers: { 'content-type': 'application/json' },
     })
-    const res = await PUT(req as any, { params: Promise.resolve({ slug: 's' }) })
+    const res = await PUT(req, { params: Promise.resolve({ slug: 's' }) })
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ ok: true })
     expect(replaceVisitorCart).toHaveBeenCalledWith(
@@ -101,11 +101,11 @@ describe('PUT /api/action-pages/[slug]/cart', () => {
   })
 
   it('rejects invalid JSON', async () => {
-    ;(createAdminClient as any).mockReturnValue(adminFor(pageFixture()))
+    vi.mocked(createAdminClient).mockReturnValue(adminFor(pageFixture()))
     const req = new Request('http://test/api/action-pages/s/cart', {
       method: 'PUT', body: 'not json', headers: { 'content-type': 'application/json' },
     })
-    const res = await PUT(req as any, { params: Promise.resolve({ slug: 's' }) })
+    const res = await PUT(req, { params: Promise.resolve({ slug: 's' }) })
     expect(res.status).toBe(400)
   })
 })

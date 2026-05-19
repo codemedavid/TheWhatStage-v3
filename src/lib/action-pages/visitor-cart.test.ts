@@ -4,6 +4,7 @@ import {
   replaceVisitorCart,
   convertVisitorCart,
 } from './visitor-cart'
+import type { SupabaseClient } from '@supabase/supabase-js'
 
 type Row = Record<string, unknown>
 
@@ -25,7 +26,7 @@ function makeAdmin(initial: {
     let mode: 'select' | 'insert' | 'update' | 'delete' = 'select'
     let payload: Row | Row[] | null = null
 
-    const api: any = {
+    const api: Record<string, unknown> = {
       select(_cols: string) { return api },
       eq(col: string, val: unknown) { filters.push({ col, op: 'eq', val }); return api },
       in(col: string, vals: unknown[]) { filters.push({ col, op: 'in', val: vals }); return api },
@@ -71,8 +72,11 @@ function makeAdmin(initial: {
     return api
   }
 
-  return { from: vi.fn((name: string) => builder(name)), _tables: tables }
+  return { from: vi.fn((name: string) => builder(name)), _tables: tables } as unknown as ReturnType<typeof makeAdmin>
 }
+
+// Narrow type for accessing test internals
+type AdminWithTables = ReturnType<typeof makeAdmin> & { _tables: Record<string, Row[]> }
 
 const baseCtx = {
   actionPageId: 'page-1',
@@ -84,7 +88,7 @@ const baseCtx = {
 describe('visitor-cart helpers', () => {
   it('loadActiveVisitorCart returns empty when no cart exists', async () => {
     const admin = makeAdmin()
-    const cart = await loadActiveVisitorCart(admin as any, baseCtx)
+    const cart = await loadActiveVisitorCart(admin as unknown as SupabaseClient, baseCtx)
     expect(cart).toEqual({ items: [] })
   })
 
@@ -96,7 +100,7 @@ describe('visitor-cart helpers', () => {
         { id: 'i2', cart_id: 'c1', product_id: 'prod-2', quantity: 1 },
       ],
     })
-    const cart = await loadActiveVisitorCart(admin as any, baseCtx)
+    const cart = await loadActiveVisitorCart(admin as unknown as SupabaseClient, baseCtx)
     expect(cart.items).toEqual([
       { id: 'prod-1', quantity: 2 },
       { id: 'prod-2', quantity: 1 },
@@ -109,10 +113,11 @@ describe('visitor-cart helpers', () => {
         { id: 'prod-1', user_id: 'owner-1', status: 'published', title: 'Mug', price_amount: 10, currency: 'USD', cover_image_url: null },
       ],
     })
-    await replaceVisitorCart(admin as any, baseCtx, [{ id: 'prod-1', quantity: 3 }])
-    expect((admin as any)._tables.carts).toHaveLength(1)
-    expect((admin as any)._tables.cart_items).toHaveLength(1)
-    expect((admin as any)._tables.cart_items[0]).toMatchObject({
+    await replaceVisitorCart(admin as unknown as SupabaseClient, baseCtx, [{ id: 'prod-1', quantity: 3 }])
+    const t = (admin as unknown as AdminWithTables)._tables
+    expect(t.carts).toHaveLength(1)
+    expect(t.cart_items).toHaveLength(1)
+    expect(t.cart_items[0]).toMatchObject({
       product_id: 'prod-1', quantity: 3, unit_price: 10, name: 'Mug',
     })
   })
@@ -123,11 +128,11 @@ describe('visitor-cart helpers', () => {
         { id: 'prod-1', user_id: 'owner-1', status: 'published', title: 'Mug', price_amount: 10, currency: 'USD', cover_image_url: null },
       ],
     })
-    await replaceVisitorCart(admin as any, baseCtx, [
+    await replaceVisitorCart(admin as unknown as SupabaseClient, baseCtx, [
       { id: 'prod-1', quantity: 1 },
       { id: 'prod-bad', quantity: 9 },
     ])
-    const items = (admin as any)._tables.cart_items
+    const items = (admin as unknown as AdminWithTables)._tables.cart_items
     expect(items).toHaveLength(1)
     expect(items[0].product_id).toBe('prod-1')
   })
@@ -138,23 +143,25 @@ describe('visitor-cart helpers', () => {
       cart_items: [{ id: 'i1', cart_id: 'c1', product_id: 'prod-1', quantity: 2, unit_price: 10, name: 'Mug' }],
       business_items: [],
     })
-    await replaceVisitorCart(admin as any, baseCtx, [])
-    expect((admin as any)._tables.carts).toHaveLength(1)
-    expect((admin as any)._tables.cart_items).toHaveLength(0)
-    expect((admin as any)._tables.carts[0].total_amount).toBeNull()
+    await replaceVisitorCart(admin as unknown as SupabaseClient, baseCtx, [])
+    const t = (admin as unknown as AdminWithTables)._tables
+    expect(t.carts).toHaveLength(1)
+    expect(t.cart_items).toHaveLength(0)
+    expect(t.carts[0].total_amount).toBeNull()
   })
 
   it('convertVisitorCart marks active cart converted', async () => {
     const admin = makeAdmin({
       carts: [{ id: 'c1', action_page_id: 'page-1', psid: 'PSID_A', status: 'active', user_id: 'owner-1' }],
     })
-    await convertVisitorCart(admin as any, baseCtx)
-    expect((admin as any)._tables.carts[0].status).toBe('converted')
-    expect((admin as any)._tables.carts[0].converted_at).toBeTruthy()
+    await convertVisitorCart(admin as unknown as SupabaseClient, baseCtx)
+    const t = (admin as unknown as AdminWithTables)._tables
+    expect(t.carts[0].status).toBe('converted')
+    expect(t.carts[0].converted_at).toBeTruthy()
   })
 
   it('convertVisitorCart no-ops when there is no active cart', async () => {
     const admin = makeAdmin()
-    await expect(convertVisitorCart(admin as any, baseCtx)).resolves.toBeUndefined()
+    await expect(convertVisitorCart(admin as unknown as SupabaseClient, baseCtx)).resolves.toBeUndefined()
   })
 })

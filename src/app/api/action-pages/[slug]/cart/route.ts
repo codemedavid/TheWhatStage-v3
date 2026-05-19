@@ -60,7 +60,7 @@ export async function GET(
     fbPageId: claims.pageId,
   }
   try {
-    const cart = await loadActiveVisitorCart(admin as any, cartCtx)
+    const cart = await loadActiveVisitorCart(admin, cartCtx)
     return NextResponse.json(cart)
   } catch {
     return NextResponse.json({ items: [] })
@@ -104,7 +104,7 @@ export async function PUT(
     fbPageId: claims.pageId,
   }
   try {
-    await replaceVisitorCart(admin as any, cartCtx, items)
+    await replaceVisitorCart(admin, cartCtx, items)
     return NextResponse.json({ ok: true })
   } catch (e) {
     console.error('[carts] PUT failed', e instanceof Error ? e.message : e)
