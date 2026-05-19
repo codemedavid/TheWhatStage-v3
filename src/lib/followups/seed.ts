@@ -10,7 +10,8 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { shouldSeed } from './gates'
-import { OFFSETS_MS, REAL_CONVERSATION_LEAD_MSG_THRESHOLD } from './config'
+import { REAL_CONVERSATION_LEAD_MSG_THRESHOLD } from './config'
+import { loadFollowupSettings, resolveEnabledOffsets } from './settings'
 
 export interface SeedArgs {
   threadId: string
@@ -36,7 +37,8 @@ export async function maybeScheduleFollowup(
   args: SeedArgs,
 ): Promise<void> {
   // 1. Cancel any active schedule for this thread. Always runs — even when
-  //    gates will fail — so a lead crossing the 15-message line cleans up.
+  //    gates or settings will block re-seeding — so a lead crossing the
+  //    15-message line (or one whose user just turned off the engine) cleans up.
   await cancelActiveFollowup(admin, args.threadId)
 
   // 2. Re-evaluate gates after cancel.
@@ -46,9 +48,17 @@ export async function maybeScheduleFollowup(
   })
   if (!gate.ok) return
 
+  // 3. Resolve the user's per-account schedule. Empty snapshot means
+  //    master OFF, all rows disabled, or a bad config — never seed.
+  const settings = await loadFollowupSettings(admin, args.userId)
+  const snapshot = resolveEnabledOffsets(settings)
+  if (snapshot.length === 0) return
+
   const conversation_kind =
     gate.inboundCount >= REAL_CONVERSATION_LEAD_MSG_THRESHOLD ? 'real' : 'generic'
-  const next_run_at = new Date(Date.parse(args.lastInboundAt) + OFFSETS_MS[0]).toISOString()
+  const next_run_at = new Date(
+    Date.parse(args.lastInboundAt) + snapshot[0].offset_ms,
+  ).toISOString()
 
   const { error } = await admin
     .from('lead_followup_schedules')
@@ -63,6 +73,7 @@ export async function maybeScheduleFollowup(
       status: 'pending',
       conversation_kind,
       lead_inbound_count_at_seed: gate.inboundCount,
+      offsets_snapshot: snapshot,
     })
 
   // 23505 = unique_violation. A concurrent inbound already seeded — fine.
