@@ -96,4 +96,63 @@ describe('PUT /api/chatbot/followup-settings', () => {
       { onConflict: 'user_id' },
     )
   })
+
+  it('accepts payloads missing the instruction field and defaults to ""', async () => {
+    getUserMock.mockResolvedValue({ data: { user: { id: 'u1' } } })
+    let captured: unknown = null
+    const upsertSpy = vi.fn(async (row: unknown) => {
+      captured = row
+      return { error: null }
+    })
+    supabaseFromMock.mockImplementation(() => ({ upsert: upsertSpy }))
+
+    const legacyPayload = {
+      enabled: true,
+      touchpoints: DEFAULT_FOLLOWUP_SETTINGS.touchpoints.map((t) => ({
+        enabled: t.enabled,
+        offset_ms: t.offset_ms,
+      })),
+    }
+    const res = await PUT(makeReq({ settings: legacyPayload }))
+    expect(res.status).toBe(200)
+    const stored = (captured as { user_id: string; followup_settings: { touchpoints: Array<{ instruction: string }> } })
+      .followup_settings
+    for (const tp of stored.touchpoints) {
+      expect(tp.instruction).toBe('')
+    }
+  })
+
+  it('round-trips a payload with instructions set', async () => {
+    getUserMock.mockResolvedValue({ data: { user: { id: 'u1' } } })
+    const upsertSpy = vi.fn(async () => ({ error: null }))
+    supabaseFromMock.mockImplementation(() => ({ upsert: upsertSpy }))
+
+    const withInstrs = {
+      ...DEFAULT_FOLLOWUP_SETTINGS,
+      touchpoints: DEFAULT_FOLLOWUP_SETTINGS.touchpoints.map((t, i) => ({
+        ...t,
+        instruction: `step ${i + 1} guide`,
+      })),
+    }
+    const res = await PUT(makeReq({ settings: withInstrs }))
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { settings: typeof withInstrs }
+    expect(body.settings.touchpoints.map((t) => t.instruction)).toEqual([
+      'step 1 guide', 'step 2 guide', 'step 3 guide', 'step 4 guide',
+      'step 5 guide', 'step 6 guide', 'step 7 guide',
+    ])
+  })
+
+  it('rejects an instruction longer than 200 chars with 400', async () => {
+    getUserMock.mockResolvedValue({ data: { user: { id: 'u1' } } })
+    const bad = {
+      ...DEFAULT_FOLLOWUP_SETTINGS,
+      touchpoints: DEFAULT_FOLLOWUP_SETTINGS.touchpoints.map((t, i) => ({
+        ...t,
+        instruction: i === 0 ? 'x'.repeat(201) : '',
+      })),
+    }
+    const res = await PUT(makeReq({ settings: bad }))
+    expect(res.status).toBe(400)
+  })
 })
