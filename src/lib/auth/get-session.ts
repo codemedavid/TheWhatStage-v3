@@ -1,5 +1,6 @@
 import { cache } from 'react'
 import { createClient } from '@/lib/supabase/server'
+import { isAccountStatus, type AccountStatus } from './account-status'
 
 export type Role = 'user' | 'admin' | 'superadmin'
 
@@ -8,6 +9,7 @@ export type SessionContext = {
   email: string
   fullName: string
   role: Role
+  status: AccountStatus
 }
 
 export const getSession = cache(async (): Promise<SessionContext | null> => {
@@ -17,7 +19,7 @@ export const getSession = cache(async (): Promise<SessionContext | null> => {
 
   const { data: profile } = await supabase
     .from('profiles')
-    .select('full_name, role')
+    .select('full_name, role, status')
     .eq('id', user.id)
     .single()
 
@@ -26,10 +28,16 @@ export const getSession = cache(async (): Promise<SessionContext | null> => {
     (user.app_metadata?.role as Role | undefined) ??
     'user'
 
+  const status: AccountStatus = isAccountStatus(profile?.status) ? profile.status : 'active'
+
+  // Superadmin is never gated — they own the kill switch.
+  if (status !== 'active' && role !== 'superadmin') return null
+
   return {
     userId: user.id,
     email: user.email ?? '',
     fullName: profile?.full_name ?? '',
     role,
+    status,
   }
 })

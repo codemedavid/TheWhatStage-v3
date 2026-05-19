@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import type { createAdminClient } from '@/lib/supabase/admin'
+import { isUserActive } from './_status'
 
 type AdminClient = ReturnType<typeof createAdminClient>
 
@@ -69,6 +70,10 @@ export async function handlePostback(
   const userId = pageOwnerId(page)
   if (!userId) {
     console.warn('[fb.webhook] postback page has no owner', { fbPageId })
+    return null
+  }
+
+  if (!(await isUserActive(admin, userId))) {
     return null
   }
 

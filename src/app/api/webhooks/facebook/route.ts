@@ -3,6 +3,7 @@ import { after, NextResponse, type NextRequest } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { interruptWorkflowRun } from '@/lib/workflow/trigger'
 import { handlePostback } from './_postback'
+import { isUserActive } from './_status'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -243,6 +244,13 @@ async function handleEvent(
     return null
   }
 
+  // Single kill-switch for the bot: paused/pending owners get no replies and
+  // no writes (no leads, no threads, no message rows). Their inbound DMs are
+  // silently dropped.
+  if (!(await isUserActive(admin, userId))) {
+    return null
+  }
+
   // Upsert thread (page_id, psid) → returns id.
   const { data: thread, error: threadErr } = await admin
     .from('messenger_threads')
@@ -356,6 +364,10 @@ async function handleFeedChange(
   const userId = Array.isArray(conn) ? conn[0]?.user_id : conn?.user_id
   if (!userId) {
     console.warn('[fb.webhook] page has no owner for comment', { fbPageId })
+    return null
+  }
+
+  if (!(await isUserActive(admin, userId))) {
     return null
   }
 

@@ -50,7 +50,17 @@ function pageLookup(data = { facebook_connections: { user_id: 'user-1' } }) {
   }
 }
 
-function makeCommentAdminMock() {
+function profilesLookup(status: 'active' | 'pending' | 'paused' = 'active') {
+  return {
+    select: vi.fn(() => ({
+      eq: vi.fn(() => ({
+        maybeSingle: vi.fn(async () => ({ data: { status }, error: null })),
+      })),
+    })),
+  }
+}
+
+function makeCommentAdminMock(options: { ownerStatus?: 'active' | 'pending' | 'paused' } = {}) {
   const commentUpsert = vi.fn<(payload: unknown, options: unknown) => unknown>(() => ({
     select: vi.fn(() => ({
       maybeSingle: vi.fn(async () => ({ data: { id: 'comment-job-1' }, error: null })),
@@ -59,6 +69,7 @@ function makeCommentAdminMock() {
 
   mocks.from.mockImplementation((table: string) => {
     if (table === 'facebook_pages') return pageLookup()
+    if (table === 'profiles') return profilesLookup(options.ownerStatus ?? 'active')
     if (table === 'facebook_comment_jobs') {
       return { upsert: commentUpsert }
     }
@@ -68,7 +79,7 @@ function makeCommentAdminMock() {
   return { commentUpsert }
 }
 
-function makeMessengerAdminMock() {
+function makeMessengerAdminMock(options: { ownerStatus?: 'active' | 'pending' | 'paused' } = {}) {
   const messengerJobInsert = vi.fn(() => ({
     select: vi.fn(() => ({
       single: vi.fn(async () => ({ data: { id: 'messenger-job-1' }, error: null })),
@@ -77,6 +88,7 @@ function makeMessengerAdminMock() {
 
   mocks.from.mockImplementation((table: string) => {
     if (table === 'facebook_pages') return pageLookup()
+    if (table === 'profiles') return profilesLookup(options.ownerStatus ?? 'active')
     if (table === 'messenger_threads') {
       return {
         upsert: vi.fn(() => ({
@@ -301,5 +313,64 @@ describe('facebook webhook comment events', () => {
       method: 'POST',
       headers: { 'x-worker-secret': 'messenger-secret' },
     })
+  })
+
+  it('skips messenger jobs when the page owner is paused', async () => {
+    const { messengerJobInsert } = makeMessengerAdminMock({ ownerStatus: 'paused' })
+
+    const res = await postWebhook({
+      object: 'page',
+      entry: [
+        {
+          id: 'fb-page-1',
+          messaging: [
+            {
+              sender: { id: 'psid-1' },
+              recipient: { id: 'fb-page-1' },
+              message: { mid: 'mid-paused', text: 'Hello' },
+            },
+          ],
+        },
+      ],
+    })
+
+    await Promise.resolve()
+
+    expect(res.status).toBe(200)
+    expect(messengerJobInsert).not.toHaveBeenCalled()
+    // No worker fetch fired because nothing was enqueued.
+    expect(global.fetch).not.toHaveBeenCalled()
+  })
+
+  it('skips comment jobs when the page owner is paused', async () => {
+    const { commentUpsert } = makeCommentAdminMock({ ownerStatus: 'paused' })
+
+    const res = await postWebhook({
+      object: 'page',
+      entry: [
+        {
+          id: 'fb-page-1',
+          changes: [
+            {
+              field: 'feed',
+              value: {
+                item: 'comment',
+                verb: 'add',
+                comment_id: 'comment-paused',
+                parent_id: 'parent-1',
+                post_id: 'post-1',
+                message: 'Interested',
+              },
+            },
+          ],
+        },
+      ],
+    })
+
+    await Promise.resolve()
+
+    expect(res.status).toBe(200)
+    expect(commentUpsert).not.toHaveBeenCalled()
+    expect(global.fetch).not.toHaveBeenCalled()
   })
 })

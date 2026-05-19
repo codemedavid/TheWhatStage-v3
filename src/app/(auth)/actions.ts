@@ -4,7 +4,7 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { signUpSchema, signInSchema } from '@/lib/auth/schemas'
-import { initOnboardingForProfile } from '@/lib/onboarding/state'
+import { isAccountStatus, pathForBlockedStatus } from '@/lib/auth/account-status'
 import { getPostAuthRedirect } from '@/lib/onboarding/post-auth-redirect'
 
 export type AuthFormState = {
@@ -55,28 +55,11 @@ export async function signUpAction(
     return { formError: 'Could not create account. Please try again.' }
   }
 
-  const supabase = await createClient()
-  const { error: signInErr } = await supabase.auth.signInWithPassword({
-    email: parsed.data.email,
-    password: parsed.data.password,
-  })
-  if (signInErr) {
-    return { formError: 'Account created but auto sign-in failed. Try logging in.' }
-  }
-
-  const { data: meAuth } = await supabase.auth.getUser()
-  if (meAuth.user) {
-    try {
-      await initOnboardingForProfile(meAuth.user.id)
-    } catch (err) {
-      console.error('[signUpAction] init onboarding state', err)
-      return {
-        formError: 'Account created but setup could not start. Please sign in to try again.',
-      }
-    }
-  }
-
-  redirect('/onboarding/welcome')
+  // New accounts land as 'pending' (handle_new_user trigger). They can't use
+  // the app until the superadmin approves them, so skip auto sign-in and
+  // onboarding init — both will happen the first time they sign in post-
+  // approval (ensureOnboardingState is called defensively from save actions).
+  redirect('/account-pending')
 }
 
 export async function signInAction(
@@ -93,13 +76,30 @@ export async function signInAction(
   }
 
   const supabase = await createClient()
-  const { error } = await supabase.auth.signInWithPassword({
+  const { data: signInData, error } = await supabase.auth.signInWithPassword({
     email: parsed.data.email,
     password: parsed.data.password,
   })
 
   if (error) {
     return { formError: 'Invalid email or password.' }
+  }
+
+  const userId = signInData.user?.id
+  if (userId) {
+    const admin = createAdminClient()
+    const { data: profile } = await admin
+      .from('profiles')
+      .select('status, role')
+      .eq('id', userId)
+      .single()
+
+    const status = isAccountStatus(profile?.status) ? profile.status : 'active'
+    const blockedPath = profile?.role === 'superadmin' ? null : pathForBlockedStatus(status)
+    if (blockedPath) {
+      await supabase.auth.signOut()
+      redirect(blockedPath)
+    }
   }
 
   redirect(await getPostAuthRedirect())

@@ -14,6 +14,7 @@ interface DbState {
   property: { id: string; title: string } | null
   thread: { id: string } | null
   insertConflict: boolean
+  ownerStatus?: 'active' | 'pending' | 'paused'
 }
 
 function makeAdmin(state: DbState) {
@@ -36,6 +37,8 @@ function makeAdmin(state: DbState) {
             return state.property
               ? { data: state.property, error: null }
               : { data: null, error: null }
+          if (table === 'profiles')
+            return { data: { status: state.ownerStatus ?? 'active' }, error: null }
           return { data: null, error: null }
         },
         single: async () => ({ data: state.thread, error: null }),
@@ -127,5 +130,16 @@ describe('handlePostback', () => {
       { sender: { id: PSID }, postback: { payload: `rec_inquire:${PROP_SLUG}` }, timestamp: 1700000000 } as never,
     )
     expect(r).toBeNull()
+  })
+
+  it('returns null and writes nothing when the page owner is paused', async () => {
+    const admin = makeAdmin({ ...baseState, ownerStatus: 'paused' })
+    const r = await handlePostback(
+      admin as unknown as Parameters<typeof handlePostback>[0],
+      FB_PAGE_ID,
+      { sender: { id: PSID }, postback: { payload: `rec_inquire:${PROP_SLUG}` }, timestamp: 1700000000 } as never,
+    )
+    expect(r).toBeNull()
+    expect(admin.calls.find((c) => c.op === 'insert')).toBeUndefined()
   })
 })
