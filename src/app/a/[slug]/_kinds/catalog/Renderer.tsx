@@ -83,12 +83,91 @@ export default function CatalogRenderer({
   )
 
   const [quantities, setQuantities] = useState<Record<string, number>>({})
+  const [, startTransition] = useTransition()
+
+  const cartUrl = useMemo(() => {
+    if (!claims || !rawToken) return null
+    const sp = new URLSearchParams()
+    sp.set('p', claims.psid)
+    sp.set('g', claims.pageId)
+    sp.set('e', String(claims.exp))
+    sp.set('t', rawToken)
+    return `/api/action-pages/${page.slug}/cart?${sp.toString()}`
+  }, [claims, rawToken, page.slug])
+
+  // Hydrate from saved cart on mount.
+  const hydrated = useRef(false)
+  useEffect(() => {
+    if (!cartUrl || hydrated.current) return
+    hydrated.current = true
+    fetch(cartUrl, { method: 'GET' })
+      .then((r) => (r.ok ? r.json() : { items: [] }))
+      .then((body: { items?: { id: string; quantity: number }[] }) => {
+        const next: Record<string, number> = {}
+        for (const i of body.items ?? []) {
+          if (i.id && typeof i.quantity === 'number' && i.quantity > 0) {
+            next[i.id] = Math.min(999, Math.floor(i.quantity))
+          }
+        }
+        if (Object.keys(next).length > 0) {
+          startTransition(() => setQuantities(next))
+        }
+      })
+      .catch(() => {
+        /* network/parse failure — keep local state */
+      })
+  }, [cartUrl, startTransition])
+
+  // Debounced write of the current quantities to the server.
+  const writeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const inFlight = useRef(false)
+  const pendingSnapshot = useRef<Record<string, number> | null>(null)
+
+  useEffect(() => {
+    if (!cartUrl) return
+    if (!hydrated.current) return
+    if (writeTimer.current) clearTimeout(writeTimer.current)
+    writeTimer.current = setTimeout(() => {
+      const snapshot = { ...quantities }
+      if (inFlight.current) {
+        pendingSnapshot.current = snapshot
+        return
+      }
+      void sendSnapshot(snapshot)
+    }, 500)
+    return () => {
+      if (writeTimer.current) clearTimeout(writeTimer.current)
+    }
+
+    async function sendSnapshot(snap: Record<string, number>) {
+      inFlight.current = true
+      try {
+        const items = Object.entries(snap)
+          .filter(([, q]) => q > 0)
+          .map(([id, quantity]) => ({ id, quantity }))
+        await fetch(cartUrl!, {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ items }),
+        })
+      } catch {
+        /* swallow — visitor's local state is still correct */
+      } finally {
+        inFlight.current = false
+        if (pendingSnapshot.current) {
+          const queued = pendingSnapshot.current
+          pendingSnapshot.current = null
+          void sendSnapshot(queued)
+        }
+      }
+    }
+  }, [quantities, cartUrl])
+
   const [activeTab, setActiveTab] = useState<string>(ALL_TAB)
   const [search, setSearch] = useState('')
   const [cartOpen, setCartOpen] = useState(false)
   const [previewProduct, setPreviewProduct] = useState<PublicProductCard | null>(null)
   const [pulse, setPulse] = useState(0)
-  const [, startTransition] = useTransition()
 
   // Open the product modal when arriving with ?product=<slug> — used by
   // Messenger carousel "View product" links to deep-link into a single item.

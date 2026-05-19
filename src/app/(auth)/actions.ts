@@ -55,10 +55,15 @@ export async function signUpAction(
     return { formError: 'Could not create account. Please try again.' }
   }
 
-  // New accounts land as 'pending' (handle_new_user trigger). They can't use
-  // the app until the superadmin approves them, so skip auto sign-in and
-  // onboarding init — both will happen the first time they sign in post-
-  // approval (ensureOnboardingState is called defensively from save actions).
+  // Sign in immediately so the browser has a Supabase session. The account
+  // is still 'pending' so getSession() returns null and the app stays locked,
+  // but once a superadmin approves them the (auth) layout will detect the
+  // active status on the next refresh and redirect automatically.
+  const supabase = await createClient()
+  await supabase.auth.signInWithPassword({
+    email: parsed.data.email,
+    password: parsed.data.password,
+  })
   redirect('/account-pending')
 }
 
@@ -97,7 +102,8 @@ export async function signInAction(
     const status = isAccountStatus(profile?.status) ? profile.status : 'active'
     const blockedPath = profile?.role === 'superadmin' ? null : pathForBlockedStatus(status)
     if (blockedPath) {
-      await supabase.auth.signOut()
+      // Keep the session alive — the (auth) layout polls getSession() and will
+      // auto-redirect to the dashboard as soon as the admin lifts the block.
       redirect(blockedPath)
     }
   }

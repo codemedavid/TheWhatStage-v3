@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { ApprovalPoller } from '../_components/ApprovalPoller'
 
 export const metadata = {
   title: 'Account paused · WhatStage',
@@ -7,6 +8,7 @@ export const metadata = {
 export default function AccountPausedPage() {
   return (
     <div className="flex flex-col">
+      <ApprovalPoller />
       <h1 className="mb-2.5 font-[family-name:var(--font-instrument-serif)] text-[clamp(34px,3.6vw,44px)] font-normal leading-[1.1] tracking-[-0.02em]">
         Account <em className="italic text-[#C96442]">paused.</em>
       </h1>
