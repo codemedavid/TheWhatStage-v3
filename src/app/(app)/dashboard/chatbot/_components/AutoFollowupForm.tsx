@@ -239,7 +239,6 @@ export function AutoFollowupForm({ initial }: { initial: FollowupSettings }) {
                   onChange={(e) => setRow(idx, { instruction: e.target.value })}
                   disabled={!row.enabled}
                   placeholder="Leave blank to use the default style for this touchpoint."
-                  aria-label={`Touchpoint ${idx + 1} message guide`}
                 />
                 <span className="afu-row-guide-count" aria-hidden="true">
                   {row.instruction.length}/200
