@@ -73,13 +73,13 @@ describe('maybeScheduleFollowup', () => {
     expect(inserted.started_at).toBe(lastInboundAt)
     expect(inserted.next_run_at).toBe(new Date(Date.parse(lastInboundAt) + 5 * 60_000).toISOString())
     expect(inserted.offsets_snapshot).toEqual([
-      { offset_ms: 300000,   slot: 0 },
-      { offset_ms: 3600000,  slot: 1 },
-      { offset_ms: 18000000, slot: 2 },
-      { offset_ms: 28800000, slot: 3 },
-      { offset_ms: 43200000, slot: 4 },
-      { offset_ms: 64800000, slot: 5 },
-      { offset_ms: 86400000, slot: 6 },
+      { offset_ms: 300000,   slot: 0, instruction: 'Quick light hello — just ask if still interested po.' },
+      { offset_ms: 3600000,  slot: 1, instruction: 'Friendly nudge — offer to answer any questions.' },
+      { offset_ms: 18000000, slot: 2, instruction: 'Share one concrete benefit or social proof — keep it short.' },
+      { offset_ms: 28800000, slot: 3, instruction: "Ask one focused question to surface what's blocking them." },
+      { offset_ms: 43200000, slot: 4, instruction: 'Light reminder — emphasize convenience and flexibility.' },
+      { offset_ms: 64800000, slot: 5, instruction: 'Soft scarcity or a clear call to decide — no pressure.' },
+      { offset_ms: 86400000, slot: 6, instruction: 'Last graceful check — invite them to message anytime.' },
     ])
   })
 
@@ -134,10 +134,10 @@ describe('maybeScheduleFollowup', () => {
     })
     const ins = captured.find((c) => c.op === 'insert')!.values as Record<string, unknown>
     expect(ins.offsets_snapshot).toEqual([
-      { offset_ms: 300000,   slot: 0 },
-      { offset_ms: 18000000, slot: 2 },
-      { offset_ms: 43200000, slot: 4 },
-      { offset_ms: 86400000, slot: 6 },
+      { offset_ms: 300000,   slot: 0, instruction: 'Quick light hello — just ask if still interested po.' },
+      { offset_ms: 18000000, slot: 2, instruction: 'Share one concrete benefit or social proof — keep it short.' },
+      { offset_ms: 43200000, slot: 4, instruction: 'Light reminder — emphasize convenience and flexibility.' },
+      { offset_ms: 86400000, slot: 6, instruction: 'Last graceful check — invite them to message anytime.' },
     ])
     // next_run_at uses the first enabled offset (slot 0 = 5m).
     expect(ins.next_run_at).toBe(new Date(Date.parse(lastInboundAt) + 300_000).toISOString())
