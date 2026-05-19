@@ -1200,6 +1200,45 @@
   padding-left: 70px;
 }
 
+.afu-row-guide {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 64px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding-left: 70px;
+  padding-top: 2px;
+}
+
+.afu-row-guide-label {
+  font-size: 12px;
+  color: #6B7280;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.afu-row-guide-input {
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid #D1D5DB;
+  border-radius: 6px;
+  font-size: 13px;
+  background: white;
+}
+
+.afu-row-guide-input:disabled {
+  background: #F9FAFB;
+  cursor: not-allowed;
+}
+
+.afu-row-guide-count {
+  font-size: 11px;
+  color: #9CA3AF;
+  font-variant-numeric: tabular-nums;
+  min-width: 48px;
+  text-align: right;
+}
+
 .afu-form-error {
   background: #FEF2F2;
   border: 1px solid #FECACA;
