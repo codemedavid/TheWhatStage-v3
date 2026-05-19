@@ -7,6 +7,8 @@ import { ConfigForm } from './_components/ConfigForm'
 import { TestChat } from './_components/TestChat'
 import { PersonalityTemplates } from './_components/PersonalityTemplates'
 import { PrimaryGoalSection, type PrimaryGoalOption } from './_components/PrimaryGoalSection'
+import { ChatbotTabs } from './_components/ChatbotTabs'
+import { AutoFollowupForm } from './_components/AutoFollowupForm'
 import type { PersonalityTemplate } from '@/lib/chatbot/personality/types'
 import './chatbot.css'
 
@@ -47,25 +49,38 @@ export default async function ChatbotPage() {
     ? (templates.find((t) => t.id === config.activeTemplateId) ?? null)
     : null
 
+  const personalityContent = (
+    <>
+      <PersonalityTemplates
+        templates={templates}
+        activeTemplate={activeTemplate as PersonalityTemplate | null}
+        activeAdoptionId={latestAdoption?.id ?? null}
+      />
+      <PrimaryGoalSection
+        current={config.primaryActionPageId ?? null}
+        options={goalOptions}
+      />
+      <ConfigForm
+        key={config.updatedAt}
+        initial={config}
+        mediaFolders={mediaFolders}
+        mediaAssets={mediaAssets}
+        actionPages={actionPages}
+      />
+    </>
+  )
+
+  const followupContent = (
+    <AutoFollowupForm initial={config.followupSettings} />
+  )
+
   return (
     <div data-chatbot-page>
       <div className="cb-wrap">
         <div className="cb-editor">
-          <PersonalityTemplates
-            templates={templates}
-            activeTemplate={activeTemplate as PersonalityTemplate | null}
-            activeAdoptionId={latestAdoption?.id ?? null}
-          />
-          <PrimaryGoalSection
-            current={config.primaryActionPageId ?? null}
-            options={goalOptions}
-          />
-          <ConfigForm
-            key={config.updatedAt}
-            initial={config}
-            mediaFolders={mediaFolders}
-            mediaAssets={mediaAssets}
-            actionPages={actionPages}
+          <ChatbotTabs
+            personalityContent={personalityContent}
+            followupContent={followupContent}
           />
         </div>
 
