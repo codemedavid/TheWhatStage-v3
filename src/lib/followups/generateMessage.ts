@@ -2,12 +2,13 @@
 //
 // One LLM call per follow-up. Hard rules baked into the system prompt:
 //   one line, ≤200 chars, no dashes, no markdown, match personality.
-// Offset 0 is always a light check-in (per spec) — short-circuit to the
-// fallback line so we don't pay for a model call on a fixed message.
-// Generic-kind messages don't include the message history. Real-kind
-// messages pass the last 20 turns so the LLM can reference what was said.
-// 8s LLM timeout; on failure or empty response, fall back to a curated
-// per-offset pool so the user never sees a dropped touchpoint.
+// Slot 0 short-circuits to the fallback pool ONLY when no per-touchpoint
+// instruction is set — when the user provides a guide for slot 0 we honor
+// it and pay for the LLM call. Generic-kind messages don't include the
+// message history. Real-kind messages pass the last 20 turns so the LLM
+// can reference what was said. 8s LLM timeout; on failure or empty response,
+// fall back to a curated per-offset pool so the user never sees a dropped
+// touchpoint.
 
 import { HfRouterLlm } from '@/lib/rag/llm'
 import { ragConfig } from '@/lib/rag/config'
@@ -23,11 +24,9 @@ export interface GenerateArgs {
   leadName: string | null
   personalityBlock: string
   recentMessages: Array<{ role: 'user' | 'assistant'; content: string }>
+  instruction: string
 }
 
-// Per-offset fallback pool. Indices 0..6 line up with OFFSETS_MS. Each pool
-// has at least one Taglish line that uses the lead's first name. Strings here
-// are pre-sanitized: no dashes, one line.
 const FALLBACK_POOL: Record<ConversationKind, string[]> = {
   generic: [
     'Hi {name}, interested pa po kayo?',
@@ -72,10 +71,18 @@ function buildSystemPrompt(args: GenerateArgs): string {
   const fnHint = firstName(args.leadName) ? `Use the customer's first name once: ${firstName(args.leadName)}.\n` : ''
   const prefix = `${manilaNowBlock()}\n\n`
 
+  const trimmedInstr = args.instruction?.trim() ?? ''
+  const guide = trimmedInstr
+    ? `Touchpoint guide for THIS message (#${args.slot + 1} of 7):\n` +
+      `${JSON.stringify(trimmedInstr)}\n` +
+      `Follow this guide. Keep the personality and language rules.\n\n`
+    : ''
+
   if (args.kind === 'generic') {
     return (
       prefix +
       `${personality}` +
+      `${guide}` +
       `You are writing follow-up message #${args.slot + 1} of 7 to a Messenger lead who replied earlier ` +
       `but has gone quiet. The previous exchange had less than 4 messages from the lead, so DO NOT pretend ` +
       `to remember specifics. Write a warm, light check-in that nudges them to reply. ` +
@@ -85,6 +92,7 @@ function buildSystemPrompt(args: GenerateArgs): string {
   return (
     prefix +
     `${personality}` +
+    `${guide}` +
     `You are writing follow-up message #${args.slot + 1} of 7 to a Messenger lead who has gone quiet ` +
     `after a real back-and-forth. Reference what was already discussed naturally and propose a concrete ` +
     `next step or ask one focused question. ${fnHint}${rules}`
@@ -110,7 +118,8 @@ async function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
 }
 
 export async function generateFollowupMessage(args: GenerateArgs): Promise<string> {
-  if (args.slot === 0) {
+  const hasInstruction = (args.instruction ?? '').trim().length > 0
+  if (!hasInstruction && args.slot === 0) {
     return fallback(args.kind, 0, args.leadName)
   }
   try {
