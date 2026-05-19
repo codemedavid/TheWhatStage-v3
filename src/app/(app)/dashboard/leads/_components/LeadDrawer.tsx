@@ -11,6 +11,7 @@ import { ConversationPanel } from './ConversationPanel'
 import { CommentsPanel } from './CommentsPanel'
 import { SubmissionsPanel } from './SubmissionsPanel'
 import { OrdersPanel } from './OrdersPanel'
+import { CartsPanel } from './CartsPanel'
 import { StageJourney } from './StageJourney'
 
 type Tab =
@@ -18,6 +19,7 @@ type Tab =
   | 'conversation'
   | 'comments'
   | 'orders'
+  | 'carts'
   | 'appointments'
   | 'forms'
 
@@ -208,6 +210,7 @@ export function LeadDrawer({
                 'conversation',
                 'comments',
                 'orders',
+                'carts',
                 'appointments',
                 'forms',
               ] as const
@@ -231,9 +234,11 @@ export function LeadDrawer({
                         ? 'Comments'
                         : t === 'orders'
                           ? 'Orders'
-                          : t === 'appointments'
-                            ? 'Appointments'
-                            : 'Forms'}
+                          : t === 'carts'
+                            ? 'Carts'
+                            : t === 'appointments'
+                              ? 'Appointments'
+                              : 'Forms'}
                   {active && (
                     <span
                       aria-hidden
@@ -255,6 +260,8 @@ export function LeadDrawer({
             <CommentsPanel leadId={form.id} />
           ) : mode === 'edit' && tab === 'orders' ? (
             <OrdersPanel leadId={form.id} />
+          ) : mode === 'edit' && tab === 'carts' ? (
+            <CartsPanel leadId={form.id} />
           ) : mode === 'edit' && tab === 'appointments' ? (
             <SubmissionsPanel
               leadId={form.id}
