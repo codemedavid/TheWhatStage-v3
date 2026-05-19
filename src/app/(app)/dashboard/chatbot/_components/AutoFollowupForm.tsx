@@ -12,6 +12,7 @@ interface RowDraft {
   enabled: boolean
   value: number
   unit: Unit
+  instruction: string
 }
 
 interface FormState {
@@ -41,7 +42,7 @@ function settingsToState(s: FollowupSettings): FormState {
     enabled: s.enabled,
     rows: s.touchpoints.map((t) => {
       const { value, unit } = msToDraft(t.offset_ms)
-      return { enabled: t.enabled, value, unit }
+      return { enabled: t.enabled, value, unit, instruction: t.instruction }
     }),
   }
 }
@@ -52,6 +53,7 @@ function stateToSettings(s: FormState): FollowupSettings {
     touchpoints: s.rows.map((r) => ({
       enabled: r.enabled,
       offset_ms: draftToMs(r),
+      instruction: r.instruction,
     })),
   }
 }
@@ -224,6 +226,25 @@ export function AutoFollowupForm({ initial }: { initial: FollowupSettings }) {
               </select>
               <span className="afu-row-suffix">after last reply</span>
               {err && <span className="afu-row-error" role="alert">{err}</span>}
+              <div className="afu-row-guide">
+                <label className="afu-row-guide-label" htmlFor={`afu-guide-${idx}`}>
+                  Guide
+                </label>
+                <input
+                  id={`afu-guide-${idx}`}
+                  type="text"
+                  className="afu-row-guide-input"
+                  maxLength={200}
+                  value={row.instruction}
+                  onChange={(e) => setRow(idx, { instruction: e.target.value })}
+                  disabled={!row.enabled}
+                  placeholder="Leave blank to use the default style for this touchpoint."
+                  aria-label={`Touchpoint ${idx + 1} message guide`}
+                />
+                <span className="afu-row-guide-count" aria-hidden="true">
+                  {row.instruction.length}/200
+                </span>
+              </div>
             </li>
           )
         })}
