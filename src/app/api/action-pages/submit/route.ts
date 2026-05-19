@@ -18,6 +18,7 @@ import { deeplinkActionPageUrl } from '@/lib/action-pages/urls'
 import { getDefaultStageKind, resolveDefaultStageId } from '@/lib/action-pages/default-stage'
 import { createFromSubmission, snapshotMethod } from '@/lib/order-payments/server'
 import type { PaymentMethod } from '@/lib/payment-methods/types'
+import { convertVisitorCart } from '@/lib/action-pages/visitor-cart'
 
 export const dynamic = 'force-dynamic'
 
@@ -275,6 +276,22 @@ export async function POST(req: NextRequest) {
         },
         { status: 400 },
       )
+    }
+
+    if (psid && fbPageId) {
+      try {
+        await convertVisitorCart(admin, {
+          actionPageId: page.id,
+          psid,
+          pageOwnerId: page.user_id,
+          fbPageId,
+        })
+      } catch (e) {
+        console.error(
+          '[submit] convertVisitorCart failed',
+          e instanceof Error ? e.message : e,
+        )
+      }
     }
   }
 
