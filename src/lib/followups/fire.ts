@@ -142,6 +142,7 @@ export async function handleFollowupSend(
     leadName,
     personalityBlock,
     recentMessages,
+    instruction: entry.instruction ?? '',
   })
 
   if (!text) {

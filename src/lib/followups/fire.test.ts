@@ -29,7 +29,7 @@ interface FakeRow {
   next_offset_idx: number
   conversation_kind: 'generic' | 'real'
   status: string
-  offsets_snapshot: Array<{ offset_ms: number; slot: number }>
+  offsets_snapshot: Array<{ offset_ms: number; slot: number; instruction?: string }>
 }
 
 function makeAdmin(seed: {
@@ -87,13 +87,13 @@ function makeAdmin(seed: {
 }
 
 const DEFAULT_SNAPSHOT = [
-  { offset_ms: 300000,   slot: 0 },
-  { offset_ms: 3600000,  slot: 1 },
-  { offset_ms: 18000000, slot: 2 },
-  { offset_ms: 28800000, slot: 3 },
-  { offset_ms: 43200000, slot: 4 },
-  { offset_ms: 64800000, slot: 5 },
-  { offset_ms: 86400000, slot: 6 },
+  { offset_ms: 300000,   slot: 0, instruction: '' },
+  { offset_ms: 3600000,  slot: 1, instruction: '' },
+  { offset_ms: 18000000, slot: 2, instruction: '' },
+  { offset_ms: 28800000, slot: 3, instruction: '' },
+  { offset_ms: 43200000, slot: 4, instruction: '' },
+  { offset_ms: 64800000, slot: 5, instruction: '' },
+  { offset_ms: 86400000, slot: 6, instruction: '' },
 ]
 
 beforeEach(() => {
@@ -221,5 +221,56 @@ describe('handleFollowupSend', () => {
     const last = upd[upd.length - 1].values as Record<string, unknown>
     expect(last.status).toBe('failed')
     expect(last.last_error).toContain('window')
+  })
+
+  it('forwards the instruction from the snapshot entry to generateFollowupMessage', async () => {
+    const snapWithInstr = [
+      { offset_ms: 300000,   slot: 0, instruction: 'quick hello po' },
+      { offset_ms: 3600000,  slot: 1, instruction: 'ask one question' },
+      { offset_ms: 18000000, slot: 2, instruction: 'share a benefit' },
+      { offset_ms: 28800000, slot: 3, instruction: '' },
+      { offset_ms: 43200000, slot: 4, instruction: '' },
+      { offset_ms: 64800000, slot: 5, instruction: '' },
+      { offset_ms: 86400000, slot: 6, instruction: '' },
+    ]
+    shouldSeedMock.mockResolvedValue({ ok: true, inboundCount: 1 })
+    generateMock.mockResolvedValue('hi')
+    sendOutboundMock.mockResolvedValue({ sent: true, messageId: 'fbi' })
+    const { admin } = makeAdmin({
+      ...baseSeed,
+      schedule: { ...schedule, next_offset_idx: 2, offsets_snapshot: snapWithInstr },
+    })
+
+    await handleFollowupSend(admin as never, { scheduleId: 's1' })
+
+    expect(generateMock).toHaveBeenCalledWith(
+      expect.objectContaining({ slot: 2, instruction: 'share a benefit' }),
+    )
+  })
+
+  it('forwards instruction="" when snapshot entry lacks the field (legacy)', async () => {
+    // Legacy snapshot rows seeded before this feature have no `instruction` key.
+    const legacySnap = [
+      { offset_ms: 300000,   slot: 0 },
+      { offset_ms: 3600000,  slot: 1 },
+      { offset_ms: 18000000, slot: 2 },
+      { offset_ms: 28800000, slot: 3 },
+      { offset_ms: 43200000, slot: 4 },
+      { offset_ms: 64800000, slot: 5 },
+      { offset_ms: 86400000, slot: 6 },
+    ]
+    shouldSeedMock.mockResolvedValue({ ok: true, inboundCount: 1 })
+    generateMock.mockResolvedValue('hi')
+    sendOutboundMock.mockResolvedValue({ sent: true, messageId: 'fbl' })
+    const { admin } = makeAdmin({
+      ...baseSeed,
+      schedule: { ...schedule, next_offset_idx: 1, offsets_snapshot: legacySnap as never },
+    })
+
+    await handleFollowupSend(admin as never, { scheduleId: 's1' })
+
+    expect(generateMock).toHaveBeenCalledWith(
+      expect.objectContaining({ slot: 1, instruction: '' }),
+    )
   })
 })
