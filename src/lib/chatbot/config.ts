@@ -1,5 +1,10 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { DEFAULT_CHATBOT_PERSONA, type ChatbotPersona } from '@/lib/rag/prompt-builder'
+import {
+  DEFAULT_FOLLOWUP_SETTINGS,
+  FOLLOWUP_SETTINGS_SCHEMA,
+  type FollowupSettings,
+} from '@/lib/followups/settings'
 
 export interface ActionPageRecommendationRules {
   rules: string
@@ -31,6 +36,7 @@ export type ChatbotConfigRow = {
   active_template_id: string | null
   personality_source: string
   recommendation_rules: unknown
+  followup_settings: unknown
   primary_action_page_id: string | null
   created_at: string
   updated_at: string
@@ -43,6 +49,7 @@ export type ChatbotConfig = ChatbotPersona & {
   activeTemplateId: string | null
   personalitySource: 'custom' | 'template'
   recommendationRules: RecommendationRulesMap
+  followupSettings: FollowupSettings
   primaryActionPageId: string | null
   updatedAt: string
 }
@@ -60,6 +67,7 @@ export const DEFAULT_CHATBOT_CONFIG: ChatbotConfig = {
   activeTemplateId: null,
   personalitySource: 'custom',
   recommendationRules: DEFAULT_RECOMMENDATION_RULES,
+  followupSettings: DEFAULT_FOLLOWUP_SETTINGS,
   primaryActionPageId: null,
   updatedAt: '',
 }
@@ -98,6 +106,11 @@ export function parseRecommendationRules(raw: unknown): RecommendationRulesMap {
   return { defaultConfidenceThreshold: threshold, perActionPage: perPage }
 }
 
+export function parseFollowupSettings(raw: unknown): FollowupSettings {
+  const parsed = FOLLOWUP_SETTINGS_SCHEMA.safeParse(raw)
+  return parsed.success ? parsed.data : DEFAULT_FOLLOWUP_SETTINGS
+}
+
 export function getActionPageRecommendationRules(
   config: ChatbotConfig,
   actionPageId: string | null | undefined,
@@ -120,6 +133,7 @@ export function rowToConfig(row: ChatbotConfigRow): ChatbotConfig {
     activeTemplateId: row.active_template_id ?? null,
     personalitySource: (row.personality_source as ChatbotConfig['personalitySource']) ?? 'custom',
     recommendationRules: parseRecommendationRules(row.recommendation_rules),
+    followupSettings: parseFollowupSettings(row.followup_settings),
     primaryActionPageId: row.primary_action_page_id ?? null,
     updatedAt: row.updated_at ?? '',
   }
