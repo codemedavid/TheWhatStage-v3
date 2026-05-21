@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, useTransition } from 'react'
 import {
   loadConversation,
   replyAsOperator,
+  resumeBot,
   setAutoReply,
   undoStageEvent,
   type ConversationComment,
@@ -42,6 +43,16 @@ export function ConversationPanel({ leadId }: { leadId: string }) {
     if (state.status === 'ready' && scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight
     }
+  }, [state])
+
+  // Tick every 60s so the pause countdown label stays current.
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    if (state.status !== 'ready') return
+    const pausedUntil = state.data.thread.bot_paused_until
+    if (!pausedUntil) return
+    const id = setInterval(() => setNow(Date.now()), 60_000)
+    return () => clearInterval(id)
   }, [state])
 
   if (state.status === 'loading') {
@@ -114,10 +125,23 @@ export function ConversationPanel({ leadId }: { leadId: string }) {
       }
     })
   }
+  const onResume = () => {
+    startToggle(async () => {
+      try {
+        await resumeBot(leadId)
+        refresh()
+      } catch (e) {
+        setState({
+          status: 'error',
+          message: e instanceof Error ? e.message : 'Resume failed',
+        })
+      }
+    })
+  }
 
   return (
     <div className="flex flex-col gap-3">
-      <Header thread={thread} toggling={toggling} onToggleAuto={onToggleAuto} />
+      <Header thread={thread} toggling={toggling} onToggleAuto={onToggleAuto} onResume={onResume} now={now} />
 
       <div
         ref={scrollRef}
@@ -184,7 +208,7 @@ export function ConversationPanel({ leadId }: { leadId: string }) {
         </button>
       </div>
       <p className="text-[11px]" style={{ color: 'var(--lead-faint)' }}>
-        ⌘ + Enter to send. Sending pauses the bot only if you toggle it off.
+        ⌘ + Enter to send. Sending pauses the bot until you stop chatting.
       </p>
     </div>
   )
@@ -194,11 +218,59 @@ function Header({
   thread,
   toggling,
   onToggleAuto,
+  onResume,
+  now,
 }: {
   thread: ConversationData['thread']
   toggling: boolean
   onToggleAuto: () => void
+  onResume: () => void
+  now: number
 }) {
+  const pausedUntilMs = thread.bot_paused_until
+    ? Date.parse(thread.bot_paused_until)
+    : null
+  const isPaused =
+    thread.auto_reply_enabled
+    && pausedUntilMs !== null
+    && !Number.isNaN(pausedUntilMs)
+    && pausedUntilMs > now
+  const minutesLeft = isPaused ? Math.max(1, Math.ceil((pausedUntilMs! - now) / 60_000)) : 0
+
+  let label: string
+  let title: string
+  let onClick: () => void
+  let pillStyle: React.CSSProperties
+
+  if (!thread.auto_reply_enabled) {
+    label = 'Bot off'
+    title = 'Manually off — toggle to resume'
+    onClick = onToggleAuto
+    pillStyle = {
+      color: 'var(--lead-body)',
+      background: 'var(--lead-surface)',
+      border: '1px solid var(--lead-line)',
+    }
+  } else if (isPaused) {
+    label = `Paused · ${minutesLeft}m`
+    title = `You're handling this — bot resumes in ${minutesLeft} min. Click to resume now.`
+    onClick = onResume
+    pillStyle = {
+      color: 'var(--lead-warning, #92400e)',
+      background: 'var(--lead-warning-soft, #fef3c7)',
+      border: '1px solid var(--lead-warning, #f59e0b)',
+    }
+  } else {
+    label = 'Bot on'
+    title = 'Bot will reply to incoming messages'
+    onClick = onToggleAuto
+    pillStyle = {
+      color: '#fff',
+      background: 'var(--lead-accent)',
+      border: '1px solid var(--lead-accent)',
+    }
+  }
+
   return (
     <div className="flex items-center gap-3">
       {thread.picture_url ? (
@@ -229,30 +301,26 @@ function Header({
       </div>
       <button
         type="button"
-        onClick={onToggleAuto}
+        onClick={onClick}
         disabled={toggling}
-        aria-pressed={thread.auto_reply_enabled}
+        title={title}
+        aria-label={title}
         className="lead-focus inline-flex h-7 items-center gap-1.5 rounded-full px-2.5 text-[11.5px] font-medium transition-colors disabled:opacity-50"
-        style={{
-          color: thread.auto_reply_enabled ? '#fff' : 'var(--lead-body)',
-          background: thread.auto_reply_enabled
-            ? 'var(--lead-accent)'
-            : 'var(--lead-surface)',
-          border: `1px solid ${
-            thread.auto_reply_enabled ? 'var(--lead-accent)' : 'var(--lead-line)'
-          }`,
-        }}
+        style={pillStyle}
       >
         <span
           aria-hidden
           className="inline-block h-1.5 w-1.5 rounded-full"
           style={{
-            background: thread.auto_reply_enabled
-              ? '#fff'
-              : 'var(--lead-faint)',
+            background:
+              !thread.auto_reply_enabled
+                ? 'var(--lead-faint)'
+                : isPaused
+                  ? 'var(--lead-warning, #f59e0b)'
+                  : '#fff',
           }}
         />
-        {thread.auto_reply_enabled ? 'Bot on' : 'Bot off'}
+        {label}
       </button>
     </div>
   )
