@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import type { ActionPageBrief, StageBrief, StageChange } from '@/lib/chatbot/classify'
-import { isSendableStage, resolveFallbackFromList, detectProceedRegex, detectStageForward } from './force-send'
+import {
+  isSendableStage,
+  resolveFallbackFromList,
+  detectProceedRegex,
+  detectStageForward,
+  hasQualifiedQuizSubmission,
+  isStageQualified,
+} from './force-send'
 
 const stage = (kind: StageBrief['kind']): StageBrief => ({
   id: 's1',
@@ -126,5 +133,60 @@ describe('detectStageForward', () => {
   it('returns true when currentPosition is null (no current stage)', () => {
     const change: StageChange = { to_stage_id: 'nurt', confidence: 'low', reason: '' }
     expect(detectStageForward(change, null, stages)).toBe(true)
+  })
+})
+
+describe('isStageQualified', () => {
+  it('returns false when stage is null', () => {
+    expect(isStageQualified(null)).toBe(false)
+  })
+
+  it.each(['qualifying', 'decision'] as const)('returns true for kind %s', (k) => {
+    expect(isStageQualified(stage(k))).toBe(true)
+  })
+
+  it.each(['entry', 'nurture', 'lost', 'dormant', 'won'] as const)(
+    'returns false for kind %s',
+    (k) => {
+      expect(isStageQualified(stage(k))).toBe(false)
+    },
+  )
+})
+
+describe('hasQualifiedQuizSubmission', () => {
+  function mockSupabase(rows: Array<{ outcome: string; action_pages: { kind: string } }>) {
+    return {
+      from: () => ({
+        select: () => ({
+          eq: () => ({
+            eq: () => ({
+              order: () => ({
+                limit: async () => ({ data: rows, error: null }),
+              }),
+            }),
+          }),
+        }),
+      }),
+    } as unknown as Parameters<typeof hasQualifiedQuizSubmission>[0]
+  }
+
+  it('returns true when a qualified submission on a qualification page exists', async () => {
+    const s = mockSupabase([{ outcome: 'qualified', action_pages: { kind: 'qualification' } }])
+    expect(await hasQualifiedQuizSubmission(s, 'lead-1')).toBe(true)
+  })
+
+  it('ignores non-qualification page submissions', async () => {
+    const s = mockSupabase([{ outcome: 'qualified', action_pages: { kind: 'form' } }])
+    expect(await hasQualifiedQuizSubmission(s, 'lead-1')).toBe(false)
+  })
+
+  it('ignores submissions whose outcome is not "qualified"', async () => {
+    const s = mockSupabase([{ outcome: 'pending_review', action_pages: { kind: 'qualification' } }])
+    expect(await hasQualifiedQuizSubmission(s, 'lead-1')).toBe(false)
+  })
+
+  it('returns false when no submissions found', async () => {
+    const s = mockSupabase([])
+    expect(await hasQualifiedQuizSubmission(s, 'lead-1')).toBe(false)
   })
 })

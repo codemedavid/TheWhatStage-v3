@@ -71,6 +71,7 @@ export async function hasQualifiedQuizSubmission(
   if (error || !data) return false
 
   for (const row of data as unknown as SubmissionRow[]) {
+    if (row.outcome !== 'qualified') continue
     const ap = Array.isArray(row.action_pages) ? row.action_pages[0] : row.action_pages
     if (ap?.kind === 'qualification') return true
   }
