@@ -424,7 +424,7 @@ export async function replyAsOperator(leadId: string, text: string): Promise<voi
   const { data: configRow } = await supabase
     .from('chatbot_configs')
     .select('human_takeover_minutes')
-    .eq('page_id', thread.page_id)
+    .eq('user_id', userId)
     .maybeSingle()
   const pauseMinutes = (configRow as { human_takeover_minutes?: number } | null)
     ?.human_takeover_minutes ?? null
