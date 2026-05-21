@@ -214,6 +214,16 @@ No new DB tables, no migrations.
 
 None blocking — design is approved for implementation planning.
 
+## Implementation Verification
+
+**Implemented:** 2026-05-21  
+**Commits:** `de0a34f` (cache), `b8060ad` `7c17089` `70613ce` `b12039f` `07f445b` `f505c70` (force-send tests), `a2d721e` (primary-goal prompt), `0aff142` (SEND NOW rule), `ff1a09d` (classify wiring), `6c80a60` (route threading)
+
+**Test results (full suite):**
+- 152/152 force-send feature tests pass (`cache.test.ts`, `force-send.test.ts`, `primary-goal.test.ts`, `classify.test.ts`, `classify-force-send.test.ts`)
+- 839/843 total tests pass; 4 pre-existing failures in `actions.test.ts` and `personality.test.ts` (unrelated to this feature)
+- ESLint: no issues on modified/new files
+
 ## File Inventory
 
 **New:**
