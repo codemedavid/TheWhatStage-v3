@@ -100,4 +100,29 @@ describe('loadPrimaryGoalInstruction', () => {
     expect(out).not.toMatch(/matches this trigger/i)
     expect(out).toContain('Book a demo')
   })
+
+  it('includes the ONCE QUALIFIED instruction when bot_send_instructions is set', async () => {
+    const c = mockClient(
+      { primary_action_page_id: 'page-1' },
+      {
+        title: 'Booking',
+        slug: 'book',
+        bot_send_instructions: 'Ask budget first.',
+        status: 'published',
+      },
+    )
+    const out = await loadPrimaryGoalInstruction(c, 'user-1')
+    expect(out).toContain('Once every prerequisite above has been answered')
+    expect(out).toContain('you MUST set `action_page.action_page_id`')
+    expect(out).toContain('Do not stall')
+  })
+
+  it('does NOT include the ONCE QUALIFIED instruction when bot_send_instructions is empty', async () => {
+    const c = mockClient(
+      { primary_action_page_id: 'page-1' },
+      { title: 'Booking', slug: 'book', bot_send_instructions: '', status: 'published' },
+    )
+    const out = await loadPrimaryGoalInstruction(c, 'user-1')
+    expect(out).not.toContain('Once every prerequisite above has been answered')
+  })
 })

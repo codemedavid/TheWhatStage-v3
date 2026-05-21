@@ -51,6 +51,8 @@ export async function loadPrimaryGoalInstruction(
       trigger,
       '',
       'QUALIFY FIRST: Read the trigger above literally. If it names prerequisites — e.g. "ask the customer\'s X first", "only after they share Y", "make sure Z is collected", "kapag nasagot na ang … bago", or any similar wording in any language — those are required questions you MUST ask BEFORE sending. Until every one of them is answered in the conversation history, leave `action_page` null and ask the next missing qualifying question in `reply` (one at a time, in the customer\'s language). Do not re-ask anything they already answered.',
+      '',
+      'ONCE QUALIFIED: Once every prerequisite above has been answered AND the customer\'s latest message shows any signal of wanting to proceed (asking how, agreeing, saying "sige"/"okay"/"magkano"/"sign me up"/"book na"/equivalents in any language, or any forward intent), you MUST set `action_page.action_page_id` to this page on this turn. Do not stall with another qualifying question. Do not wait for a more explicit ask. The button arrives as a separate message — your `reply` stays conversational.',
     )
   } else {
     lines.push(
