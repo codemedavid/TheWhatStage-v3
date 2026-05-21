@@ -45,6 +45,7 @@ import { getChatbotConfig, type ChatbotConfig } from '@/lib/chatbot/config'
 import { loadLeadContext } from '@/lib/chatbot/leadContext'
 import { interruptWorkflowRun } from '@/lib/workflow/trigger'
 import { runDeepReclassify } from '@/lib/chatbot/deep-reclassify'
+import { isBotPaused } from '@/lib/chatbot/takeover'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -134,6 +135,7 @@ interface ThreadRow {
   lead_id: string | null
   full_name: string | null
   auto_reply_enabled: boolean
+  bot_paused_until: string | null
   inbound_since_classify: number
   conversation_summary: string | null
   last_inbound_at: string | null
@@ -514,7 +516,11 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
       }).catch((e) => console.error('[messenger.worker] interruptWorkflowRun threw', e))
     }
 
-    if (thread.auto_reply_enabled && !thread.controlled_by_run_id) {
+    if (
+      thread.auto_reply_enabled
+      && !isBotPaused(thread.bot_paused_until)
+      && !thread.controlled_by_run_id
+    ) {
       // Best-effort presence signal: typing_on shows the typing bubble while
       // the LLM runs, auto-clearing after ~20s or on the next outbound, so no
       // explicit typing_off is needed. Page Reactions used to live here but
@@ -1383,7 +1389,7 @@ async function loadJobContext(
   const { data, error } = await admin
     .from('messenger_messages')
     .select(
-      'body, fb_message_id, messenger_threads!inner(id, user_id, page_id, psid, lead_id, full_name, auto_reply_enabled, inbound_since_classify, conversation_summary, last_inbound_at, controlled_by_run_id)',
+      'body, fb_message_id, messenger_threads!inner(id, user_id, page_id, psid, lead_id, full_name, auto_reply_enabled, bot_paused_until, inbound_since_classify, conversation_summary, last_inbound_at, controlled_by_run_id)',
     )
     .eq('id', job.inbound_msg_id)
     .maybeSingle<{

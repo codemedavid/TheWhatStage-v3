@@ -622,6 +622,225 @@ function makeWorkerAdminMockWithAllSold() {
   return makeWorkerAdminMockWithRealestate(true)
 }
 
+function makeWorkerAdminMockWithPause(bot_paused_until: string | null) {
+  let claimCount = 0
+  const inserts: Record<string, unknown[]> = {}
+  const updates: Record<string, unknown[]> = {}
+
+  class Query {
+    private filters: Record<string, unknown> = {}
+    private updatePayload: unknown = null
+    private selectOpts: Record<string, unknown> = {}
+
+    constructor(private table: string) {}
+
+    select(_col?: unknown, opts?: Record<string, unknown>) {
+      this.selectOpts = opts ?? {}
+      return this
+    }
+    eq(key: string, value: unknown) {
+      this.filters[key] = value
+      return this
+    }
+    neq() { return this }
+    not() { return this }
+    is() { return this }
+    gt() { return this }
+    order() { return this }
+    limit() { return this }
+    update(payload: unknown) {
+      this.updatePayload = payload
+      updates[this.table] = [...(updates[this.table] ?? []), payload]
+      return this
+    }
+    insert(payload: unknown) {
+      inserts[this.table] = [...(inserts[this.table] ?? []), payload]
+      return {
+        error: null,
+        select: () => ({
+          single: async () => ({ data: { id: 'inserted-id' }, error: null }),
+        }),
+      }
+    }
+    async single() {
+      return this.resolveSingle()
+    }
+    async maybeSingle() {
+      return this.resolveSingle()
+    }
+    then<TResult1 = unknown, TResult2 = never>(
+      onfulfilled?: ((value: unknown) => TResult1 | PromiseLike<TResult1>) | null,
+      onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
+    ) {
+      return this.resolveMany().then(onfulfilled, onrejected)
+    }
+
+    private async resolveSingle() {
+      if (this.updatePayload) return { data: null, error: null }
+
+      if (this.table === 'messenger_messages' && this.selectOpts.count === 'exact') {
+        return { count: pendingInboundCount, data: null, error: null }
+      }
+
+      if (this.table === 'messenger_messages') {
+        return {
+          data: {
+            body: 'I want to continue',
+            fb_message_id: 'mid.inbound.1',
+            messenger_threads: {
+              id: 'thread_1',
+              user_id: 'user_1',
+              page_id: 'fb_page_1',
+              psid: 'psid_1',
+              lead_id: 'lead_1',
+              full_name: 'Lead One',
+              auto_reply_enabled: true,
+              bot_paused_until,
+              // Set to 3 so that next (4) % CLASSIFY_EVERY (4) === 0 and classifyOnly fires
+              inbound_since_classify: 3,
+              conversation_summary: null,
+              last_inbound_at: null,
+              controlled_by_run_id: null,
+            },
+          },
+          error: null,
+        }
+      }
+
+      if (this.table === 'facebook_pages') {
+        return {
+          data: {
+            id: 'fb_page_1',
+            page_access_token: 'encrypted-page-token',
+            name: 'Page One',
+          },
+          error: null,
+        }
+      }
+
+      if (this.table === 'chatbot_configs') {
+        return {
+          data: {
+            auto_classify_enabled: true,
+            deep_reclassify_enabled: false,
+          },
+          error: null,
+        }
+      }
+
+      if (this.table === 'leads') {
+        return {
+          data: {
+            stage_id: 'stage_current',
+            campaign_id: 'campaign_1',
+            current_funnel_id: 'funnel_current',
+          },
+          error: null,
+        }
+      }
+
+      if (this.table === 'campaigns') {
+        return {
+          data: {
+            id: 'campaign_1',
+            personality_mode: 'custom',
+            persona: 'Campaign persona',
+            do_rules: ['campaign do'],
+            dont_rules: ['campaign dont'],
+            goal_action_page_id: 'ap_goal',
+          },
+          error: null,
+        }
+      }
+
+      return { data: null, error: null }
+    }
+
+    private async resolveMany() {
+      if (this.updatePayload) return { data: null, error: null }
+
+      if (this.table === 'messenger_messages' && this.selectOpts.count === 'exact') {
+        return { count: pendingInboundCount, data: null, error: null }
+      }
+
+      if (this.table === 'messenger_messages') {
+        return { data: [], error: null }
+      }
+
+      if (this.table === 'pipeline_stages') {
+        return {
+          data: [
+            { id: 'stage_current', name: 'Current', description: 'Current stage' },
+            { id: 'stage_next', name: 'Next', description: 'Next stage' },
+          ],
+          error: null,
+        }
+      }
+
+      if (this.table === 'funnels') {
+        return {
+          data: [
+            {
+              id: 'funnel_current',
+              position: 0,
+              instruction: 'Current funnel instructions',
+              rules: [{ kind: 'do', text: 'current do' }],
+              action_page_id: 'ap_current',
+              next_funnel_id: null,
+            },
+          ],
+          error: null,
+        }
+      }
+
+      if (this.table === 'action_pages') {
+        return {
+          data: [
+            {
+              id: 'ap_current',
+              slug: 'current',
+              title: 'Current action page',
+              cta_label: 'Continue',
+              bot_send_instructions: 'Send for current funnel only',
+              signing_secret: 'secret-current',
+            },
+          ],
+          error: null,
+        }
+      }
+
+      return { data: [], error: null }
+    }
+  }
+
+  const admin = {
+    rpc: vi.fn(async (name: string) => {
+      if (name !== 'claim_messenger_jobs') throw new Error(name)
+      claimCount += 1
+      return {
+        data:
+          claimCount === 1
+            ? [
+                {
+                  id: 'job_1',
+                  thread_id: 'thread_1',
+                  inbound_msg_id: 'msg_inbound_1',
+                  user_id: 'user_1',
+                  attempts: 0,
+                  outbound_text_fb_id: null,
+                  outbound_button_fb_id: null,
+                },
+              ]
+            : [],
+        error: null,
+      }
+    }),
+    from: vi.fn((table: string) => new Query(table)),
+  }
+
+  return { admin, inserts, updates }
+}
+
 describe('resolveCommentBridgesForThread', () => {
   it('links unresolved same-page bridge rows and back-fills lead-comment lead_id', async () => {
     const bridgeUpdates: unknown[] = []
@@ -853,6 +1072,37 @@ describe('POST /api/messenger/process', () => {
       mocks.admin = admin
       const response = await POST(makeWorkerRequest() as Parameters<typeof POST>[0])
       expect(response.status).toBe(200)
+    })
+  })
+
+  describe('human takeover — bot_paused_until gate', () => {
+    it('skips reply step when bot_paused_until is in the future', async () => {
+      const futureIso = new Date(Date.now() + 60 * 60 * 1000).toISOString()
+      const { admin } = makeWorkerAdminMockWithPause(futureIso)
+      mocks.admin = admin
+
+      const res = await POST(makeWorkerRequest() as Parameters<typeof POST>[0])
+
+      expect(res.status).toBe(200)
+      // The send path (answerWithClassification + messenger sends) must not run
+      expect(mocks.answerWithClassification).not.toHaveBeenCalled()
+      expect(mocks.sendMessengerText).not.toHaveBeenCalled()
+      expect(mocks.sendMessengerButton).not.toHaveBeenCalled()
+      expect(mocks.sendMessengerSenderAction).not.toHaveBeenCalled()
+      // Classification-only path should still run
+      expect(mocks.classifyOnly).toHaveBeenCalledTimes(1)
+    })
+
+    it('replies normally when bot_paused_until is in the past', async () => {
+      const pastIso = new Date(Date.now() - 60 * 60 * 1000).toISOString()
+      const { admin } = makeWorkerAdminMockWithPause(pastIso)
+      mocks.admin = admin
+
+      const res = await POST(makeWorkerRequest() as Parameters<typeof POST>[0])
+
+      expect(res.status).toBe(200)
+      // The send path must run normally
+      expect(mocks.answerWithClassification).toHaveBeenCalledTimes(1)
     })
   })
 })
