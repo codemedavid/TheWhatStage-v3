@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import type { ActionPageBrief, StageBrief, StageChange } from '@/lib/chatbot/classify'
+import type { ActionPageBrief, ActionPageChoice, StageBrief, StageChange } from '@/lib/chatbot/classify'
 import type { AnswerHistory } from '@/lib/chatbot/answer'
 import { leadCacheGet, leadCacheSet } from '@/lib/leads/cache'
 import { HfRouterLlm } from '@/lib/rag'
@@ -185,4 +185,90 @@ export const defaultLlmCheckClient: LlmCheckClient & {
     )
     return parseLlmJsonResponse(raw).ok
   },
+}
+
+export interface ForceSendContext {
+  userId: string
+  leadId: string | null
+  threadId: string | null
+  history: AnswerHistory
+  latestCustomerMessage: string
+  currentStage: StageBrief | null
+  stages: StageBrief[]
+  stageChangeThisTurn: StageChange | null
+  llmActionPage: ActionPageChoice | null
+  actionPages: ActionPageBrief[]
+  primaryActionPageId: string | null
+  supabase: SupabaseClient
+  llm?: LlmCheckClient & { detectProceed(args: { history: AnswerHistory }): Promise<boolean> }
+}
+
+export interface ForceSendDecision {
+  actionPage: ActionPageChoice | null
+  overrideFired: boolean
+  reason: string
+}
+
+export async function decideForceSend(ctx: ForceSendContext): Promise<ForceSendDecision> {
+  const llm = ctx.llm ?? defaultLlmCheckClient
+
+  if (!isSendableStage(ctx.currentStage)) {
+    return { actionPage: ctx.llmActionPage, overrideFired: false, reason: 'skip:stage' }
+  }
+
+  const page = resolveFallbackFromList(ctx.primaryActionPageId, ctx.actionPages)
+  if (!page) {
+    return { actionPage: ctx.llmActionPage, overrideFired: false, reason: 'skip:no-page' }
+  }
+
+  const hadPriorCustomerTurn = ctx.history.some((m) => m.role === 'user')
+  if (!hadPriorCustomerTurn) {
+    return { actionPage: ctx.llmActionPage, overrideFired: false, reason: 'skip:cold-inbound' }
+  }
+
+  if (!ctx.leadId) {
+    return { actionPage: ctx.llmActionPage, overrideFired: false, reason: 'skip:no-lead' }
+  }
+
+  if (ctx.llmActionPage && ctx.llmActionPage.action_page_id === page.id) {
+    return { actionPage: ctx.llmActionPage, overrideFired: false, reason: 'noop:llm-already-picked' }
+  }
+
+  let qualified = isStageQualified(ctx.currentStage)
+  if (!qualified) qualified = await hasQualifiedQuizSubmission(ctx.supabase, ctx.leadId)
+  if (!qualified) {
+    qualified = await prerequisitesAnsweredCached({
+      leadId: ctx.leadId,
+      actionPageId: page.id,
+      instructionsText: page.bot_send_instructions ?? '',
+      history: ctx.history,
+      llm,
+    })
+  }
+  if (!qualified) {
+    return { actionPage: ctx.llmActionPage, overrideFired: false, reason: 'skip:not-qualified' }
+  }
+
+  let ready = detectProceedRegex(ctx.latestCustomerMessage)
+  if (!ready) {
+    ready = detectStageForward(
+      ctx.stageChangeThisTurn,
+      ctx.currentStage?.position ?? null,
+      ctx.stages,
+    )
+  }
+  if (!ready) ready = await llm.detectProceed({ history: ctx.history })
+  if (!ready) {
+    return { actionPage: ctx.llmActionPage, overrideFired: false, reason: 'skip:not-ready' }
+  }
+
+  return {
+    actionPage: {
+      action_page_id: page.id,
+      reason: 'force-send: qualified + ready',
+      button_text: '',
+    },
+    overrideFired: true,
+    reason: 'override',
+  }
 }

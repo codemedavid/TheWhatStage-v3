@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
-import type { ActionPageBrief, StageBrief, StageChange } from '@/lib/chatbot/classify'
+import type { ActionPageBrief, ActionPageChoice, StageBrief, StageChange } from '@/lib/chatbot/classify'
 import { __leadCacheResetForTests } from '@/lib/leads/cache'
 import {
   isSendableStage,
@@ -329,5 +329,155 @@ describe('parseLlmJsonResponse', () => {
 
   it('returns { ok: false } when ok is not a boolean', () => {
     expect(parseLlmJsonResponse('{"ok": "yes"}')).toEqual({ ok: false })
+  })
+})
+
+import { decideForceSend, type ForceSendContext } from './force-send'
+
+function ctx(over: Partial<ForceSendContext> = {}): ForceSendContext {
+  const pages: ActionPageBrief[] = [
+    { id: 'primary', title: 'Primary', cta_label: 'Go', bot_send_instructions: '' },
+  ]
+  const baseStage: StageBrief = {
+    id: 'qual',
+    name: 'Qualifying',
+    description: null,
+    position: 2,
+    kind: 'qualifying',
+  }
+  const stages: StageBrief[] = [
+    { id: 'entry', name: 'Entry', description: null, position: 0, kind: 'entry' },
+    baseStage,
+    { id: 'won', name: 'Won', description: null, position: 3, kind: 'won' },
+  ]
+  return {
+    userId: 'u1',
+    leadId: 'lead-1',
+    threadId: 't1',
+    history: [{ role: 'user', content: 'previous msg' }],
+    latestCustomerMessage: 'sige po',
+    currentStage: baseStage,
+    stages,
+    stageChangeThisTurn: null,
+    llmActionPage: null,
+    actionPages: pages,
+    primaryActionPageId: 'primary',
+    supabase: {
+      from: () => ({
+        select: () => ({
+          eq: () => ({
+            eq: () => ({
+              order: () => ({
+                limit: async () => ({ data: [], error: null }),
+              }),
+            }),
+          }),
+        }),
+      }),
+    } as unknown as ForceSendContext['supabase'],
+    llm: { checkPrerequisites: vi.fn(async () => true), detectProceed: vi.fn(async () => false) },
+    ...over,
+  }
+}
+
+describe('decideForceSend', () => {
+  beforeEach(() => __leadCacheResetForTests())
+
+  it('overrides null LLM choice when all conditions are met', async () => {
+    const c = ctx()
+    const r = await decideForceSend(c)
+    expect(r.overrideFired).toBe(true)
+    expect(r.actionPage?.action_page_id).toBe('primary')
+  })
+
+  it('does not override when LLM already picked the resolved page', async () => {
+    const llmChoice: ActionPageChoice = {
+      action_page_id: 'primary',
+      reason: 'LLM said so',
+      button_text: 'Tap below 👇',
+    }
+    const r = await decideForceSend(ctx({ llmActionPage: llmChoice }))
+    expect(r.overrideFired).toBe(false)
+    expect(r.actionPage).toBe(llmChoice)
+  })
+
+  it.each(['lost', 'dormant', 'won'] as const)('skips when stage kind is %s', async (k) => {
+    const r = await decideForceSend(
+      ctx({
+        currentStage: { id: 'x', name: 'X', description: null, position: 5, kind: k },
+      }),
+    )
+    expect(r.overrideFired).toBe(false)
+    expect(r.actionPage).toBeNull()
+  })
+
+  it('falls back to first page when no primary configured', async () => {
+    const r = await decideForceSend(ctx({ primaryActionPageId: null }))
+    expect(r.overrideFired).toBe(true)
+    expect(r.actionPage?.action_page_id).toBe('primary')
+  })
+
+  it('does nothing when no primary AND no published pages', async () => {
+    const r = await decideForceSend(ctx({ primaryActionPageId: null, actionPages: [] }))
+    expect(r.overrideFired).toBe(false)
+    expect(r.actionPage).toBeNull()
+  })
+
+  it('does nothing on a cold first inbound (no prior customer messages)', async () => {
+    const r = await decideForceSend(ctx({ history: [] }))
+    expect(r.overrideFired).toBe(false)
+  })
+
+  it('does nothing when leadId is null', async () => {
+    const r = await decideForceSend(ctx({ leadId: null }))
+    expect(r.overrideFired).toBe(false)
+  })
+
+  it('does not call the proceed LLM when regex hits', async () => {
+    const llm = { checkPrerequisites: vi.fn(async () => true), detectProceed: vi.fn(async () => false) }
+    await decideForceSend(ctx({ latestCustomerMessage: 'sige po', llm }))
+    expect(llm.detectProceed).not.toHaveBeenCalled()
+  })
+
+  it('does not call the proceed LLM when regex misses but stage moved forward', async () => {
+    const change: StageChange = { to_stage_id: 'qual', confidence: 'medium', reason: 'asked price' }
+    const llm = { checkPrerequisites: vi.fn(async () => true), detectProceed: vi.fn(async () => false) }
+    await decideForceSend(
+      ctx({ latestCustomerMessage: 'hmm interesting', stageChangeThisTurn: change, llm }),
+    )
+    expect(llm.detectProceed).not.toHaveBeenCalled()
+  })
+
+  it('calls the proceed LLM once when both regex and stage-forward miss', async () => {
+    const llm = { checkPrerequisites: vi.fn(async () => true), detectProceed: vi.fn(async () => true) }
+    const r = await decideForceSend(
+      ctx({ latestCustomerMessage: 'hmm interesting', stageChangeThisTurn: null, llm }),
+    )
+    expect(llm.detectProceed).toHaveBeenCalledTimes(1)
+    expect(r.overrideFired).toBe(true)
+  })
+
+  it('does NOT override when proceed signal is missing', async () => {
+    const llm = { checkPrerequisites: vi.fn(async () => true), detectProceed: vi.fn(async () => false) }
+    const r = await decideForceSend(
+      ctx({ latestCustomerMessage: 'hmm interesting', stageChangeThisTurn: null, llm }),
+    )
+    expect(r.overrideFired).toBe(false)
+    expect(r.actionPage).toBeNull()
+  })
+
+  it('skips prerequisite LLM call when stage is already qualified (path A)', async () => {
+    const llm = { checkPrerequisites: vi.fn(async () => false), detectProceed: vi.fn(async () => false) }
+    const r = await decideForceSend(
+      ctx({
+        latestCustomerMessage: 'sige po',
+        actionPages: [
+          { id: 'primary', title: 'Primary', cta_label: 'Go', bot_send_instructions: 'Ask budget first.' },
+        ],
+        llm,
+      }),
+    )
+    expect(llm.checkPrerequisites).not.toHaveBeenCalled()
+    expect(r.overrideFired).toBe(true)
   })
 })
