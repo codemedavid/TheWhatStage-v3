@@ -505,7 +505,12 @@ export function stageInstruction(
       '- Max ~80 chars. One line. No greetings, no page title, no URL.\n' +
       '- Include a downward-pointing emoji like 👇 (or 📝/📅 when fitting) to draw the eye to the button.\n' +
       '- Examples: "I-tap ang button sa baba para mag-book ng call 👇", "Fill out the quick form below 👇".\n' +
-      '- NEVER use the action page title (e.g. "Lead Gen", "Booking") as the button_text.'
+      '- NEVER use the action page title (e.g. "Lead Gen", "Booking") as the button_text.' +
+      '\n\n' +
+      'SEND NOW — when all prerequisites are met:\n' +
+      '- Once the conversation shows that every prerequisite in the page\'s "send when" guidance has been answered, AND the customer\'s latest message shows any forward intent (agreement, "sige"/"okay"/"magkano"/"how do I"/"sign me up"/"book na"/equivalents in any language), you MUST set `action_page.action_page_id` to that page on this turn.\n' +
+      '- Do not stall with one more qualifying question once everything is answered. Do not wait for a more explicit ask. The button arrives as a separate message — your `reply` stays conversational and references nothing about a link/button/form.\n' +
+      '- This rule applies to every action page in the list below, not only the primary goal.'
     : ''
   const apListSection = hasActionPages ? '\n\n' + actionPageList(actionPages) : ''
   const recommendSection = hasRecommend ? recommendInstruction(recommendRules!, 'product') : ''

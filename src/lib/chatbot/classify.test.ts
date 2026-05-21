@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { StageBrief, StageChange } from './classify'
+import type { StageBrief, StageChange, ActionPageBrief } from './classify'
 import { applyStageChange, sanitizeReply, stageInstruction, stageList } from './classify'
 
 // applyStageChange creates a fresh admin client after a successful move so
@@ -368,5 +368,32 @@ describe('sanitizeReply', () => {
     const raw =
       'Usually sa ganyang volume, nasa 60-70% ang nasasayang. Gusto mo bang makita kung paano namin inaayos yan?'
     expect(sanitizeReply(raw)).toBe(raw)
+  })
+})
+
+describe('stageInstruction SEND NOW rule', () => {
+  const stage: StageBrief = {
+    id: 's',
+    name: 'Qualifying',
+    description: null,
+    position: 1,
+    kind: 'qualifying',
+  }
+  const page: ActionPageBrief = {
+    id: 'p1',
+    title: 'Form',
+    cta_label: 'Open',
+    bot_send_instructions: 'Send when customer asks to sign up.',
+  }
+
+  it('includes SEND NOW instruction when action pages are present', () => {
+    const out = stageInstruction([stage], stage.id, [page], null, null)
+    expect(out).toContain('SEND NOW')
+    expect(out).toContain('any forward intent')
+  })
+
+  it('does not include SEND NOW when no action pages', () => {
+    const out = stageInstruction([stage], stage.id, [], null, null)
+    expect(out).not.toContain('SEND NOW')
   })
 })
