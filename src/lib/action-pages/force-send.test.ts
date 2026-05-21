@@ -10,6 +10,7 @@ import {
   isStageQualified,
   hashInstructions,
   prerequisitesAnsweredCached,
+  parseLlmJsonResponse,
   type LlmCheckClient,
 } from './force-send'
 
@@ -302,5 +303,31 @@ describe('prerequisitesAnsweredCached', () => {
     expect(first).toBe(false)
     expect(second).toBe(true)
     expect(fake.checkPrerequisites).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('parseLlmJsonResponse', () => {
+  it('parses {"ok": true}', () => {
+    expect(parseLlmJsonResponse('{"ok": true}')).toEqual({ ok: true })
+  })
+
+  it('parses {"ok": false}', () => {
+    expect(parseLlmJsonResponse('{"ok": false}')).toEqual({ ok: false })
+  })
+
+  it('strips ```json fences', () => {
+    expect(parseLlmJsonResponse('```json\n{"ok": true}\n```')).toEqual({ ok: true })
+  })
+
+  it('extracts the first {...} block when text contains prose', () => {
+    expect(parseLlmJsonResponse('sure: {"ok": true} done')).toEqual({ ok: true })
+  })
+
+  it('returns { ok: false } on garbage input', () => {
+    expect(parseLlmJsonResponse('lol no')).toEqual({ ok: false })
+  })
+
+  it('returns { ok: false } when ok is not a boolean', () => {
+    expect(parseLlmJsonResponse('{"ok": "yes"}')).toEqual({ ok: false })
   })
 })
