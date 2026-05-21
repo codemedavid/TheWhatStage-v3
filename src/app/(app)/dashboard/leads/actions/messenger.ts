@@ -476,3 +476,13 @@ export async function replyAsOperator(leadId: string, text: string): Promise<voi
   if (sendError) throw new Error(`replyAsOperator: ${sendError}`)
   revalidatePath('/dashboard/leads', 'layout')
 }
+
+export async function resumeBot(leadId: string): Promise<void> {
+  const { supabase } = await requireUser()
+  const { error } = await supabase
+    .from('messenger_threads')
+    .update({ bot_paused_until: null })
+    .eq('lead_id', leadId)
+  if (error) throw new Error(`resumeBot: ${error.message}`)
+  revalidatePath('/dashboard/leads', 'layout')
+}
