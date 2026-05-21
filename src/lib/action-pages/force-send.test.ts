@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi, beforeEach } from 'vitest'
 import type { ActionPageBrief, StageBrief, StageChange } from '@/lib/chatbot/classify'
+import { __leadCacheResetForTests } from '@/lib/leads/cache'
 import {
   isSendableStage,
   resolveFallbackFromList,
@@ -7,6 +8,9 @@ import {
   detectStageForward,
   hasQualifiedQuizSubmission,
   isStageQualified,
+  hashInstructions,
+  prerequisitesAnsweredCached,
+  type LlmCheckClient,
 } from './force-send'
 
 const stage = (kind: StageBrief['kind']): StageBrief => ({
@@ -188,5 +192,115 @@ describe('hasQualifiedQuizSubmission', () => {
   it('returns false when no submissions found', async () => {
     const s = mockSupabase([])
     expect(await hasQualifiedQuizSubmission(s, 'lead-1')).toBe(false)
+  })
+})
+
+beforeEach(() => __leadCacheResetForTests())
+
+describe('hashInstructions', () => {
+  it('produces a stable hex string', () => {
+    expect(hashInstructions('hello')).toBe(hashInstructions('hello'))
+  })
+
+  it('differs when text differs', () => {
+    expect(hashInstructions('a')).not.toBe(hashInstructions('b'))
+  })
+
+  it('returns the same hash for empty inputs', () => {
+    expect(hashInstructions('')).toBe(hashInstructions(''))
+  })
+})
+
+describe('prerequisitesAnsweredCached', () => {
+  const history = [{ role: 'user' as const, content: 'My budget is 50k and I want delivery next week' }]
+  const instructions = 'Ask for budget and delivery timeline before sending'
+
+  it('calls the LLM once and caches the result for a (leadId, pageId, hash) key', async () => {
+    const fake: LlmCheckClient = {
+      checkPrerequisites: vi.fn(async () => true),
+    }
+
+    const first = await prerequisitesAnsweredCached({
+      leadId: 'lead-1',
+      actionPageId: 'page-1',
+      instructionsText: instructions,
+      history,
+      llm: fake,
+    })
+    const second = await prerequisitesAnsweredCached({
+      leadId: 'lead-1',
+      actionPageId: 'page-1',
+      instructionsText: instructions,
+      history,
+      llm: fake,
+    })
+
+    expect(first).toBe(true)
+    expect(second).toBe(true)
+    expect(fake.checkPrerequisites).toHaveBeenCalledTimes(1)
+  })
+
+  it('recomputes when instructions text changes (hash differs)', async () => {
+    const fake: LlmCheckClient = {
+      checkPrerequisites: vi.fn(async () => true),
+    }
+
+    await prerequisitesAnsweredCached({
+      leadId: 'lead-1',
+      actionPageId: 'page-1',
+      instructionsText: 'old text',
+      history,
+      llm: fake,
+    })
+    await prerequisitesAnsweredCached({
+      leadId: 'lead-1',
+      actionPageId: 'page-1',
+      instructionsText: 'new text',
+      history,
+      llm: fake,
+    })
+
+    expect(fake.checkPrerequisites).toHaveBeenCalledTimes(2)
+  })
+
+  it('returns true without calling the LLM when instructionsText is empty', async () => {
+    const fake: LlmCheckClient = { checkPrerequisites: vi.fn(async () => false) }
+    const r = await prerequisitesAnsweredCached({
+      leadId: 'lead-1',
+      actionPageId: 'page-1',
+      instructionsText: '',
+      history,
+      llm: fake,
+    })
+    expect(r).toBe(true)
+    expect(fake.checkPrerequisites).not.toHaveBeenCalled()
+  })
+
+  it('does not cache when the LLM returns false (so a later turn can succeed)', async () => {
+    const fake: LlmCheckClient = {
+      checkPrerequisites: vi
+        .fn<[], Promise<boolean>>()
+        .mockResolvedValueOnce(false)
+        .mockResolvedValueOnce(true),
+    }
+
+    const first = await prerequisitesAnsweredCached({
+      leadId: 'lead-1',
+      actionPageId: 'page-1',
+      instructionsText: instructions,
+      history,
+      llm: fake,
+    })
+    const second = await prerequisitesAnsweredCached({
+      leadId: 'lead-1',
+      actionPageId: 'page-1',
+      instructionsText: instructions,
+      history,
+      llm: fake,
+    })
+
+    expect(first).toBe(false)
+    expect(second).toBe(true)
+    expect(fake.checkPrerequisites).toHaveBeenCalledTimes(2)
   })
 })
