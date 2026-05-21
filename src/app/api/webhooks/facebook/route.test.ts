@@ -79,7 +79,13 @@ function makeCommentAdminMock(options: { ownerStatus?: 'active' | 'pending' | 'p
   return { commentUpsert }
 }
 
-function makeMessengerAdminMock(options: { ownerStatus?: 'active' | 'pending' | 'paused' } = {}) {
+function makeMessengerAdminMock(
+  options: {
+    ownerStatus?: 'active' | 'pending' | 'paused'
+    threadOverrides?: Record<string, unknown>
+    autoClassifyEnabled?: boolean
+  } = {},
+) {
   const messengerJobInsert = vi.fn(() => ({
     select: vi.fn(() => ({
       single: vi.fn(async () => ({ data: { id: 'messenger-job-1' }, error: null })),
@@ -94,7 +100,13 @@ function makeMessengerAdminMock(options: { ownerStatus?: 'active' | 'pending' | 
         upsert: vi.fn(() => ({
           select: vi.fn(() => ({
             single: vi.fn(async () => ({
-              data: { id: 'thread-1', auto_reply_enabled: true, lead_id: null },
+              data: {
+                id: 'thread-1',
+                auto_reply_enabled: true,
+                bot_paused_until: null,
+                lead_id: null,
+                ...options.threadOverrides,
+              },
               error: null,
             })),
           })),
@@ -115,6 +127,19 @@ function makeMessengerAdminMock(options: { ownerStatus?: 'active' | 'pending' | 
     }
     if (table === 'messenger_jobs') {
       return { insert: messengerJobInsert }
+    }
+    if (table === 'chatbot_configs') {
+      const autoClassify = options.autoClassifyEnabled ?? false
+      return {
+        select: vi.fn(() => ({
+          eq: vi.fn(() => ({
+            maybeSingle: vi.fn(async () => ({
+              data: autoClassify ? { auto_classify_enabled: true } : null,
+              error: null,
+            })),
+          })),
+        })),
+      }
     }
     throw new Error(`unexpected table ${table}`)
   })
@@ -372,5 +397,72 @@ describe('facebook webhook comment events', () => {
     expect(res.status).toBe(200)
     expect(commentUpsert).not.toHaveBeenCalled()
     expect(global.fetch).not.toHaveBeenCalled()
+  })
+
+  it('takes classify-only fallback when bot_paused_until is in the future', async () => {
+    const futureDate = new Date(Date.now() + 60 * 60 * 1000).toISOString() // 1 hour from now
+    const { messengerJobInsert } = makeMessengerAdminMock({
+      threadOverrides: { auto_reply_enabled: true, bot_paused_until: futureDate },
+      autoClassifyEnabled: false,
+    })
+
+    const res = await postWebhook({
+      object: 'page',
+      entry: [
+        {
+          id: 'fb-page-1',
+          messaging: [
+            {
+              sender: { id: 'psid-1' },
+              recipient: { id: 'fb-page-1' },
+              message: { mid: 'mid-paused-bot', text: 'Hello during takeover' },
+            },
+          ],
+        },
+      ],
+    })
+
+    await Promise.resolve()
+
+    expect(res.status).toBe(200)
+    expect(messengerJobInsert).not.toHaveBeenCalled()
+    expect(global.fetch).not.toHaveBeenCalled()
+  })
+
+  it('enqueues normally when bot_paused_until is in the past', async () => {
+    const pastDate = new Date(Date.now() - 60 * 60 * 1000).toISOString() // 1 hour ago
+    const { messengerJobInsert } = makeMessengerAdminMock({
+      threadOverrides: { auto_reply_enabled: true, bot_paused_until: pastDate },
+    })
+
+    const res = await postWebhook({
+      object: 'page',
+      entry: [
+        {
+          id: 'fb-page-1',
+          messaging: [
+            {
+              sender: { id: 'psid-1' },
+              recipient: { id: 'fb-page-1' },
+              message: { mid: 'mid-expired-pause', text: 'Hello after takeover ended' },
+            },
+          ],
+        },
+      ],
+    })
+
+    await Promise.resolve()
+
+    expect(res.status).toBe(200)
+    expect(messengerJobInsert).toHaveBeenCalledWith({
+      thread_id: 'thread-1',
+      inbound_msg_id: 'message-1',
+      user_id: 'user-1',
+    })
+    expect(global.fetch).toHaveBeenCalledTimes(1)
+    expect(global.fetch).toHaveBeenCalledWith('https://app.test/api/messenger/process', {
+      method: 'POST',
+      headers: { 'x-worker-secret': 'messenger-secret' },
+    })
   })
 })

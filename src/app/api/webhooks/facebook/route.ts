@@ -2,6 +2,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto'
 import { after, NextResponse, type NextRequest } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { interruptWorkflowRun } from '@/lib/workflow/trigger'
+import { isBotPaused } from '@/lib/chatbot/takeover'
 import { handlePostback } from './_postback'
 import { isUserActive } from './_status'
 
@@ -258,7 +259,7 @@ async function handleEvent(
       { page_id: page.id, user_id: userId, psid },
       { onConflict: 'page_id,psid', ignoreDuplicates: false },
     )
-    .select('id, auto_reply_enabled, lead_id')
+    .select('id, auto_reply_enabled, bot_paused_until, lead_id')
     .single()
 
   if (threadErr || !thread) {
@@ -306,7 +307,13 @@ async function handleEvent(
   // Enqueue if the bot is on for this thread, OR if global auto-classify is
   // enabled for this user (the worker will skip the reply step and only
   // classify every Nth message). Skip otherwise.
-  if (thread.auto_reply_enabled === false) {
+  // Reactive bot is gated by either the sticky manual toggle OR an active
+  // human-takeover pause. In either case, fall through to classify-only if
+  // the user has auto_classify enabled.
+  if (
+    thread.auto_reply_enabled === false ||
+    isBotPaused((thread as { bot_paused_until?: string | null }).bot_paused_until)
+  ) {
     const { data: cfg } = await admin
       .from('chatbot_configs')
       .select('auto_classify_enabled')
