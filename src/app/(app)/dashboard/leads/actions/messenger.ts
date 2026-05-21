@@ -46,6 +46,7 @@ export interface ConversationData {
     full_name: string | null
     picture_url: string | null
     auto_reply_enabled: boolean
+    bot_paused_until: string | null
     last_message_at: string | null
     page_name: string | null
   }
@@ -75,7 +76,7 @@ export async function loadConversation(
   const { data: thread } = await supabase
     .from('messenger_threads')
     .select(
-      'id, psid, full_name, picture_url, auto_reply_enabled, last_message_at, page_id, facebook_pages(name)',
+      'id, psid, full_name, picture_url, auto_reply_enabled, bot_paused_until, last_message_at, page_id, facebook_pages(name)',
     )
     .eq('lead_id', leadId)
     .maybeSingle()
@@ -137,6 +138,7 @@ export async function loadConversation(
       full_name: thread.full_name,
       picture_url: thread.picture_url,
       auto_reply_enabled: thread.auto_reply_enabled,
+      bot_paused_until: (thread as { bot_paused_until?: string | null }).bot_paused_until ?? null,
       last_message_at: thread.last_message_at,
       page_name: pageName,
     },
