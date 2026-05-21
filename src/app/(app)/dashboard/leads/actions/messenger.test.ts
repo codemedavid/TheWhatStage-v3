@@ -65,12 +65,16 @@ function makeSupabaseStub(opts: {
     if (table === 'chatbot_configs') {
       return {
         select: () => ({
-          eq: () => ({
-            maybeSingle: async () => ({
-              data: { human_takeover_minutes: opts.takeoverMinutes ?? 60 },
-              error: null,
-            }),
-          }),
+          eq: (col: string, val: unknown) => {
+            expect(col).toBe('user_id')
+            expect(val).toBe('user-1')
+            return {
+              maybeSingle: async () => ({
+                data: { human_takeover_minutes: opts.takeoverMinutes ?? 60 },
+                error: null,
+              }),
+            }
+          },
         }),
       }
     }

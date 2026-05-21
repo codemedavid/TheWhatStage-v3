@@ -421,14 +421,13 @@ export async function replyAsOperator(leadId: string, text: string): Promise<voi
 
   // Stamp bot_paused_until regardless of send success/failure — the operator's
   // intent to take over is what matters, not whether the FB API accepted the message.
-  const { data: configRow } = await supabase
+  const { data: cfg } = await supabase
     .from('chatbot_configs')
     .select('human_takeover_minutes')
     .eq('user_id', userId)
     .maybeSingle()
-  const pauseMinutes = (configRow as { human_takeover_minutes?: number } | null)
-    ?.human_takeover_minutes ?? null
-  if (pauseMinutes !== null && pauseMinutes > 0) {
+  const pauseMinutes = cfg?.human_takeover_minutes ?? 0
+  if (pauseMinutes > 0) {
     await supabase
       .from('messenger_threads')
       .update({ bot_paused_until: new Date(Date.now() + pauseMinutes * 60_000).toISOString() })
