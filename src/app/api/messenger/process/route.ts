@@ -579,6 +579,8 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
               leadContextBlock,
               leadName: thread.full_name ?? undefined,
               preloadedConfig: config,
+              leadId: thread.lead_id ?? null,
+              threadId: thread.id,
             },
           )
           reply = r.text.trim()
