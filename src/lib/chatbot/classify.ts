@@ -15,6 +15,7 @@ import {
 } from './config'
 import { selectMediaForReply, type SelectedMediaAsset } from '@/lib/media/selector'
 import { logChatbotUsage, type AnswerHistory, type AnswerOptions, type AnswerResult } from './answer'
+import { decideForceSend } from '@/lib/action-pages/force-send'
 
 export interface StageBrief {
   id: string
@@ -92,6 +93,8 @@ export async function answerWithClassification(
     activeCatalogPageId?: string | null
     /** Same idea, but for a realestate action page — gates `recommend_property`. */
     activeRealestatePageId?: string | null
+    leadId?: string | null
+    threadId?: string | null
   } = {},
 ): Promise<AnswerWithClassificationResult> {
   const baseConfig = options.preloadedConfig ?? (await getChatbotConfig(supabase, userId))
@@ -271,6 +274,35 @@ export async function answerWithClassification(
     actionPage = null
     productRecommendation = null
     propertyRecommendation = null
+  }
+
+  try {
+    const forced = await decideForceSend({
+      userId,
+      leadId: options.leadId ?? null,
+      threadId: options.threadId ?? null,
+      history,
+      latestCustomerMessage: message,
+      currentStage: stages.find((s) => s.id === currentStageId) ?? null,
+      stages,
+      stageChangeThisTurn: stageChange,
+      llmActionPage: actionPage,
+      actionPages,
+      primaryActionPageId: config.primaryActionPageId ?? null,
+      supabase,
+    })
+    if (forced.overrideFired) {
+      console.info('[force-send] override fired', {
+        userId,
+        leadId: options.leadId ?? null,
+        threadId: options.threadId ?? null,
+        reason: forced.reason,
+        pageId: forced.actionPage?.action_page_id ?? null,
+      })
+    }
+    actionPage = forced.actionPage
+  } catch (e) {
+    console.error('[force-send] decideForceSend threw — keeping LLM choice', e)
   }
 
   const [sourceTitles, media] = await Promise.all([
