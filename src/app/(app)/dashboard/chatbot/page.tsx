@@ -9,6 +9,7 @@ import { PersonalityTemplates } from './_components/PersonalityTemplates'
 import { PrimaryGoalSection, type PrimaryGoalOption } from './_components/PrimaryGoalSection'
 import { ChatbotTabs } from './_components/ChatbotTabs'
 import { AutoFollowupForm } from './_components/AutoFollowupForm'
+import { HumanTakeoverForm } from './_components/HumanTakeoverForm'
 import type { PersonalityTemplate } from '@/lib/chatbot/personality/types'
 import './chatbot.css'
 
@@ -71,7 +72,10 @@ export default async function ChatbotPage() {
   )
 
   const followupContent = (
-    <AutoFollowupForm initial={config.followupSettings} />
+    <>
+      <AutoFollowupForm initial={config.followupSettings} />
+      <HumanTakeoverForm />
+    </>
   )
 
   return (
