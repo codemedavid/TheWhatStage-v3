@@ -346,9 +346,15 @@ export async function undoStageEvent(eventId: string): Promise<void> {
 
 export async function setAutoReply(leadId: string, enabled: boolean): Promise<void> {
   const { supabase } = await requireUser()
+  // Enabling clears any auto-pause stamp so the operator doesn't have to wait
+  // out the timer after explicitly turning the bot back on. Disabling leaves
+  // the stamp alone — the manual toggle and the pause are independent states.
+  const patch: Record<string, unknown> = enabled
+    ? { auto_reply_enabled: true, bot_paused_until: null }
+    : { auto_reply_enabled: false }
   const { error } = await supabase
     .from('messenger_threads')
-    .update({ auto_reply_enabled: enabled })
+    .update(patch)
     .eq('lead_id', leadId)
   if (error) throw new Error(`setAutoReply: ${error.message}`)
   revalidatePath('/dashboard/leads', 'layout')
