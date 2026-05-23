@@ -232,6 +232,19 @@ export async function sendCapiTestEventAction(
     }
   }
 
+  // Meta validates that user_data.page_scoped_user_id is numeric (real PSIDs
+  // are 15–17 digit numbers). Prefer a real PSID from this page's messenger
+  // history so the test event resolves to a known user in Events Manager;
+  // otherwise fall back to a numeric placeholder so the format check passes.
+  const { data: thread } = await admin
+    .from('messenger_threads')
+    .select('psid')
+    .eq('page_id', existing.id)
+    .order('last_message_at', { ascending: false, nullsFirst: false })
+    .limit(1)
+    .maybeSingle<{ psid: string }>()
+  const testPsid = thread?.psid && /^\d+$/.test(thread.psid) ? thread.psid : '1000000000000000'
+
   // Prefix with 'test-' so isUuid() returns false and the log row's
   // submission_id stays null — avoiding a FK violation against action_page_submissions.
   const fakeSubmissionId = `test-${crypto.randomUUID()}`
@@ -245,7 +258,7 @@ export async function sendCapiTestEventAction(
       actionPageKind: 'form',
       actionPageSlug: 'test',
       outcome: 'submitted',
-      psid: 'TEST_PSID',
+      psid: testPsid,
       pageRowId: existing.id,
       parsedData: {},
       pageConfig: {},
