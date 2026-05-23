@@ -371,6 +371,27 @@ describe('sanitizeReply', () => {
   })
 })
 
+describe('stageInstruction attach_images block', () => {
+  it('includes attach_images in the JSON schema', () => {
+    const out = stageInstruction(stages, null, [], null, null)
+    expect(out).toContain('"attach_images": boolean')
+  })
+
+  it('includes the ATTACH IMAGES decision rules', () => {
+    const out = stageInstruction(stages, null, [], null, null)
+    expect(out).toContain('ATTACH IMAGES')
+    expect(out).toMatch(/default.+`false`/i)
+    expect(out).toMatch(/explicitly asked to see/i)
+    expect(out).toMatch(/when in doubt.*`false`/i)
+  })
+
+  it('lists the per-language visual-intent triggers the LLM should look for', () => {
+    const out = stageInstruction(stages, null, [], null, null)
+    expect(out).toContain('show me')
+    expect(out).toContain('pakita')
+  })
+})
+
 describe('stageInstruction SEND NOW rule', () => {
   const stage: StageBrief = {
     id: 's',

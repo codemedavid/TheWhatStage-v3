@@ -5,7 +5,6 @@ import { useActionState } from 'react'
 import { signInAction, type AuthFormState } from '../actions'
 import {
   AuthTabs,
-  Checkbox,
   EmailIcon,
   Field,
   FormError,
@@ -55,9 +54,6 @@ export default function LoginPage() {
             </Link>
           }
         />
-        <Checkbox name="remember" defaultChecked>
-          Remember me on this device
-        </Checkbox>
         <SubmitButton>Sign in</SubmitButton>
       </form>
 

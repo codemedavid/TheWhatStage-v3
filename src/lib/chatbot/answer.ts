@@ -17,6 +17,12 @@ export interface AnswerResult {
   text: string
   sourceTitles: string[]
   media: SelectedMediaAsset[]
+  /** Whether the bot decided this turn's reply warrants attaching images.
+   *  Gates every image-send path (selected media, source-image first-mention,
+   *  sales-page hero). The fallback `answer()` path can't reason about this
+   *  per-turn, so it returns `media.length > 0` — operator-tagged explicit
+   *  @asset/#folder refs are trustworthy enough to keep sending. */
+  attachImages: boolean
 }
 
 export interface CampaignPersonaOverride {
@@ -193,7 +199,7 @@ export async function answer(
     text = config.fallbackMessage
   }
 
-  return { text, sourceTitles, media }
+  return { text, sourceTitles, media, attachImages: media.length > 0 }
 }
 
 /**

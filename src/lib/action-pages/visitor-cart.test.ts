@@ -72,7 +72,7 @@ function makeAdmin(initial: {
     return api
   }
 
-  return { from: vi.fn((name: string) => builder(name)), _tables: tables } as unknown as ReturnType<typeof makeAdmin>
+  return { from: vi.fn((name: string) => builder(name)), _tables: tables }
 }
 
 // Narrow type for accessing test internals

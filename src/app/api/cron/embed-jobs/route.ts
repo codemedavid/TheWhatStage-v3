@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { enqueuePendingSources, runDueJobs } from '@/lib/rag/worker/embed-job';
 import { buildMediaRagText } from '@/lib/media/rag-text';
+import { buildPaymentMethodRagText } from '@/lib/payment-methods/rag-text';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
@@ -84,6 +85,19 @@ export async function GET(req: Request) {
           assetSlug: data.slug,
           assetDescription: data.description,
         }),
+      };
+    },
+    async fetchPaymentMethod(id: string) {
+      const { data, error } = await client
+        .from('payment_methods')
+        .select('name, kind, instructions, details, enabled')
+        .eq('id', id)
+        .single();
+      if (error || !data) throw new Error(`payment method ${id} missing: ${error?.message}`);
+      return {
+        name: data.name,
+        enabled: data.enabled,
+        ragText: buildPaymentMethodRagText(data as Parameters<typeof buildPaymentMethodRagText>[0]),
       };
     },
   };

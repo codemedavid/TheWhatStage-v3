@@ -1,9 +1,10 @@
 import { createAdminClient } from '@/lib/supabase/admin';
 import { runJob, type EmbedJobRow, type SourceFetchers } from './worker/embed-job';
 import { buildMediaRagText } from '@/lib/media/rag-text';
+import { buildPaymentMethodRagText } from '@/lib/payment-methods/rag-text';
 import type { SourceKind } from './types';
 
-function sourceColumn(kind: SourceKind): 'document_id' | 'faq_id' | 'business_item_id' | 'media_asset_id' {
+function sourceColumn(kind: SourceKind): 'document_id' | 'faq_id' | 'business_item_id' | 'media_asset_id' | 'payment_method_id' {
   switch (kind) {
     case 'document':
       return 'document_id';
@@ -13,8 +14,8 @@ function sourceColumn(kind: SourceKind): 'document_id' | 'faq_id' | 'business_it
       return 'business_item_id';
     case 'media_asset':
       return 'media_asset_id';
-    default:
-      throw new Error(`unsupported source kind: ${kind}`);
+    case 'payment_method':
+      return 'payment_method_id';
   }
 }
 
@@ -80,6 +81,19 @@ function buildFetchers(client: ReturnType<typeof createAdminClient>): SourceFetc
         }),
       };
     },
+    async fetchPaymentMethod(id) {
+      const { data, error } = await client
+        .from('payment_methods')
+        .select('name, kind, instructions, details, enabled')
+        .eq('id', id)
+        .single();
+      if (error || !data) throw new Error(`payment method ${id} missing: ${error?.message}`);
+      return {
+        name: data.name,
+        enabled: data.enabled,
+        ragText: buildPaymentMethodRagText(data as Parameters<typeof buildPaymentMethodRagText>[0]),
+      };
+    },
   };
 }
 
@@ -105,7 +119,7 @@ export async function processSourceInline(args: {
     .eq(col, args.sourceId)
     .eq('status', 'queued')
     .select(
-      'id, document_id, faq_id, business_item_id, media_asset_id, user_id, attempts, source_version',
+      'id, document_id, faq_id, business_item_id, media_asset_id, payment_method_id, user_id, attempts, source_version',
     );
 
   if (error) {

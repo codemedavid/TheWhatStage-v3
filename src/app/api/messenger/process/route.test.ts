@@ -12,7 +12,7 @@ vi.mock('@/lib/chatbot/deep-reclassify', () => ({
 
 const mocks = vi.hoisted(() => ({
   admin: null as unknown,
-  answer: vi.fn(async () => ({ text: 'Fallback reply', sourceTitles: [] })),
+  answer: vi.fn(async () => ({ text: 'Fallback reply', sourceTitles: [], media: [], attachImages: false })),
   shouldRollSummary: vi.fn(() => false),
   summarizeConversation: vi.fn(async () => ''),
   answerWithClassification: vi.fn(async () => ({
@@ -27,6 +27,7 @@ const mocks = vi.hoisted(() => ({
     productRecommendation: null,
     propertyRecommendation: null,
     media: [],
+    attachImages: false,
   })),
   applyStageChange: vi.fn(async () => null),
   classifyOnly: vi.fn(async () => null),
@@ -945,6 +946,7 @@ describe('POST /api/messenger/process', () => {
       productRecommendation: null,
       propertyRecommendation: null,
       media: [],
+      attachImages: false,
     })
 
     const res = await POST(makeWorkerRequest() as Parameters<typeof POST>[0])
@@ -968,6 +970,7 @@ describe('POST /api/messenger/process', () => {
       productRecommendation: null,
       propertyRecommendation: null,
       media: [],
+      attachImages: false,
     })
 
     const res = await POST(makeWorkerRequest() as Parameters<typeof POST>[0])
@@ -988,6 +991,7 @@ describe('POST /api/messenger/process', () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       propertyRecommendation: { query: '3BR condo in Cebu', filters: { priceMin: null, priceMax: 6_000_000, tags: ['condo'] }, actionPageId: 'ap_realestate', confidenceThreshold: 0.55 } as any,
       media: [],
+      attachImages: false,
     })
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     ;(mocks.recommendProperty.mockResolvedValueOnce as any)({

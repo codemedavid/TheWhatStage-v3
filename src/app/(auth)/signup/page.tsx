@@ -67,6 +67,11 @@ export default function SignupPage() {
           </Link>
           .
         </Checkbox>
+        {state.fieldErrors?.agree ? (
+          <p className="-mt-2 text-[12.5px] text-[#C96442]">
+            {state.fieldErrors.agree}
+          </p>
+        ) : null}
         <SubmitButton>Create account</SubmitButton>
       </form>
 

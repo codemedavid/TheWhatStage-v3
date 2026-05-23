@@ -31,6 +31,7 @@ export async function signUpAction(
     full_name: formData.get('full_name'),
     email: formData.get('email'),
     password: formData.get('password'),
+    agree: formData.get('agree'),
   })
 
   if (!parsed.success) {
@@ -46,12 +47,10 @@ export async function signUpAction(
   })
 
   if (createErr) {
-    if (process.env.NODE_ENV !== 'production') {
-      console.error('[signUpAction] supabase create error:', createErr)
-    }
-    if (createErr.message?.toLowerCase().includes('already')) {
-      return { formError: 'An account with that email already exists.' }
-    }
+    // Always log server-side; never branch the user-facing message on the
+    // failure reason. Differentiating "already exists" from other errors
+    // lets an attacker enumerate which emails have accounts.
+    console.error('[signUpAction] supabase create error:', createErr)
     return { formError: 'Could not create account. Please try again.' }
   }
 
@@ -102,8 +101,12 @@ export async function signInAction(
     const status = isAccountStatus(profile?.status) ? profile.status : 'active'
     const blockedPath = profile?.role === 'superadmin' ? null : pathForBlockedStatus(status)
     if (blockedPath) {
-      // Keep the session alive — the (auth) layout polls getSession() and will
-      // auto-redirect to the dashboard as soon as the admin lifts the block.
+      // Paused = admin sanction; drop the session entirely so even Supabase
+      // client calls fail until they sign back in after reinstatement.
+      // Pending = awaiting approval; we keep the session so the layout's
+      // 10s router.refresh poll auto-promotes them to the dashboard when
+      // an admin flips status → active without forcing a re-login.
+      if (status === 'paused') await supabase.auth.signOut()
       redirect(blockedPath)
     }
   }

@@ -124,20 +124,27 @@ export async function dismissOnboarding(): Promise<void> {
   const supabase = await createClient()
   const { data: auth } = await supabase.auth.getUser()
   if (!auth.user) throw new Error('not authenticated')
-  await supabase
+  // Brand-new accounts have no state row until the business step is saved,
+  // so a bare UPDATE would silently match zero rows and leave dismissed_at
+  // unset — sending the user right back to /onboarding/welcome on next load.
+  await initOnboardingForProfile(auth.user.id)
+  const { error } = await supabase
     .from(TABLE)
     .update({ dismissed_at: new Date().toISOString() })
     .eq('profile_id', auth.user.id)
+  if (error) throw error
 }
 
 export async function completeOnboarding(): Promise<void> {
   const supabase = await createClient()
   const { data: auth } = await supabase.auth.getUser()
   if (!auth.user) throw new Error('not authenticated')
-  await supabase
+  await initOnboardingForProfile(auth.user.id)
+  const { error } = await supabase
     .from(TABLE)
     .update({ completed_at: new Date().toISOString() })
     .eq('profile_id', auth.user.id)
+  if (error) throw error
 }
 
 export async function setOnboardingLanguage(

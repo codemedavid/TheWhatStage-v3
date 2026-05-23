@@ -1,5 +1,6 @@
 'use client'
-import { useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { LeadDrawer } from './LeadDrawer'
 import { BulkActionBar } from './BulkActionBar'
 import type { LeadRow, StageRow, FieldDefRow, CampaignOption } from '../_lib/queries'
@@ -116,10 +117,10 @@ export function LeadsTableClient({
                     </div>
                   </td>
                   <td className="px-3 py-2.5" style={{ color: 'var(--lead-body)' }}>
-                    {r.email ?? <Em />}
+                    <ContactCell primary={r.email} all={r.emails} />
                   </td>
                   <td className="px-3 py-2.5 tabular-nums" style={{ color: 'var(--lead-body)' }}>
-                    {r.phone ?? <Em />}
+                    <ContactCell primary={r.phone} all={r.phones} />
                   </td>
                   <td className="px-3 py-2.5" style={{ color: 'var(--lead-body)' }}>
                     {r.company ?? <Em />}
@@ -178,6 +179,144 @@ function Th({ children, align = 'left' }: { children: React.ReactNode; align?: '
 
 function Em() {
   return <span style={{ color: 'var(--lead-faint)' }}>—</span>
+}
+
+function ContactCell({ primary, all }: { primary: string | null; all: string[] | null }) {
+  const values = useMemo(() => {
+    const seen = new Set<string>()
+    const list: string[] = []
+    for (const v of [primary, ...(all ?? [])]) {
+      if (!v) continue
+      const t = v.trim()
+      if (!t || seen.has(t)) continue
+      seen.add(t)
+      list.push(t)
+    }
+    return list
+  }, [primary, all])
+
+  const [open, setOpen] = useState(false)
+  const [pos, setPos] = useState<{ top: number; left: number; width: number } | null>(null)
+  const btnRef = useRef<HTMLButtonElement>(null)
+  const popRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node
+      if (btnRef.current?.contains(t)) return
+      if (popRef.current?.contains(t)) return
+      setOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    const close = () => setOpen(false)
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    window.addEventListener('scroll', close, true)
+    window.addEventListener('resize', close)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+      window.removeEventListener('scroll', close, true)
+      window.removeEventListener('resize', close)
+    }
+  }, [open])
+
+  if (values.length === 0) return <Em />
+  if (values.length === 1) return <span className="truncate">{values[0]}</span>
+
+  const toggleOpen = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (open) {
+      setOpen(false)
+      return
+    }
+    const rect = btnRef.current?.getBoundingClientRect()
+    if (rect) setPos({ top: rect.bottom + 4, left: rect.left, width: rect.width })
+    setOpen(true)
+  }
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={toggleOpen}
+        className="lead-focus inline-flex max-w-full items-center gap-1 rounded-md px-1.5 py-0.5 text-left transition-colors hover:bg-[color:var(--lead-surface-2)]"
+        style={{ color: 'var(--lead-body)' }}
+        title={`${values.length} detected`}
+      >
+        <span className="truncate">{values[0]}</span>
+        <span
+          className="inline-flex h-4 shrink-0 items-center rounded-sm px-1 text-[10px] font-medium tabular-nums"
+          style={{ background: 'var(--lead-surface-2)', color: 'var(--lead-muted)' }}
+        >
+          +{values.length - 1}
+        </span>
+        <Chevron open={open} />
+      </button>
+      {open && pos && typeof document !== 'undefined' &&
+        createPortal(
+          <div
+            ref={popRef}
+            className="overflow-hidden rounded-lg py-1 text-[12.5px]"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              position: 'fixed',
+              top: pos.top,
+              left: pos.left,
+              minWidth: Math.max(pos.width, 220),
+              zIndex: 50,
+              background: 'var(--lead-surface)',
+              border: '1px solid var(--lead-line)',
+              boxShadow: '0 8px 24px rgba(0,0,0,0.16)',
+            }}
+          >
+            {values.map((v, i) => (
+              <div
+                key={`${v}-${i}`}
+                className="flex items-center gap-2 px-3 py-1.5"
+                style={{ color: 'var(--lead-ink)' }}
+              >
+                <span className="flex-1 truncate">{v}</span>
+                {i === 0 && (
+                  <span
+                    className="rounded-sm px-1 text-[10px] uppercase tracking-wide"
+                    style={{ background: 'var(--lead-accent-soft)', color: 'var(--lead-accent)' }}
+                  >
+                    Primary
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>,
+          document.body,
+        )}
+    </>
+  )
+}
+
+function Chevron({ open }: { open: boolean }) {
+  return (
+    <svg
+      width="10"
+      height="10"
+      viewBox="0 0 10 10"
+      aria-hidden
+      style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 120ms', flexShrink: 0 }}
+    >
+      <path
+        d="M2 3.5L5 6.5L8 3.5"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        fill="none"
+      />
+    </svg>
+  )
 }
 
 function initials(name: string): string {

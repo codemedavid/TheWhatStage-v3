@@ -20,13 +20,27 @@ export async function runGeneration<K extends GenerationKind>(
     const hash = canonicalHash(input)
     const state = await enqueueRunning(profileId, kind, hash)
     if (state !== 'enqueued') return
+    const handler = KINDS[kind] as { run: (i: KindInput<K>) => Promise<unknown> }
+    let result: unknown
+    let llmError: string | undefined
     try {
-      const handler = KINDS[kind] as { run: (i: KindInput<K>) => Promise<unknown> }
-      const result = await handler.run(input)
-      await markDone(profileId, kind, hash, result)
+      result = await handler.run(input)
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      await markFailed(profileId, kind, hash, message)
+      llmError = err instanceof Error ? err.message : String(err)
+    }
+    if (llmError !== undefined) {
+      try {
+        await markFailed(profileId, kind, hash, llmError)
+      } catch (markErr) {
+        console.error('[generation.runner] markFailed write error', markErr)
+      }
+    } else {
+      try {
+        await markDone(profileId, kind, hash, result)
+      } catch (markErr) {
+        console.error('[generation.runner] markDone write error', markErr)
+        // Row stays 'running'; stale sweep converts it to 'failed' after 90 s.
+      }
     }
   } catch (err) {
     console.error('[generation.runner]', err)

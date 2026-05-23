@@ -256,6 +256,7 @@ export async function answerWithClassification(
   let actionPage: ActionPageChoice | null = null
   let productRecommendation: ProductRecommendationRequest | null = null
   let propertyRecommendation: PropertyRecommendationRequest | null = null
+  let attachImages = false
   if (parsed && typeof parsed === 'object') {
     const r = parsed as {
       reply?: unknown
@@ -263,11 +264,13 @@ export async function answerWithClassification(
       action_page?: unknown
       recommend_product?: unknown
       recommend_property?: unknown
+      attach_images?: unknown
     }
     const rawReply = typeof r.reply === 'string' ? r.reply : ''
     if (rawReply) text = sanitizeReply(rawReply)
     stageChange = coerceStageChange(r.stage_change, stages, currentStageId)
     actionPage = coerceActionPage(r.action_page, actionPages)
+    attachImages = r.attach_images === true
     // The model occasionally announces a link in `reply` ("Eto na yung link…")
     // but doesn't set the structured `action_page` field, so the customer sees
     // a broken promise. sanitizeReply strips the tease sentence, but we log
@@ -327,6 +330,10 @@ export async function answerWithClassification(
     actionPage = null
     productRecommendation = null
     propertyRecommendation = null
+    // The fallback model didn't produce a structured envelope, so it never
+    // reasoned about image attachment. Fall back to the same rule as
+    // `answer()`: trust operator-tagged @asset/#folder refs.
+    attachImages = media.length > 0
   }
 
   try {
@@ -374,7 +381,7 @@ export async function answerWithClassification(
     content: c.content,
     rrf_score: ('score' in c ? (c as { score: number }).score : 0),
   }))
-  return { text, sourceTitles, media, stageChange, actionPage, productRecommendation, propertyRecommendation, topChunks }
+  return { text, sourceTitles, media, attachImages, stageChange, actionPage, productRecommendation, propertyRecommendation, topChunks }
 }
 
 /**
@@ -550,6 +557,7 @@ export function stageInstruction(
   const schemaParts = [
     '"reply": string',
     '"stage_change": {"to_stage_id": string, "confidence": "low"|"medium"|"high", "reason": string} | null',
+    '"attach_images": boolean',
   ]
   if (hasActionPages) {
     schemaParts.push(
@@ -567,6 +575,19 @@ export function stageInstruction(
     )
   }
   const schema = `{${schemaParts.join(', ')}}`
+
+  const attachImagesBlock =
+    'ATTACH IMAGES — decide whether to send photos this turn:\n' +
+    '- Default `attach_images` to `false`. The vast majority of replies are text only.\n' +
+    '- Set `attach_images` to `true` ONLY when ONE of these is clearly true:\n' +
+    '    (a) The customer explicitly asked to see something — "show me", "send a photo/pic", "may photos po ba", "pakita", "ipakita mo yung sample", "patingin", "can I see the menu/QR/portfolio", or any equivalent in any language.\n' +
+    '    (b) The customer\'s latest message is about a specific item / product / payment QR / portfolio piece whose photo would DIRECTLY answer the question (e.g. they asked about a specific product variant and the knowledge has its image; they asked how to pay via GCash and the knowledge has the QR).\n' +
+    '    (c) You are also setting `action_page` to a sales or product page AND the hero image is a natural part of the pitch.\n' +
+    '- Set `attach_images` to `false` for: greetings, qualifying questions (asking back about the customer\'s business / needs / timeline / budget), generic pricing chit-chat without a specific item picked, objection handling, scheduling, off-topic, anything where adding a photo would feel random or unrelated.\n' +
+    '- Quality test: ask yourself "would a thoughtful human salesperson reach for their phone to send a photo RIGHT NOW based on this message?". If the answer is no or "maybe later", set `false`.\n' +
+    '- When in doubt → `false`. A skipped image is far less damaging than an irrelevant brand/logo/product photo arriving out of context.\n' +
+    '- This flag gates ALL image sends this turn — gallery shots, product covers, payment QRs, brand/logo assets, sales-page hero. The system still picks WHICH images go out; you only decide WHETHER any go out at all.\n' +
+    '- If a "# Attached images" section appears in the system prompt, treat those as CANDIDATES only — they are sent only when you set `attach_images: true`. If you set `attach_images: false`, do NOT mention or hint at images in `reply` (no "here are some screenshots", no "see below"). If you set `true`, briefly acknowledge them.'
   // Split the action-page block into a stable prose preamble (placed BEFORE
   // the volatile stageList/actionPageList) and a volatile list (placed at the
   // very end). The preamble text is byte-identical across every turn, so
@@ -667,6 +688,8 @@ export function stageInstruction(
     calibrationBlock +
     '\n\n' +
     examplesBlock +
+    '\n\n' +
+    attachImagesBlock +
     apPreamble +
     recommendSection +
     recommendPropertySection +

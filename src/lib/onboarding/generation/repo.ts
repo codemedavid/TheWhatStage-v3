@@ -70,7 +70,10 @@ export async function upsertRunning(
     },
     { onConflict: 'profile_id,kind' },
   )
-  if (error) console.error('[generation.repo.upsertRunning]', error)
+  if (error) {
+    console.error('[generation.repo.upsertRunning]', error)
+    throw error
+  }
 }
 
 export type EnqueueResult = 'enqueued' | 'in_progress' | 'already_done'
@@ -117,7 +120,10 @@ export async function markDone(
     .eq('profile_id', profileId)
     .eq('kind', kind)
     .eq('input_hash', inputHash)
-  if (error) console.error('[generation.repo.markDone]', error)
+  if (error) {
+    console.error('[generation.repo.markDone]', error)
+    throw error
+  }
 }
 
 export async function markFailed(
@@ -137,7 +143,10 @@ export async function markFailed(
     .eq('profile_id', profileId)
     .eq('kind', kind)
     .eq('input_hash', inputHash)
-  if (error) console.error('[generation.repo.markFailed]', error)
+  if (error) {
+    console.error('[generation.repo.markFailed]', error)
+    throw error
+  }
 }
 
 /**

@@ -66,11 +66,12 @@ function fd(values: Record<string, string>): FormData {
 }
 
 describe('signUpAction', () => {
-  it('creates user and redirects to /account-pending (no auto-signin, no onboarding init)', async () => {
+  it('creates user, auto-signs-in (so ApprovalPoller can poll), redirects to /account-pending', async () => {
     await expect(signUpAction({}, fd({
       full_name: 'Aling Nena',
       email: 'nena@example.com',
       password: 'hunter22hunter',
+      agree: 'on',
     }))).rejects.toThrowError(/NEXT_REDIRECT:\/account-pending/)
 
     expect(adminAuthCreate).toHaveBeenCalledWith(expect.objectContaining({
@@ -78,21 +79,32 @@ describe('signUpAction', () => {
       email_confirm: true,
       user_metadata: { full_name: 'Aling Nena' },
     }))
-    expect(signInWithPassword).not.toHaveBeenCalled()
+    expect(signInWithPassword).toHaveBeenCalledTimes(1)
     expect(redirectMock).toHaveBeenCalledWith('/account-pending')
   })
 
-  it('returns formError "already exists" when admin create reports duplicate', async () => {
+  it('returns generic formError when admin create fails (no email-existence enumeration)', async () => {
     adminAuthCreate.mockResolvedValue({ data: null, error: { message: 'User already registered' } } as never)
     const res = await signUpAction({}, fd({
-      full_name: 'X', email: 'dup@example.com', password: 'hunter22hunter',
+      full_name: 'X', email: 'dup@example.com', password: 'hunter22hunter', agree: 'on',
     }))
-    expect(res.formError).toMatch(/already exists/i)
+    // Must NOT leak whether the email exists; the message should be the same
+    // generic copy returned for any other create failure.
+    expect(res.formError).toMatch(/could not create account/i)
+    expect(res.formError).not.toMatch(/already/i)
     expect(redirectMock).not.toHaveBeenCalled()
   })
 
+  it('rejects signup when the terms-of-service checkbox is missing', async () => {
+    const res = await signUpAction({}, fd({
+      full_name: 'X', email: 'a@b.co', password: 'hunter22hunter',
+    }))
+    expect(res.fieldErrors?.agree).toBeDefined()
+    expect(adminAuthCreate).not.toHaveBeenCalled()
+  })
+
   it('returns fieldErrors on validation failure (no admin call)', async () => {
-    const res = await signUpAction({}, fd({ full_name: '', email: 'no', password: '' }))
+    const res = await signUpAction({}, fd({ full_name: '', email: 'no', password: '', agree: 'on' }))
     expect(res.fieldErrors).toBeDefined()
     expect(adminAuthCreate).not.toHaveBeenCalled()
   })
@@ -108,12 +120,16 @@ describe('signInAction', () => {
     expect(signOut).not.toHaveBeenCalled()
   })
 
-  it('on pending user, signs out and redirects to /account-pending', async () => {
+  it('on pending user, keeps the session alive (for ApprovalPoller) and redirects to /account-pending', async () => {
     mockAdminFrom.mockReturnValue(profileLookup({ status: 'pending', role: 'user' }))
     await expect(signInAction({}, fd({
       email: 'new@example.com', password: 'hunter22hunter',
     }))).rejects.toThrowError(/NEXT_REDIRECT:\/account-pending/)
-    expect(signOut).toHaveBeenCalledTimes(1)
+    // Pending users keep their session so the (auth) layout's 10s
+    // router.refresh poll auto-promotes them to the dashboard the moment
+    // the admin flips status → active. Self-escalation is blocked by RLS,
+    // not by killing the session.
+    expect(signOut).not.toHaveBeenCalled()
     expect(getPostAuthRedirect).not.toHaveBeenCalled()
   })
 

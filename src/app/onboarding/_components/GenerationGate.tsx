@@ -56,9 +56,15 @@ type PollState =
 // Hard ceiling so a stuck job never traps the user. Generators have a 60s
 // server-side timeout; double it for client patience plus a margin.
 const MAX_POLL_MS = 120_000
-// After this many ticks of 404 (job missing), assume lazy-enqueue failed and
-// surface a retry CTA instead of polling forever.
-const NOT_ENQUEUED_TICK_GIVEUP = 6
+// after() callbacks fire after the HTTP response is sent, and the Supabase
+// RPC that inserts the job row adds ~50-500ms (more on cold starts). The
+// client must not give up on 404s before the row has had time to appear.
+// 10 ticks × 1.5 s = 15 s of grace before the first delayed tick at 3 s,
+// giving ~17 s total — enough for even a cold-start + slow Supabase round.
+const NOT_ENQUEUED_TICK_GIVEUP = 10
+// Delay before the very first poll so the server-side after() callback has
+// time to enqueue the job before we start accumulating 404 ticks.
+const INITIAL_POLL_DELAY_MS = 2500
 
 function computeDelay(tick: number): number {
   if (tick < 4) return 1500            // fast first ~6s
@@ -136,7 +142,7 @@ export function GenerationGate({
       schedule(computeDelay(tickCount))
     }
 
-    tick()
+    schedule(INITIAL_POLL_DELAY_MS)
 
     const onVis = () => {
       if (typeof document === 'undefined') return

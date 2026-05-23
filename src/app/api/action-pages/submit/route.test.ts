@@ -461,7 +461,7 @@ describe('POST /api/action-pages/submit', () => {
     const res = await POST(req as any)
     expect(res.status).toBe(200)
     expect(mocks.dispatchCapiEvent).toHaveBeenCalledTimes(1)
-    const call = mocks.dispatchCapiEvent.mock.calls[0][0]
+    const call = (mocks.dispatchCapiEvent.mock.calls as unknown as Array<[unknown]>)[0][0]
     expect(call).toMatchObject({
       userId: 'user_1',
       actionPageKind: 'form',

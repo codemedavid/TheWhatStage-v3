@@ -280,7 +280,7 @@ describe('prerequisitesAnsweredCached', () => {
   it('does not cache when the LLM returns false (so a later turn can succeed)', async () => {
     const fake: LlmCheckClient = {
       checkPrerequisites: vi
-        .fn<[], Promise<boolean>>()
+        .fn<() => Promise<boolean>>()
         .mockResolvedValueOnce(false)
         .mockResolvedValueOnce(true),
     }
