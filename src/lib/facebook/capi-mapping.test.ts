@@ -12,16 +12,16 @@ function input(
 }
 
 describe('resolveEventName — kind defaults', () => {
-  it('form/submitted → Lead', () => {
-    expect(resolveEventName(input('form', 'submitted'))).toEqual({ send: true, eventName: 'Lead' })
+  it('form/submitted → LeadSubmitted', () => {
+    expect(resolveEventName(input('form', 'submitted'))).toEqual({ send: true, eventName: 'LeadSubmitted' })
   })
 
-  it('booking/booked → Schedule', () => {
-    expect(resolveEventName(input('booking', 'booked'))).toEqual({ send: true, eventName: 'Schedule' })
+  it('booking/booked → LeadSubmitted (business_messaging has no Schedule)', () => {
+    expect(resolveEventName(input('booking', 'booked'))).toEqual({ send: true, eventName: 'LeadSubmitted' })
   })
 
-  it('qualification/qualified → Lead', () => {
-    expect(resolveEventName(input('qualification', 'qualified'))).toEqual({ send: true, eventName: 'Lead' })
+  it('qualification/qualified → QualifiedLead', () => {
+    expect(resolveEventName(input('qualification', 'qualified'))).toEqual({ send: true, eventName: 'QualifiedLead' })
   })
 
   it('qualification/disqualified → skip', () => {
@@ -48,12 +48,12 @@ describe('resolveEventName — kind defaults', () => {
     expect(resolveEventName(input('catalog', 'checked_out', true))).toEqual({ send: true, eventName: 'Purchase' })
   })
 
-  it('realestate/inquiry_submitted → Lead', () => {
-    expect(resolveEventName(input('realestate', 'inquiry_submitted'))).toEqual({ send: true, eventName: 'Lead' })
+  it('realestate/inquiry_submitted → LeadSubmitted', () => {
+    expect(resolveEventName(input('realestate', 'inquiry_submitted'))).toEqual({ send: true, eventName: 'LeadSubmitted' })
   })
 
-  it('realestate/viewing_booked → Schedule', () => {
-    expect(resolveEventName(input('realestate', 'viewing_booked'))).toEqual({ send: true, eventName: 'Schedule' })
+  it('realestate/viewing_booked → LeadSubmitted (business_messaging has no Schedule)', () => {
+    expect(resolveEventName(input('realestate', 'viewing_booked'))).toEqual({ send: true, eventName: 'LeadSubmitted' })
   })
 
   it('unknown outcome → skip', () => {
@@ -71,17 +71,21 @@ describe('resolveEventName — override precedence', () => {
   })
 
   it('override null → falls through to default mapping', () => {
-    expect(resolveEventName(input('booking', 'booked', false, null))).toEqual({ send: true, eventName: 'Schedule' })
+    expect(resolveEventName(input('booking', 'booked', false, null))).toEqual({ send: true, eventName: 'LeadSubmitted' })
   })
 
   it('override with non-standard string → falls through to default mapping', () => {
-    expect(resolveEventName(input('form', 'submitted', false, 'CustomEvent'))).toEqual({ send: true, eventName: 'Lead' })
+    expect(resolveEventName(input('form', 'submitted', false, 'CustomEvent'))).toEqual({ send: true, eventName: 'LeadSubmitted' })
+  })
+
+  it('legacy "Lead" override (invalid for business_messaging) → falls through to default', () => {
+    expect(resolveEventName(input('form', 'submitted', false, 'Lead'))).toEqual({ send: true, eventName: 'LeadSubmitted' })
   })
 })
 
 describe('resolveEventName — unknown kind fallback', () => {
   it('unknown kind → skip', () => {
-    expect(resolveEventName(input('form' as ActionPageKind, 'submitted'))).toEqual({ send: true, eventName: 'Lead' })
+    expect(resolveEventName(input('form' as ActionPageKind, 'submitted'))).toEqual({ send: true, eventName: 'LeadSubmitted' })
     // explicitly test that defaultEventName's default: branch returns null for an unknown kind
     expect(resolveEventName({ kind: 'unknown_kind' as ActionPageKind, outcome: 'submitted', hasPayment: false, override: null })).toEqual({ send: false, reason: 'outcome_skip' })
   })

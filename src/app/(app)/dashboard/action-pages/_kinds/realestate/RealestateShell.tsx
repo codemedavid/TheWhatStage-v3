@@ -454,22 +454,18 @@ function WorkflowPanel({
       <Field
         label="CAPI event override"
         optional
-        help="Which Meta Conversions API event to fire on submission. Leave empty to use the default (Lead / Schedule)."
+        help="Which Meta Conversions API event to fire on submission. Leave empty to use the default (LeadSubmitted)."
       >
         <select
           name="capi_event_name_override"
           defaultValue={page.capi_event_name_override ?? ''}
           className="w-full rounded-md border border-zinc-200 bg-white px-3 py-2 text-[13px] text-zinc-900 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
         >
-          <option value="">Use default (Lead / Schedule)</option>
-          <option value="Lead">Lead</option>
-          <option value="Schedule">Schedule</option>
+          <option value="">Use default (LeadSubmitted)</option>
+          <option value="LeadSubmitted">LeadSubmitted</option>
+          <option value="QualifiedLead">QualifiedLead</option>
           <option value="Purchase">Purchase</option>
           <option value="InitiateCheckout">InitiateCheckout</option>
-          <option value="CompleteRegistration">CompleteRegistration</option>
-          <option value="Contact">Contact</option>
-          <option value="Subscribe">Subscribe</option>
-          <option value="SubmitApplication">SubmitApplication</option>
           <option value="AddToCart">AddToCart</option>
           <option value="ViewContent">ViewContent</option>
           <option value="SKIP">Don&apos;t send</option>

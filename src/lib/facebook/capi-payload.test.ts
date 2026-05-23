@@ -205,14 +205,14 @@ describe('buildEventEnvelope', () => {
     const userData = { page_id: 'P', page_scoped_user_id: 'X' }
     const customData = { content_ids: ['ap-1'], content_type: 'product' as const }
     const env = buildEventEnvelope({
-      eventName: 'Lead',
+      eventName: 'LeadSubmitted',
       eventId: 'sub-1',
       eventTimeMs: 1716480000000, // 2024-05-23T16:00:00Z
       userData,
       customData,
     })
     expect(env).toEqual({
-      event_name: 'Lead',
+      event_name: 'LeadSubmitted',
       event_time: 1716480000,
       event_id: 'sub-1',
       action_source: 'business_messaging',
@@ -225,7 +225,7 @@ describe('buildEventEnvelope', () => {
 
   it('omits custom_data when not provided', () => {
     const env = buildEventEnvelope({
-      eventName: 'Lead',
+      eventName: 'LeadSubmitted',
       eventId: 'sub-1',
       eventTimeMs: 1716480000000,
       userData: { page_id: 'P', page_scoped_user_id: 'X' },

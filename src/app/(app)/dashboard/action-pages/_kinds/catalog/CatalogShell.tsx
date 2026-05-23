@@ -482,16 +482,15 @@ function WorkflowPanel({
           className="w-full rounded-md border border-zinc-200 bg-white px-3 py-2 text-[13px] text-zinc-900 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
         >
           <option value="">Use default (InitiateCheckout / Purchase)</option>
-          <option value="Lead">Lead</option>
-          <option value="Schedule">Schedule</option>
           <option value="Purchase">Purchase</option>
           <option value="InitiateCheckout">InitiateCheckout</option>
-          <option value="CompleteRegistration">CompleteRegistration</option>
-          <option value="Contact">Contact</option>
-          <option value="Subscribe">Subscribe</option>
-          <option value="SubmitApplication">SubmitApplication</option>
           <option value="AddToCart">AddToCart</option>
           <option value="ViewContent">ViewContent</option>
+          <option value="CartAbandoned">CartAbandoned</option>
+          <option value="LeadSubmitted">LeadSubmitted</option>
+          <option value="OrderCreated">OrderCreated</option>
+          <option value="OrderShipped">OrderShipped</option>
+          <option value="OrderDelivered">OrderDelivered</option>
           <option value="SKIP">Don&apos;t send</option>
         </select>
       </Field>

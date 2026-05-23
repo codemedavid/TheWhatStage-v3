@@ -699,28 +699,32 @@ function CtaField({ defaultValue }: { defaultValue: string }) {
 }
 
 const CAPI_EVENT_OPTIONS = [
-  'Lead',
-  'Schedule',
+  'LeadSubmitted',
+  'QualifiedLead',
   'Purchase',
   'InitiateCheckout',
-  'CompleteRegistration',
-  'Contact',
-  'Subscribe',
-  'SubmitApplication',
   'AddToCart',
   'ViewContent',
+  'CartAbandoned',
+  'OrderCreated',
+  'OrderShipped',
+  'OrderDelivered',
+  'OrderCanceled',
+  'OrderReturned',
+  'RatingProvided',
+  'ReviewProvided',
   'SKIP',
 ] as const
 
 function kindDefaultLabel(kind: string): string {
   switch (kind) {
-    case 'form': return 'Lead'
-    case 'booking': return 'Schedule'
-    case 'qualification': return 'Lead'
+    case 'form': return 'LeadSubmitted'
+    case 'booking': return 'LeadSubmitted'
+    case 'qualification': return 'QualifiedLead'
     case 'sales': return 'InitiateCheckout / Purchase'
     case 'catalog': return 'InitiateCheckout / Purchase'
-    case 'realestate': return 'Lead / Schedule'
-    default: return 'Lead'
+    case 'realestate': return 'LeadSubmitted'
+    default: return 'LeadSubmitted'
   }
 }
 

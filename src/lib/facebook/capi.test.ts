@@ -168,7 +168,7 @@ describe('dispatchCapiEvent — network paths', () => {
     expect((init as RequestInit).method).toBe('POST')
     expect(inserts[0].row).toMatchObject({
       status: 'sent',
-      event_name: 'Lead',
+      event_name: 'LeadSubmitted',
       http_status: 200,
       fb_trace_id: 'trace-XYZ',
     })

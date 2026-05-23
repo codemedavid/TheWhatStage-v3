@@ -33,9 +33,10 @@ export const UpdateActionPageInput = z.object({
   pipeline_rules: z.array(PipelineRule).max(20),
   capi_event_name_override: z
     .enum([
-      'Lead', 'Schedule', 'Purchase', 'InitiateCheckout',
-      'CompleteRegistration', 'Contact', 'Subscribe',
-      'SubmitApplication', 'AddToCart', 'ViewContent', 'SKIP',
+      'Purchase', 'LeadSubmitted', 'InitiateCheckout', 'AddToCart', 'ViewContent',
+      'OrderCreated', 'OrderShipped', 'OrderDelivered', 'OrderCanceled',
+      'OrderReturned', 'CartAbandoned', 'QualifiedLead', 'RatingProvided',
+      'ReviewProvided', 'SKIP',
     ])
     .nullable()
     .optional()
