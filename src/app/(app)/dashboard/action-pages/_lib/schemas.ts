@@ -44,6 +44,7 @@ export const UpdateActionPageInput = z.object({
   notification_template: z
     .object({
       text: z.string().max(640).optional(),
+      echo_payment_proof: z.boolean().optional(),
     })
     .nullable()
     .optional(),

@@ -13,7 +13,7 @@ export interface ActionPageRow {
   config: Record<string, unknown>
   pipeline_rules: PipelineRule[]
   capi_event_name_override: string | null
-  notification_template: { text?: string } | null
+  notification_template: { text?: string; echo_payment_proof?: boolean } | null
   cta_label: string | null
   bot_send_instructions: string | null
   signing_secret: string

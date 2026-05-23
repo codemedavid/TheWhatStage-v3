@@ -104,6 +104,11 @@ export async function updateActionPage(formData: FormData): Promise<void> {
   }
   const capiEventRaw = String(formData.get('capi_event_name_override') ?? '').trim() || null
   const notificationText = String(formData.get('notification_text') ?? '').trim()
+  const echoPaymentProofRaw = formData.get('echo_payment_proof')
+  const echoPaymentProof =
+    echoPaymentProofRaw === null
+      ? undefined
+      : echoPaymentProofRaw === 'on' || echoPaymentProofRaw === 'true'
   const ctaLabelRaw = String(formData.get('cta_label') ?? '').trim()
   const botInstructionsRaw = String(formData.get('bot_send_instructions') ?? '').trim()
 
@@ -127,7 +132,13 @@ export async function updateActionPage(formData: FormData): Promise<void> {
     status: formData.get('status'),
     pipeline_rules,
     capi_event_name_override: capiEventRaw,
-    notification_template: notificationText ? { text: notificationText } : null,
+    notification_template:
+      notificationText || echoPaymentProof !== undefined
+        ? {
+            ...(notificationText ? { text: notificationText } : {}),
+            ...(echoPaymentProof !== undefined ? { echo_payment_proof: echoPaymentProof } : {}),
+          }
+        : null,
     cta_label: ctaLabelRaw ? ctaLabelRaw.slice(0, 50) : null,
     bot_send_instructions: botInstructionsRaw ? botInstructionsRaw.slice(0, 2000) : null,
   }
