@@ -73,4 +73,16 @@ describe('resolveEventName — override precedence', () => {
   it('override null → falls through to default mapping', () => {
     expect(resolveEventName(input('booking', 'booked', false, null))).toEqual({ send: true, eventName: 'Schedule' })
   })
+
+  it('override with non-standard string → falls through to default mapping', () => {
+    expect(resolveEventName(input('form', 'submitted', false, 'CustomEvent'))).toEqual({ send: true, eventName: 'Lead' })
+  })
+})
+
+describe('resolveEventName — unknown kind fallback', () => {
+  it('unknown kind → skip', () => {
+    expect(resolveEventName(input('form' as ActionPageKind, 'submitted'))).toEqual({ send: true, eventName: 'Lead' })
+    // explicitly test that defaultEventName's default: branch returns null for an unknown kind
+    expect(resolveEventName({ kind: 'unknown_kind' as ActionPageKind, outcome: 'submitted', hasPayment: false, override: null })).toEqual({ send: false, reason: 'outcome_skip' })
+  })
 })
