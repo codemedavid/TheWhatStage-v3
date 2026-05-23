@@ -771,6 +771,51 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  const proofUrl =
+    (page.kind === 'catalog' || page.kind === 'sales')
+      ? pickProofUrl(parsed.data)
+      : null
+  const proofEnabled = page.notification_template?.echo_payment_proof !== false
+  if (
+    proofUrl &&
+    proofEnabled &&
+    echo &&
+    psid &&
+    fbPageId &&
+    messengerThreadId &&
+    messengerPageData?.page_access_token
+  ) {
+    try {
+      const token = decryptToken(messengerPageData.page_access_token)
+      const result = await sendOutbound({
+        admin,
+        thread: {
+          id: messengerThreadId,
+          psid,
+          last_inbound_at: messengerThreadData?.last_inbound_at ?? null,
+        },
+        pageToken: token,
+        payload: { kind: 'image', imageUrl: proofUrl },
+        kind: 'submission_echo',
+      })
+      if (result.sent) {
+        await admin.from('messenger_messages').insert({
+          thread_id: messengerThreadId,
+          user_id: page.user_id,
+          direction: 'outbound',
+          sender: 'bot',
+          fb_message_id: result.messageId,
+          body: '[image] payment proof',
+        })
+      }
+    } catch (e) {
+      console.warn('[action-pages.submit] payment proof echo failed', {
+        psid,
+        err: e instanceof Error ? e.message : String(e),
+      })
+    }
+  }
+
   if (
     outcomeAction?.attach_action_page_id &&
     psid &&
@@ -1111,4 +1156,10 @@ async function advanceLeadFunnelForActionPage(args: {
     .update({ current_funnel_id: funnel.next_funnel_id })
     .eq('id', leadId)
     .eq('user_id', userId)
+}
+
+function pickProofUrl(data: Record<string, unknown>): string | null {
+  const url = data.payment_proof_url
+  if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) return null
+  return url
 }

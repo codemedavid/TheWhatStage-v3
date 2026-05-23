@@ -530,4 +530,225 @@ describe('POST /api/action-pages/submit', () => {
       kind: 'submission_echo',
     }))
   })
+
+  it('sends the payment proof image after the text echo when echo_payment_proof is true', async () => {
+    const { admin } = makeAdminMock()
+    const ITEM_ID = 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11'
+    // Override action_pages to return a catalog page with echo_payment_proof: true
+    const origFrom = admin.from
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(admin as any).from = vi.fn((table: string) => {
+      if (table === 'action_pages') {
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              maybeSingle: vi.fn(async () => ({
+                data: {
+                  id: 'ap_1',
+                  user_id: 'user_1',
+                  kind: 'catalog',
+                  slug: 'shop',
+                  status: 'published',
+                  config: {},
+                  pipeline_rules: [],
+                  notification_template: { text: 'Order done!', echo_payment_proof: true },
+                  signing_secret: 'secret',
+                },
+                error: null,
+              })),
+            })),
+          })),
+        }
+      }
+      if (table === 'business_items') {
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              eq: vi.fn(() => ({
+                eq: vi.fn(() => ({
+                  in: vi.fn(async () => ({
+                    data: [{
+                      id: ITEM_ID,
+                      title: 'Test Product',
+                      sku: null,
+                      price_amount: 100,
+                      currency: 'PHP',
+                      pricing_model: 'fixed',
+                    }],
+                    error: null,
+                  })),
+                })),
+              })),
+            })),
+          })),
+        }
+      }
+      return origFrom(table)
+    })
+    // Override rpc to handle create_catalog_order
+    const origRpc = admin.rpc
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(admin as any).rpc = vi.fn(async (...args: unknown[]) => {
+      if (args[0] === 'create_catalog_order') return { data: 'ord_catalog_1', error: null }
+      return origRpc()
+    })
+    mocks.admin = admin
+    mocks.sendOutbound.mockClear()
+    mocks.sendOutbound.mockResolvedValue({ sent: true, messageId: 'mid.proof.1' })
+
+    const params = buildDeeplinkParams('secret', {
+      slug: 'shop',
+      psid: 'psid_1',
+      pageId: 'fb_page_1',
+      exp: Math.floor(Date.now() / 1000) + 60,
+    })
+
+    await POST(
+      makeJsonRequest({
+        slug: 'shop',
+        data: {
+          payment_proof_url: 'https://cdn.test/proof.jpg',
+          items: [{ id: ITEM_ID, quantity: 1 }],
+          customer_name: 'Ana',
+        },
+        p: params.get('p'),
+        g: params.get('g'),
+        e: params.get('e'),
+        t: params.get('t'),
+      }) as Parameters<typeof POST>[0],
+    )
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const imageCalls = (mocks.sendOutbound.mock.calls as any[]).filter(
+      (args: unknown[]) => (args[0] as { payload: { kind: string } }).payload.kind === 'image',
+    )
+    expect(imageCalls.length).toBe(1)
+    expect((imageCalls[0][0] as { payload: { imageUrl: string } }).payload.imageUrl).toBe(
+      'https://cdn.test/proof.jpg',
+    )
+  })
+
+  it('does not send the payment proof when echo_payment_proof is false', async () => {
+    const { admin } = makeAdminMock()
+    const ITEM_ID = 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11'
+    const origFrom = admin.from
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(admin as any).from = vi.fn((table: string) => {
+      if (table === 'action_pages') {
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              maybeSingle: vi.fn(async () => ({
+                data: {
+                  id: 'ap_1',
+                  user_id: 'user_1',
+                  kind: 'catalog',
+                  slug: 'shop',
+                  status: 'published',
+                  config: {},
+                  pipeline_rules: [],
+                  notification_template: { text: 'Order done!', echo_payment_proof: false },
+                  signing_secret: 'secret',
+                },
+                error: null,
+              })),
+            })),
+          })),
+        }
+      }
+      if (table === 'business_items') {
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              eq: vi.fn(() => ({
+                eq: vi.fn(() => ({
+                  in: vi.fn(async () => ({
+                    data: [{
+                      id: ITEM_ID,
+                      title: 'Test Product',
+                      sku: null,
+                      price_amount: 100,
+                      currency: 'PHP',
+                      pricing_model: 'fixed',
+                    }],
+                    error: null,
+                  })),
+                })),
+              })),
+            })),
+          })),
+        }
+      }
+      return origFrom(table)
+    })
+    const origRpc = admin.rpc
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(admin as any).rpc = vi.fn(async (...args: unknown[]) => {
+      if (args[0] === 'create_catalog_order') return { data: 'ord_catalog_2', error: null }
+      return origRpc()
+    })
+    mocks.admin = admin
+    mocks.sendOutbound.mockClear()
+    mocks.sendOutbound.mockResolvedValue({ sent: true, messageId: 'mid.1' })
+
+    const params = buildDeeplinkParams('secret', {
+      slug: 'shop',
+      psid: 'psid_1',
+      pageId: 'fb_page_1',
+      exp: Math.floor(Date.now() / 1000) + 60,
+    })
+
+    await POST(
+      makeJsonRequest({
+        slug: 'shop',
+        data: {
+          payment_proof_url: 'https://cdn.test/proof.jpg',
+          items: [{ id: ITEM_ID, quantity: 1 }],
+          customer_name: 'Ana',
+        },
+        p: params.get('p'),
+        g: params.get('g'),
+        e: params.get('e'),
+        t: params.get('t'),
+      }) as Parameters<typeof POST>[0],
+    )
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const imageCalls = (mocks.sendOutbound.mock.calls as any[]).filter(
+      (args: unknown[]) => (args[0] as { payload: { kind: string } }).payload.kind === 'image',
+    )
+    expect(imageCalls.length).toBe(0)
+  })
+
+  it('does not send the payment proof for non-catalog/sales kinds even if proof URL is present', async () => {
+    const { admin } = makeAdminMock()
+    // makeAdminMock returns kind: 'form' by default
+    mocks.admin = admin
+    mocks.sendOutbound.mockClear()
+    mocks.sendOutbound.mockResolvedValue({ sent: true, messageId: 'mid.1' })
+
+    const params = buildDeeplinkParams('secret', {
+      slug: 'welcome-form',
+      psid: 'psid_1',
+      pageId: 'fb_page_1',
+      exp: Math.floor(Date.now() / 1000) + 60,
+    })
+
+    await POST(
+      makeJsonRequest({
+        slug: 'welcome-form',
+        data: { payment_proof_url: 'https://cdn.test/proof.jpg' },
+        p: params.get('p'),
+        g: params.get('g'),
+        e: params.get('e'),
+        t: params.get('t'),
+      }) as Parameters<typeof POST>[0],
+    )
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const imageCalls = (mocks.sendOutbound.mock.calls as any[]).filter(
+      (args: unknown[]) => (args[0] as { payload: { kind: string } }).payload.kind === 'image',
+    )
+    expect(imageCalls.length).toBe(0)
+  })
 })
