@@ -248,12 +248,16 @@ export interface ProductRecommendationSendInput {
     title: string
     price_label: string
     cover_image_url: string | null
+    summary?: string | null
+    description?: string | null
   }
   /** Reranker confidence 0–1, recorded for dashboard observability. */
   confidence: number
   /** Caption above the button card. Localized by the caller. */
   caption?: string
   kind?: SendKind
+  /** Source keys already shown as images on this thread. Skip image send if `product:<product.id>` is in this list. */
+  alreadyAttachedKeys?: string[]
 }
 
 export interface ProductRecommendationSendResult {
@@ -290,7 +294,10 @@ export async function sendProductRecommendation(
   const messageIds: string[] = []
   let imageSent = false
 
-  if (product.cover_image_url) {
+  const productSourceKey = `product:${product.id}`
+  const alreadyShown = args.alreadyAttachedKeys?.includes(productSourceKey) ?? false
+
+  if (product.cover_image_url && !alreadyShown) {
     const imgResult = await sendOutbound({
       admin,
       thread,
@@ -312,10 +319,12 @@ export async function sendProductRecommendation(
     imageSent = true
   }
 
-  // Messenger Button Template caps `text` at 640 chars; keep it well under that
-  // and let the caption + price line carry context. The CTA label maxes at 20.
   const caption = args.caption?.trim() || 'Check this out 👇'
-  const cardText = trimToBytes(`${caption}\n\n${product.title} — ${product.price_label}`, 600)
+  const desc = (product.summary || product.description || '').trim()
+  const cardText = trimToBytes(
+    [caption, `${product.title} — ${product.price_label}`, desc].filter(Boolean).join('\n\n'),
+    600,
+  )
   const ctaLabel = trimToBytes('View product', 20)
 
   const buttonResult = await sendOutbound({

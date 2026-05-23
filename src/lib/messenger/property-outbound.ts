@@ -88,12 +88,14 @@ export interface PropertyRecommendationSendInput {
     cover_image_url: string | null
     city: string
     region: string
+    description?: string | null
   }
   /** Reranker confidence 0–1, recorded for dashboard observability. */
   confidence: number
   /** Caption shown above the card. Localized by the caller. */
   caption?: string
   kind?: SendKind
+  alreadyAttachedKeys?: string[]
 }
 
 export interface PropertyRecommendationSendResult {
@@ -128,7 +130,25 @@ export async function sendPropertyRecommendation(
   const messageIds: string[] = []
   let imageSent = false
 
-  if (property.cover_image_url) {
+  const desc = (property.description || '').trim()
+  if (desc) {
+    const descResult = await sendOutbound({
+      admin,
+      thread,
+      pageToken,
+      payload: { kind: 'text', text: desc.slice(0, 2000) },
+      kind,
+    })
+    if (!descResult.sent) {
+      return { sent: false, messageIds: [], imageSent: false, reason: descResult.reason, deeplinkUrl }
+    }
+    messageIds.push(descResult.messageId)
+  }
+
+  const propertySourceKey = `property:${property.id}`
+  const alreadyShown = args.alreadyAttachedKeys?.includes(propertySourceKey) ?? false
+
+  if (property.cover_image_url && !alreadyShown) {
     const imgResult = await sendOutbound({
       admin,
       thread,
