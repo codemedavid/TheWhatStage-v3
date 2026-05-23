@@ -39,6 +39,8 @@ export interface BuildPromptArgs {
   maxContext?: number;
   /** Rolling summary of older turns, injected before the knowledge context. */
   conversationSummary?: string;
+  /** Pre-formatted block listing available payment methods; injected just before KB context. */
+  paymentEnumBlock?: string;
 }
 
 export const DEFAULT_CHATBOT_PERSONA: ChatbotPersona = {
@@ -88,7 +90,7 @@ function buildContextBlock(chunks: Array<RetrievedChunk & { score: number }>): s
     .join('\n\n---\n\n');
 }
 
-function assembleSystemPrompt(p: ChatbotPersona, contextBlock: string, conversationSummary?: string): string {
+function assembleSystemPrompt(p: ChatbotPersona, contextBlock: string, conversationSummary?: string, paymentEnumBlock?: string): string {
   const goalSection = p.funnelInstruction?.trim()
     ? [
         `# PRIMARY GOAL (Follow this above all else)`,
@@ -111,6 +113,10 @@ function assembleSystemPrompt(p: ChatbotPersona, contextBlock: string, conversat
         conversationSummary.trim(),
         ``,
       ]
+    : [];
+
+  const paymentSection = paymentEnumBlock?.trim()
+    ? [paymentEnumBlock.trim(), '']
     : [];
 
   // Stable sections — identical across every turn for a given persona/config.
@@ -173,6 +179,7 @@ function assembleSystemPrompt(p: ChatbotPersona, contextBlock: string, conversat
       ...instructionsSection,
       ...stable,
       ...summarySection,
+      ...paymentSection,
       ...kb,
     ].join('\n');
   }
@@ -186,6 +193,7 @@ function assembleSystemPrompt(p: ChatbotPersona, contextBlock: string, conversat
     ...goalSection,
     ...instructionsSection,
     ...summarySection,
+    ...paymentSection,
     ...kb,
   ].join('\n');
 }
@@ -211,7 +219,7 @@ export function buildPrompt(args: BuildPromptArgs): BuiltPrompt {
   };
 
   return {
-    system: assembleSystemPrompt(merged, contextBlock, args.conversationSummary),
+    system: assembleSystemPrompt(merged, contextBlock, args.conversationSummary, args.paymentEnumBlock),
     user: args.userQuery,
     contextChunkIds: ranked.map((c) => c.id),
     contextChunks,

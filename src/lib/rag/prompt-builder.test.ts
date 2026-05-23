@@ -147,3 +147,30 @@ describe('buildPrompt', () => {
     });
   });
 });
+
+describe('buildPrompt — payment enum block', () => {
+  it('injects the payment enum block above the KB context', () => {
+    const r = buildPrompt({
+      userQuery: 'how do I pay?',
+      buckets: buckets([chunk('a', 'product info', 0.9)]),
+      paymentEnumBlock: 'Available Payment Methods:\n- GCash: 0917-123-4567',
+    });
+    expect(r.system).toContain('Available Payment Methods');
+    expect(r.system.indexOf('Available Payment Methods'))
+      .toBeLessThan(r.system.indexOf('product info'));
+  });
+
+  it('does not inject anything when paymentEnumBlock is empty', () => {
+    const r = buildPrompt({
+      userQuery: 'q',
+      buckets: buckets(),
+      paymentEnumBlock: '',
+    });
+    expect(r.system).not.toContain('Available Payment Methods');
+  });
+
+  it('does not inject anything when paymentEnumBlock is omitted', () => {
+    const r = buildPrompt({ userQuery: 'q', buckets: buckets() });
+    expect(r.system).not.toContain('Available Payment Methods');
+  });
+});
