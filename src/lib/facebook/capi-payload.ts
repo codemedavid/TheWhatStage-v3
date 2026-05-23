@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import type { ActionPageKind } from '@/lib/action-pages/kinds'
 
 export function sha256(s: string): string {
   return createHash('sha256').update(s, 'utf8').digest('hex')
@@ -97,4 +98,74 @@ export function buildUserData(input: BuildUserDataInput): UserData {
   if (input.clientUserAgent) out.client_user_agent = input.clientUserAgent
 
   return out
+}
+
+export interface CatalogOrderForCapi {
+  subtotal: number
+  currency: string
+  lines: { business_item_id: string; quantity: number }[]
+  paymentStatus: 'unpaid' | 'pending' | 'paid'
+}
+
+export interface BuildCustomDataInput {
+  kind: ActionPageKind
+  actionPageId: string
+  parsedData: Record<string, unknown>
+  pageConfig: Record<string, unknown>
+  businessOrderId: string | null
+  catalogOrder: CatalogOrderForCapi | null
+  submissionId?: string
+  hasPayment?: boolean
+}
+
+export interface CustomData {
+  currency?: string
+  value?: number
+  content_ids?: string[]
+  content_type?: 'product'
+  num_items?: number
+  order_id?: string
+}
+
+function asString(v: unknown): string | null {
+  return typeof v === 'string' && v.length > 0 ? v : null
+}
+function asNumber(v: unknown): number | null {
+  return typeof v === 'number' && Number.isFinite(v) ? v : null
+}
+
+export function buildCustomData(input: BuildCustomDataInput): CustomData {
+  if (input.kind === 'catalog' && input.catalogOrder && input.businessOrderId) {
+    const lines = input.catalogOrder.lines
+    return {
+      currency: input.catalogOrder.currency,
+      value: input.catalogOrder.subtotal,
+      content_ids: lines.map((l) => l.business_item_id),
+      content_type: 'product',
+      num_items: lines.reduce((s, l) => s + l.quantity, 0),
+      order_id: input.businessOrderId,
+    }
+  }
+
+  if (input.kind === 'sales' && input.hasPayment) {
+    const cd: CustomData = {
+      content_ids: [input.actionPageId],
+      content_type: 'product',
+    }
+    const currency =
+      asString(input.parsedData.payment_currency) ??
+      asString((input.pageConfig.price as Record<string, unknown> | undefined)?.currency)
+    const value = asNumber(input.parsedData.payment_amount)
+    if (currency && value !== null) {
+      cd.currency = currency
+      cd.value = value
+      if (input.submissionId) cd.order_id = input.submissionId
+    }
+    return cd
+  }
+
+  return {
+    content_ids: [input.actionPageId],
+    content_type: 'product',
+  }
 }

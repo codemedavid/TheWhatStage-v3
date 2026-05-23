@@ -6,6 +6,7 @@ import {
   sha256,
   hashList,
   buildUserData,
+  buildCustomData,
 } from './capi-payload'
 
 describe('normalizeEmail', () => {
@@ -109,5 +110,95 @@ describe('buildUserData', () => {
     const ud = buildUserData({ ...base, leadName: 'Madonna' })
     expect(ud.fn).toEqual([sha256('madonna')])
     expect(ud).not.toHaveProperty('ln')
+  })
+})
+
+describe('buildCustomData', () => {
+  it('catalog with order → currency, value, content_ids, num_items, order_id, content_type', () => {
+    const cd = buildCustomData({
+      kind: 'catalog',
+      actionPageId: 'ap-1',
+      parsedData: {},
+      pageConfig: {},
+      businessOrderId: 'order-1',
+      catalogOrder: {
+        subtotal: 199.5,
+        currency: 'PHP',
+        lines: [
+          { business_item_id: 'p1', quantity: 2 },
+          { business_item_id: 'p2', quantity: 1 },
+        ],
+        paymentStatus: 'paid',
+      },
+    })
+    expect(cd).toEqual({
+      currency: 'PHP',
+      value: 199.5,
+      content_ids: ['p1', 'p2'],
+      content_type: 'product',
+      num_items: 3,
+      order_id: 'order-1',
+    })
+  })
+
+  it('sales with payment → currency + value + order_id + content_ids', () => {
+    const cd = buildCustomData({
+      kind: 'sales',
+      actionPageId: 'ap-2',
+      parsedData: { payment_amount: 500, payment_currency: 'PHP' },
+      pageConfig: {},
+      businessOrderId: null,
+      catalogOrder: null,
+      submissionId: 'sub-1',
+      hasPayment: true,
+    })
+    expect(cd).toEqual({
+      currency: 'PHP',
+      value: 500,
+      order_id: 'sub-1',
+      content_ids: ['ap-2'],
+      content_type: 'product',
+    })
+  })
+
+  it('sales with payment but no payment_currency → falls back to pageConfig.price.currency', () => {
+    const cd = buildCustomData({
+      kind: 'sales',
+      actionPageId: 'ap-2',
+      parsedData: { payment_amount: 500 },
+      pageConfig: { price: { currency: 'USD' } },
+      businessOrderId: null,
+      catalogOrder: null,
+      submissionId: 'sub-1',
+      hasPayment: true,
+    })
+    expect(cd?.currency).toBe('USD')
+    expect(cd?.value).toBe(500)
+  })
+
+  it('sales with payment but no value/currency → returns content_ids only', () => {
+    const cd = buildCustomData({
+      kind: 'sales',
+      actionPageId: 'ap-2',
+      parsedData: {},
+      pageConfig: {},
+      businessOrderId: null,
+      catalogOrder: null,
+      submissionId: 'sub-1',
+      hasPayment: true,
+    })
+    expect(cd).toEqual({ content_ids: ['ap-2'], content_type: 'product' })
+  })
+
+  it('non-monetary kinds → content_ids only', () => {
+    const cd = buildCustomData({
+      kind: 'form',
+      actionPageId: 'ap-3',
+      parsedData: {},
+      pageConfig: {},
+      businessOrderId: null,
+      catalogOrder: null,
+    })
+    expect(cd).toEqual({ content_ids: ['ap-3'], content_type: 'product' })
   })
 })
