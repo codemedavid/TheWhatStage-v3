@@ -192,6 +192,7 @@ describe('dispatchCapiEvent — network paths', () => {
       fb_trace_id: 'trace-ERR',
     })
     expect(inserts[0].row.response_body).toMatchObject({ error: { message: 'bad event_id' } })
+    expect(inserts[0].row.error_message).toBe('bad event_id')
   })
 
   it('logs error on network failure', async () => {

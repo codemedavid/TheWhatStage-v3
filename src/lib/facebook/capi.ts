@@ -213,7 +213,7 @@ export async function dispatchCapiEvent(input: DispatchInput): Promise<void> {
     log.fb_trace_id = traceHeader ?? (typeof traceFromBody === 'string' ? traceFromBody : null)
     log.response_body = parsed
     log.status = res.ok ? 'sent' : 'error'
-    if (!res.ok && (!log.error_message)) {
+    if (!res.ok) {
       const errMsg =
         parsed && typeof parsed === 'object' && (parsed as Record<string, unknown>).error
           ? ((parsed as Record<string, unknown>).error as Record<string, unknown>).message
