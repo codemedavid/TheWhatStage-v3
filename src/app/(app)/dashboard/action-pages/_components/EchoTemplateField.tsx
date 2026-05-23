@@ -2,7 +2,7 @@
 
 import { useMemo, useRef, useState } from 'react'
 import { renderEchoTemplate } from '@/lib/action-pages/echo/render'
-import { knownPathsForKind, sampleContextForKind, VARIABLES_BY_KIND } from '@/lib/action-pages/echo/variables'
+import { knownPathsForKind, sampleContextForKind, VARIABLES_BY_KIND, type VariableDef } from '@/lib/action-pages/echo/variables'
 import type { ActionPageKind } from '@/lib/action-pages/kinds'
 
 export interface EchoTemplateFieldProps {
@@ -34,9 +34,9 @@ export function EchoTemplateField(props: EchoTemplateFieldProps) {
   const [pickerOpen, setPickerOpen] = useState(!compact)
   const taRef = useRef<HTMLTextAreaElement>(null)
 
-  const variables = VARIABLES_BY_KIND[kind]
   const groups = useMemo(() => {
-    const map = new Map<string, typeof variables>()
+    const variables = VARIABLES_BY_KIND[kind]
+    const map = new Map<string, VariableDef[]>()
     for (const v of variables) {
       const list = map.get(v.group) ?? []
       list.push(v)
@@ -54,7 +54,7 @@ export function EchoTemplateField(props: EchoTemplateFieldProps) {
       )
     }
     return Array.from(map.entries())
-  }, [variables, customKeys])
+  }, [kind, customKeys])
 
   const preview = useMemo(() => {
     const known = knownPathsForKind(kind, customKeys)
