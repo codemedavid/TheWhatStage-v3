@@ -7,6 +7,7 @@ import { ErrorBanner } from './_components/error-banner'
 import { ConnectButton } from './_components/connect-button'
 import { PagePicker } from './_components/page-picker'
 import { ConnectedView } from './_components/connected-view'
+import { CapiSection } from './_components/capi-section'
 
 type SearchParams = { error?: string; detail?: string }
 
@@ -34,7 +35,7 @@ export default async function FacebookSettingsPage({
   } else {
     const { data: pages } = await supabase
       .from('facebook_pages')
-      .select('id, fb_page_id, name, category, picture_url')
+      .select('id, fb_page_id, name, category, picture_url, capi_enabled, capi_dataset_id, capi_access_token, capi_test_event_code')
       .eq('connection_id', conn.id)
       .order('created_at', { ascending: true })
 
@@ -52,7 +53,20 @@ export default async function FacebookSettingsPage({
         <PagePicker pages={pickerPages} />
       )
     } else {
-      body = <ConnectedView pages={pages} />
+      const capiPages = (pages ?? []).map((p) => ({
+        id: p.id,
+        name: p.name,
+        capi_enabled: Boolean(p.capi_enabled),
+        capi_dataset_id: p.capi_dataset_id ?? null,
+        has_capi_token: Boolean(p.capi_access_token),
+        capi_test_event_code: p.capi_test_event_code ?? null,
+      }))
+      body = (
+        <>
+          <ConnectedView pages={pages} />
+          <CapiSection pages={capiPages} />
+        </>
+      )
     }
   }
 
