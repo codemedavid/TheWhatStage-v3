@@ -74,6 +74,17 @@ export interface AnswerWithClassificationResult extends AnswerResult {
   actionPage: ActionPageChoice | null
   productRecommendation: ProductRecommendationRequest | null
   propertyRecommendation: PropertyRecommendationRequest | null
+  /** All retrieved chunks (useful + ambiguous + reject) from this turn's RAG
+   *  retrieval. Used downstream for source-image attachment. */
+  topChunks: Array<{
+    document_id: string | null
+    faq_id: string | null
+    business_item_id: string | null
+    media_asset_id: string | null
+    payment_method_id: string | null
+    content: string
+    rrf_score: number
+  }>
 }
 
 /**
@@ -354,7 +365,16 @@ export async function answerWithClassification(
     slugs: media.map((m) => m.slug),
     refChunkCount: refChunks.length,
   })
-  return { text, sourceTitles, media, stageChange, actionPage, productRecommendation, propertyRecommendation }
+  const topChunks = refChunks.map((c) => ({
+    document_id: c.document_id,
+    faq_id: c.faq_id,
+    business_item_id: c.business_item_id ?? null,
+    media_asset_id: null as string | null,
+    payment_method_id: c.payment_method_id ?? null,
+    content: c.content,
+    rrf_score: ('score' in c ? (c as { score: number }).score : 0),
+  }))
+  return { text, sourceTitles, media, stageChange, actionPage, productRecommendation, propertyRecommendation, topChunks }
 }
 
 /**

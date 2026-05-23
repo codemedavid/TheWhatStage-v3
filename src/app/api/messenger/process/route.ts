@@ -46,6 +46,8 @@ import { loadLeadContext } from '@/lib/chatbot/leadContext'
 import { interruptWorkflowRun } from '@/lib/workflow/trigger'
 import { runDeepReclassify } from '@/lib/chatbot/deep-reclassify'
 import { isBotPaused } from '@/lib/chatbot/takeover'
+import { resolveSourceImages } from '@/lib/chatbot/source-images'
+import { firstMentionGate } from '@/lib/chatbot/attach-gate'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -140,6 +142,7 @@ interface ThreadRow {
   conversation_summary: string | null
   last_inbound_at: string | null
   controlled_by_run_id: string | null
+  attached_item_keys: string[]
 }
 
 export async function POST(req: NextRequest) {
@@ -549,6 +552,7 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
         ReturnType<typeof answerWithClassification>
       >['propertyRecommendation'] = null
       let selectedMedia: SelectedMediaAsset[] = []
+      let topChunks: Awaited<ReturnType<typeof answerWithClassification>>['topChunks'] = []
       const activeCatalogPageId = sendablePages.find((p) => p.kind === 'catalog')?.id ?? null
       const activeRealestatePageId = sendablePages.find((p) => p.kind === 'realestate')?.id ?? null
       const conversationSummary = thread.conversation_summary ?? undefined
@@ -589,6 +593,7 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
           productRecommendation = r.productRecommendation
           propertyRecommendation = r.propertyRecommendation
           selectedMedia = r.media
+          topChunks = r.topChunks
         } catch (e) {
           console.error('[messenger.worker] combined call failed, falling back', e)
         }
@@ -718,6 +723,40 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
       })
       await sendSelectedMedia(admin, { job, thread, pageToken, selectedMedia })
 
+      // Source-image attach: send first-mention product/payment images from RAG chunks
+      if (topChunks && topChunks.length > 0) {
+        try {
+          const sourceImages = await resolveSourceImages(admin, topChunks)
+          if (sourceImages.length > 0) {
+            const gateResult = firstMentionGate({
+              candidates: sourceImages,
+              attachedItemKeys: thread.attached_item_keys ?? [],
+              customerText: message,
+            })
+            for (const img of gateResult.approved) {
+              await sendOutbound({
+                admin,
+                thread: { id: thread.id, psid: thread.psid, last_inbound_at: thread.last_inbound_at },
+                pageToken,
+                payload: { kind: 'image', imageUrl: img.imageUrl },
+                kind: 'bot',
+              })
+            }
+            if (gateResult.newKeys.length > 0) {
+              const merged = [...(thread.attached_item_keys ?? []), ...gateResult.newKeys]
+              const trimmed = merged.slice(-100)
+              await admin
+                .from('messenger_threads')
+                .update({ attached_item_keys: trimmed })
+                .eq('id', thread.id)
+              thread.attached_item_keys = trimmed
+            }
+          }
+        } catch (e) {
+          console.warn('[messenger.worker] source-image attach failed', e)
+        }
+      }
+
       // Product recommendation — fired when the LLM picked recommend_product
       // (customer explicitly asked OR operator rules triggered). Sends the
       // matched product's image + a single-product button card. When it
@@ -766,6 +805,7 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
                   description: match.product.description,
                 },
                 confidence: match.confidence,
+                alreadyAttachedKeys: thread.attached_item_keys ?? [],
               })
               if (sendResult.sent) {
                 recommendationSent = true
@@ -868,6 +908,7 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
                   description: match.product.description || match.product.summary,
                 },
                 confidence: match.confidence,
+                alreadyAttachedKeys: thread.attached_item_keys ?? [],
               })
               if (sendResult.sent) {
                 recommendationSent = true
@@ -1438,7 +1479,7 @@ async function loadJobContext(
   const { data, error } = await admin
     .from('messenger_messages')
     .select(
-      'body, fb_message_id, messenger_threads!inner(id, user_id, page_id, psid, lead_id, full_name, auto_reply_enabled, bot_paused_until, inbound_since_classify, conversation_summary, last_inbound_at, controlled_by_run_id)',
+      'body, fb_message_id, messenger_threads!inner(id, user_id, page_id, psid, lead_id, full_name, auto_reply_enabled, bot_paused_until, inbound_since_classify, conversation_summary, last_inbound_at, controlled_by_run_id, attached_item_keys)',
     )
     .eq('id', job.inbound_msg_id)
     .maybeSingle<{
