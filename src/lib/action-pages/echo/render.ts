@@ -11,6 +11,7 @@ export interface RenderResult {
 const PLACEHOLDER_RE = /\{\{([\s\S]*?)\}\}/g
 const PATH_RE = /^[a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)*$/
 const MAX_PLACEHOLDERS = 500
+const DENIED_SEGMENTS = new Set(['__proto__', 'constructor', 'prototype'])
 
 export function renderEchoTemplate(
   template: string,
@@ -33,7 +34,7 @@ export function renderEchoTemplate(
       return '{{}}'
     }
 
-    const operands = expr.split('||').map((op) => op.trim())
+    const operands = splitOnPipe(expr)
 
     // Check each operand is either a valid path or a quoted literal
     for (const op of operands) {
@@ -62,6 +63,30 @@ export function renderEchoTemplate(
   return { text: out, warnings }
 }
 
+function splitOnPipe(expr: string): string[] {
+  const operands: string[] = []
+  let current = ''
+  let inQuote = false
+  let i = 0
+  while (i < expr.length) {
+    const ch = expr[i]
+    if (ch === '"') {
+      inQuote = !inQuote
+      current += ch
+      i++
+    } else if (!inQuote && ch === '|' && expr[i + 1] === '|') {
+      operands.push(current.trim())
+      current = ''
+      i += 2
+    } else {
+      current += ch
+      i++
+    }
+  }
+  operands.push(current.trim())
+  return operands.filter((op, idx, arr) => op.length > 0 || arr.length === 1)
+}
+
 function isQuotedLiteral(operand: string): boolean {
   return operand.length >= 2 && operand.startsWith('"') && operand.endsWith('"')
 }
@@ -73,6 +98,7 @@ function stripQuotes(operand: string): string {
 function lookup(ctx: Record<string, unknown>, path: string): unknown {
   let cur: unknown = ctx
   for (const segment of path.split('.')) {
+    if (DENIED_SEGMENTS.has(segment)) return undefined
     if (cur === null || cur === undefined) return undefined
     if (typeof cur !== 'object') return undefined
     cur = (cur as Record<string, unknown>)[segment]

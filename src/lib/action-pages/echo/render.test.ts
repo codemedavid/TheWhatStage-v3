@@ -134,4 +134,14 @@ describe('renderEchoTemplate', () => {
     expect(result.text).toBe('a {{}} b')
     expect(result.warnings).toEqual([{ token: '', reason: 'malformed' }])
   })
+
+  it('returns empty for __proto__ path segment (denylist)', () => {
+    const result = renderEchoTemplate(
+      '{{__proto__.polluted}}',
+      {},
+      new Set(['__proto__.polluted']),
+    )
+    expect(result.text).toBe('')
+    expect(result.warnings).toEqual([])
+  })
 })
