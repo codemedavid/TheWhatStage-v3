@@ -109,7 +109,7 @@ describe('selectMediaForReply', () => {
     expect(result).toHaveLength(1)
   })
 
-  it('picks one best image per folder mention', async () => {
+  it('sends all images in a referenced folder, ordered by semantic ranking', async () => {
     const result = await selectMediaForReply({
       client: makeClient(baseAssets, baseFolders, { semanticOrder: ['a4', 'a3', 'a1', 'a2'] }),
       embedder,
@@ -120,7 +120,7 @@ describe('selectMediaForReply', () => {
       limit: 4,
     })
 
-    const samplesHit = result.find((r) => r.matchReason === 'folder_ref')
-    expect(samplesHit).toMatchObject({ slug: 'premium-build', folderId: 'f2' })
+    const folderHits = result.filter((r) => r.matchReason === 'folder_ref')
+    expect(folderHits.map((r) => r.slug)).toEqual(['premium-build', 'sample-build'])
   })
 })

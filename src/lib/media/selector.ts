@@ -121,7 +121,9 @@ export async function selectMediaForReply(args: {
     }
   }
 
-  // Priority 2 — #folder references: pick the single best image per folder.
+  // Priority 2 — #folder references: attach every image in the folder, ordered
+  // by semantic relevance to the customer's question. Capped by the global
+  // `limit` so a 20-image folder doesn't carpet-bomb the conversation.
   if (selected.length < limit && refs.folderSlugs.length) {
     const { data: folders, error: folderErr } = await args.client
       .from('media_folders')
@@ -157,8 +159,11 @@ export async function selectMediaForReply(args: {
         const folder = slugToFolder.get(slug)
         if (!folder) continue
         const candidates = assetsByFolder.get(folder.id) ?? []
-        const best = pickBestAsset(candidates, ranking)
-        if (best) addUnique(selected, best, 'folder_ref', limit)
+        for (const row of sortByRanking(candidates, ranking)) {
+          if (selected.length >= limit) break
+          addUnique(selected, row, 'folder_ref', limit)
+        }
+        if (selected.length >= limit) break
       }
     }
   }
@@ -174,16 +179,10 @@ export async function selectMediaForReply(args: {
   return finalSelection
 }
 
-function pickBestAsset(candidates: MediaAssetRow[], ranking: Map<string, number>): MediaAssetRow | null {
-  if (!candidates.length) return null
-  let best: MediaAssetRow | null = null
-  let bestRank = Number.POSITIVE_INFINITY
-  for (const row of candidates) {
-    const rank = ranking.get(row.id)
-    if (rank !== undefined && rank < bestRank) {
-      bestRank = rank
-      best = row
-    }
-  }
-  return best ?? candidates[0]
+function sortByRanking(candidates: MediaAssetRow[], ranking: Map<string, number>): MediaAssetRow[] {
+  return [...candidates].sort((a, b) => {
+    const ra = ranking.get(a.id) ?? Number.POSITIVE_INFINITY
+    const rb = ranking.get(b.id) ?? Number.POSITIVE_INFINITY
+    return ra - rb
+  })
 }
