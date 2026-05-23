@@ -127,11 +127,17 @@ function makeAdminMock() {
       return {
         select: vi.fn(() => ({
           eq: vi.fn(() => ({
+            // For the old funnel check: double .eq()
             eq: vi.fn(() => ({
               maybeSingle: vi.fn(async () => ({
                 data: { current_funnel_id: 'funnel_1' },
                 error: null,
               })),
+            })),
+            // For new buildEchoContext loadLead: single .eq() then .maybeSingle()
+            maybeSingle: vi.fn(async () => ({
+              data: { id: 'lead_1', name: null, email: null, phone: null },
+              error: null,
             })),
           })),
         })),
@@ -335,7 +341,19 @@ function makeQualificationAdminMock() {
     }
     if (table === 'leads') {
       return {
-        select: vi.fn(() => ({ eq: vi.fn(() => ({ eq: vi.fn(() => ({ maybeSingle: vi.fn(async () => ({ data: null, error: null })) })) })) })),
+        select: vi.fn(() => ({
+          eq: vi.fn(() => ({
+            // For the old funnel check: double .eq()
+            eq: vi.fn(() => ({
+              maybeSingle: vi.fn(async () => ({ data: null, error: null })),
+            })),
+            // For new buildEchoContext loadLead: single .eq() then .maybeSingle()
+            maybeSingle: vi.fn(async () => ({
+              data: { id: 'lead_1', name: null, email: null, phone: null },
+              error: null,
+            })),
+          })),
+        })),
       }
     }
     if (table === 'funnels') {

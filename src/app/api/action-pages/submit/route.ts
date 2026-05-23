@@ -20,6 +20,8 @@ import { createFromSubmission, snapshotMethod } from '@/lib/order-payments/serve
 import type { PaymentMethod } from '@/lib/payment-methods/types'
 import { convertVisitorCart } from '@/lib/action-pages/visitor-cart'
 import { dispatchCapiEvent } from '@/lib/facebook/capi'
+import { renderEchoTemplate } from '@/lib/action-pages/echo/render'
+import { buildEchoContext } from '@/lib/action-pages/echo/context'
 
 export const dynamic = 'force-dynamic'
 
@@ -30,7 +32,7 @@ interface ActionPageRecord {
   slug: string
   config: Record<string, unknown>
   pipeline_rules: PipelineRule[]
-  notification_template: { text?: string } | null
+  notification_template: { text?: string; echo_payment_proof?: boolean } | null
   signing_secret: string
 }
 
@@ -672,16 +674,38 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // Echo back to Messenger. For catalog orders, prepend an order summary.
-  // Per-outcome notify_text wins over the global template for the closing line.
+  // Echo back to Messenger using the templated echo engine.
+  // Per-outcome notify_text wins over the global template.
   const matchedRule = page.pipeline_rules.find((r) => r.outcome === parsed.outcome)
-  const notifyText =
+  const echoTemplate =
     (outcomeAction?.messenger_text && outcomeAction.messenger_text.trim()) ||
     (matchedRule?.notify_text && matchedRule.notify_text.trim()) ||
-    page.notification_template?.text
-  const echo = catalogOrderResult
-    ? buildOrderEcho(catalogOrderResult, notifyText)
-    : notifyText
+    page.notification_template?.text ||
+    ''
+
+  const echoContext = echoTemplate
+    ? await buildEchoContext({
+        admin,
+        page: {
+          id: page.id,
+          user_id: page.user_id,
+          kind: isActionPageKind(page.kind) ? page.kind : 'form',
+          slug: page.slug,
+          config: page.config,
+          notification_template: page.notification_template,
+        },
+        parsed: parsed,
+        catalogOrder: catalogOrderResult,
+        leadId,
+        threadId: messengerThreadId,
+        psid,
+        fbPageId,
+      })
+    : null
+
+  const echo = echoTemplate && echoContext
+    ? renderEchoTemplate(echoTemplate, echoContext.ctx, echoContext.known).text.slice(0, 1900)
+    : ''
   // Fetch page token and thread data once; reused by both the echo block and
   // the attached-action-page block below.
   let messengerPageData: { page_access_token: string } | null = null
@@ -840,26 +864,6 @@ interface CatalogOrderResult {
   paymentStatus: 'unpaid' | 'pending' | 'paid'
 }
 
-function buildOrderEcho(order: CatalogOrderResult, notifyText: string | undefined): string {
-  const fmt = (amount: number, currency: string) => {
-    try {
-      return new Intl.NumberFormat('en-PH', { style: 'currency', currency }).format(amount)
-    } catch {
-      return `${amount.toFixed(2)} ${currency}`
-    }
-  }
-  const lines = order.lines
-    .map((l) => `• ${l.quantity}x ${l.title_snapshot} — ${fmt(l.line_total_amount, l.currency)}`)
-    .join('\n')
-  const parts = [`Order received!\n${lines}\n\nTotal: ${fmt(order.subtotal, order.currency)}`]
-  const { name, phone, email, notes } = order.customer
-  if (name) parts.push(`Name: ${name}`)
-  if (phone) parts.push(`Phone: ${phone}`)
-  if (email) parts.push(`Email: ${email}`)
-  if (notes) parts.push(`Notes: ${notes}`)
-  if (notifyText?.trim()) parts.push(`\n${notifyText.trim()}`)
-  return parts.join('\n').slice(0, 1900)
-}
 
 async function createBusinessOrderFromCatalog(args: {
   admin: ReturnType<typeof createAdminClient>
