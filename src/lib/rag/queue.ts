@@ -2,8 +2,8 @@ import type { SourceKind } from './types';
 import type { SupabaseLike } from './ingest';
 
 function sourceMeta(kind: SourceKind): {
-  sourceCol: 'document_id' | 'faq_id' | 'business_item_id' | 'media_asset_id';
-  sourceTable: 'knowledge_documents' | 'knowledge_faqs' | 'business_items' | 'media_assets';
+  sourceCol: 'document_id' | 'faq_id' | 'business_item_id' | 'media_asset_id' | 'payment_method_id';
+  sourceTable: 'knowledge_documents' | 'knowledge_faqs' | 'business_items' | 'media_assets' | 'payment_methods';
 } {
   switch (kind) {
     case 'document':
@@ -14,6 +14,8 @@ function sourceMeta(kind: SourceKind): {
       return { sourceCol: 'business_item_id', sourceTable: 'business_items' };
     case 'media_asset':
       return { sourceCol: 'media_asset_id', sourceTable: 'media_assets' };
+    case 'payment_method':
+      return { sourceCol: 'payment_method_id', sourceTable: 'payment_methods' };
   }
 }
 
