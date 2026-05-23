@@ -24,6 +24,10 @@ export function splitName(raw: string): { first: string | null; last: string | n
   return { first: first || null, last: last || null }
 }
 
+/**
+ * Hash pre-normalised values. Pass values through normalizeEmail /
+ * normalizePhone / splitName before calling this function.
+ */
 export function hashList(values: Array<string | null | undefined>): string[] | null {
   const out: string[] = []
   for (const v of values) {
