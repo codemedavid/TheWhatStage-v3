@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import { syncPaymentMethodToKnowledge } from '@/lib/payment-methods/sync'
 import {
   type PaymentMethod,
   type PaymentMethodInput,
@@ -77,6 +78,7 @@ export async function createPaymentMethod(
     .select('id')
     .single<{ id: string }>()
   if (error) throw new Error(`createPaymentMethod: ${error.message}`)
+  await syncPaymentMethodToKnowledge(supabase, userId, data.id)
   revalidatePath('/dashboard/payment-methods')
   return data.id
 }
@@ -93,6 +95,7 @@ export async function updatePaymentMethod(
     .eq('id', id)
     .eq('user_id', userId)
   if (error) throw new Error(`updatePaymentMethod: ${error.message}`)
+  await syncPaymentMethodToKnowledge(supabase, userId, id)
   revalidatePath('/dashboard/payment-methods')
 }
 
@@ -118,5 +121,6 @@ export async function setPaymentMethodEnabled(
     .eq('id', id)
     .eq('user_id', userId)
   if (error) throw new Error(`setPaymentMethodEnabled: ${error.message}`)
+  await syncPaymentMethodToKnowledge(supabase, userId, id)
   revalidatePath('/dashboard/payment-methods')
 }
