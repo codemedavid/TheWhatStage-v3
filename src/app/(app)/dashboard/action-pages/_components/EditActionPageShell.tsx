@@ -18,6 +18,8 @@ import { TriggerGuard } from './TriggerGuard'
 import { TriggerField } from './TriggerField'
 import { DraftSaveModal } from './DraftSaveModal'
 import { useDraftGate } from './useDraftGate'
+import { EchoTemplateField } from './EchoTemplateField'
+import { extractCustomKeysFromConfig } from '../_lib/custom-keys'
 
 type StepId = 'general' | 'configuration' | 'workflow' | 'share'
 
@@ -326,14 +328,24 @@ function EditActionPageShellInner({
                     </p>
                   </div>
                   <div className="ap-section-body">
-                    <textarea
+                    <EchoTemplateField
                       name="notification_text"
+                      kind={page.kind}
+                      customKeys={extractCustomKeysFromConfig(page.kind, page.config)}
                       defaultValue={page.notification_template?.text ?? ''}
                       rows={3}
-                      maxLength={640}
                       placeholder="Thanks! We got your details and will be in touch shortly."
-                      className="ap-textarea"
                     />
+                    {(page.kind === 'catalog' || page.kind === 'sales') && (
+                      <label className="mt-3 flex items-center gap-2 text-[13px] text-[#374151]">
+                        <input
+                          type="checkbox"
+                          name="echo_payment_proof"
+                          defaultChecked={page.notification_template?.echo_payment_proof !== false}
+                        />
+                        Also re-echo the uploaded payment screenshot in Messenger
+                      </label>
+                    )}
                   </div>
                 </div>
 
