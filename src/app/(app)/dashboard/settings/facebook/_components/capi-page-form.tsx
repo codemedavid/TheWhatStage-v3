@@ -18,7 +18,7 @@ export function CapiPageForm({ page }: { page: Page }) {
   return (
     <details
       className="rounded-md border p-4 open:bg-muted/30"
-      open={page.capi_enabled || !page.has_capi_token === false}
+      open={page.capi_enabled || !page.has_capi_token}
     >
       <summary className="cursor-pointer text-sm font-medium">
         {page.name} {page.capi_enabled ? '· Enabled' : '· Disabled'}
