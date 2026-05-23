@@ -6,10 +6,11 @@ export type ParseInput =
   | { kind: 'document'; title: string; contentJson: unknown; contentText?: string | null }
   | { kind: 'faq'; question: string; answer: string }
   | { kind: 'business_item'; title: string; ragText: string }
-  | { kind: 'media_asset'; title: string; ragText: string };
+  | { kind: 'media_asset'; title: string; ragText: string }
+  | { kind: 'payment_method'; title: string; ragText: string };
 
 function parseTextSource(input: {
-  kind: 'business_item' | 'media_asset';
+  kind: 'business_item' | 'media_asset' | 'payment_method';
   title: string;
   ragText: string;
 }): ParsedSource {
@@ -32,6 +33,8 @@ export function parse(input: ParseInput): ParsedSource {
     case 'business_item':
       return parseTextSource(input);
     case 'media_asset':
+      return parseTextSource(input);
+    case 'payment_method':
       return parseTextSource(input);
   }
 }

@@ -37,18 +37,20 @@ export class StaleSourceVersionError extends Error {
 }
 
 function sourceColumns(kind: SourceKind): {
-  sourceCol: 'document_id' | 'faq_id' | 'business_item_id' | 'media_asset_id';
-  nullCols: Array<'document_id' | 'faq_id' | 'business_item_id' | 'media_asset_id'>;
+  sourceCol: 'document_id' | 'faq_id' | 'business_item_id' | 'media_asset_id' | 'payment_method_id';
+  nullCols: Array<'document_id' | 'faq_id' | 'business_item_id' | 'media_asset_id' | 'payment_method_id'>;
 } {
   switch (kind) {
     case 'document':
-      return { sourceCol: 'document_id', nullCols: ['faq_id', 'business_item_id', 'media_asset_id'] };
+      return { sourceCol: 'document_id', nullCols: ['faq_id', 'business_item_id', 'media_asset_id', 'payment_method_id'] };
     case 'faq':
-      return { sourceCol: 'faq_id', nullCols: ['document_id', 'business_item_id', 'media_asset_id'] };
+      return { sourceCol: 'faq_id', nullCols: ['document_id', 'business_item_id', 'media_asset_id', 'payment_method_id'] };
     case 'business_item':
-      return { sourceCol: 'business_item_id', nullCols: ['document_id', 'faq_id', 'media_asset_id'] };
+      return { sourceCol: 'business_item_id', nullCols: ['document_id', 'faq_id', 'media_asset_id', 'payment_method_id'] };
     case 'media_asset':
-      return { sourceCol: 'media_asset_id', nullCols: ['document_id', 'faq_id', 'business_item_id'] };
+      return { sourceCol: 'media_asset_id', nullCols: ['document_id', 'faq_id', 'business_item_id', 'payment_method_id'] };
+    case 'payment_method':
+      return { sourceCol: 'payment_method_id', nullCols: ['document_id', 'faq_id', 'business_item_id', 'media_asset_id'] };
   }
 }
 
@@ -90,9 +92,7 @@ export async function applyIngest(
 
   const rows = toEmbed.map((c, i) => ({
     [sourceCol]: source.sourceId,
-    [nullCols[0]]: null,
-    [nullCols[1]]: null,
-    [nullCols[2]]: null,
+    ...Object.fromEntries(nullCols.map((col) => [col, null])),
     user_id: source.userId,
     chunk_index: c.chunkIndex,
     content: c.content,

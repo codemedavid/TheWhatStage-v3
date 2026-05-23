@@ -83,6 +83,7 @@ describe('runJob', () => {
       faq_id: null,
       business_item_id: null,
       media_asset_id: null,
+      payment_method_id: null,
       user_id: 'u1',
       attempts: 0,
       source_version: 0,
@@ -111,6 +112,7 @@ describe('runJob', () => {
       faq_id: null,
       business_item_id: null,
       media_asset_id: null,
+      payment_method_id: null,
       user_id: 'u1',
       attempts: 4, // one short of MAX_ATTEMPTS=5
       source_version: 0,
@@ -135,6 +137,7 @@ describe('runJob', () => {
       faq_id: null,
       business_item_id: null,
       media_asset_id: null,
+      payment_method_id: null,
       user_id: 'u1',
       attempts: 1,
       source_version: 0,
@@ -164,6 +167,7 @@ describe('runJob', () => {
       faq_id: null,
       business_item_id: null,
       media_asset_id: null,
+      payment_method_id: null,
       user_id: 'u1',
       attempts: 0,
       source_version: 1,
@@ -185,6 +189,7 @@ describe('runJob', () => {
       faq_id: null,
       business_item_id: 'bi1',
       media_asset_id: null,
+      payment_method_id: null,
       user_id: 'u1',
       attempts: 0,
       source_version: 0,
@@ -217,6 +222,7 @@ describe('runJob', () => {
       faq_id: null,
       business_item_id: 'bi2',
       media_asset_id: null,
+      payment_method_id: null,
       user_id: 'u1',
       attempts: 0,
       source_version: 1,
@@ -248,6 +254,7 @@ describe('runJob', () => {
       faq_id: null,
       business_item_id: null,
       media_asset_id: 'ma1',
+      payment_method_id: null,
       user_id: 'u1',
       attempts: 0,
       source_version: 3,
@@ -281,6 +288,7 @@ describe('runJob', () => {
       faq_id: null,
       business_item_id: null,
       media_asset_id: 'ma2',
+      payment_method_id: null,
       user_id: 'u1',
       attempts: 0,
       source_version: 4,
@@ -292,6 +300,121 @@ describe('runJob', () => {
     expect(deletes).toHaveLength(1);
     expect(updates.find((u) => u.table === 'media_assets')?.patch.embedding_status).toBe('pending');
     expect(updates.find((u) => u.table === 'knowledge_embedding_jobs')?.patch.status).toBe('done');
+  });
+});
+
+describe('runJob — payment_method source', () => {
+  it('embeds a payment method and marks it indexed', async () => {
+    const { client, updates, upserts } = fakeClient();
+    const job: EmbedJobRow = {
+      id: 'j-pm-1',
+      document_id: null,
+      faq_id: null,
+      business_item_id: null,
+      media_asset_id: null,
+      payment_method_id: 'pm-1',
+      user_id: 'u1',
+      attempts: 0,
+      source_version: 1,
+    };
+    const pmFetchers: SourceFetchers = {
+      ...fetchers,
+      fetchPaymentMethod: async () => ({
+        name: 'GCash · Main',
+        ragText: 'Payment method: GCash · Main\nAccount number: 0917-123-4567',
+        version: 1,
+        enabled: true,
+      }),
+    };
+    await runJob(client as unknown as SupabaseLike, job, pmFetchers, embedder);
+    expect(upserts).toHaveLength(1);
+    expect(upserts[0].table).toBe('knowledge_chunks');
+    expect((upserts[0].rows[0] as TestRecord).payment_method_id).toBe('pm-1');
+    expect(updates.find((u) => u.table === 'payment_methods')?.patch.embedding_status).toBe('indexed');
+  });
+
+  it('removes chunks when payment method is disabled', async () => {
+    const { client, updates } = fakeClient();
+    const job: EmbedJobRow = {
+      id: 'j-pm-2',
+      document_id: null,
+      faq_id: null,
+      business_item_id: null,
+      media_asset_id: null,
+      payment_method_id: 'pm-2',
+      user_id: 'u1',
+      attempts: 0,
+      source_version: 2,
+    };
+    const pmFetchers: SourceFetchers = {
+      ...fetchers,
+      fetchPaymentMethod: async () => ({
+        name: 'Old GCash',
+        ragText: '',
+        version: 2,
+        enabled: false,
+      }),
+    };
+    await runJob(client as unknown as SupabaseLike, job, pmFetchers, embedder);
+    const jobUpdate = updates.find((u) => u.table === 'knowledge_embedding_jobs');
+    expect(jobUpdate?.patch.status).toBe('done');
+    expect(jobUpdate?.patch.last_error).toContain('disabled');
+  });
+});
+
+describe('enqueuePendingSources — payment_method', () => {
+  it('also enqueues pending payment methods', async () => {
+    const inserted: unknown[] = [];
+    const staleUpdates: Array<{ table: string; id: string }> = [];
+    const sources = {
+      knowledge_documents: [],
+      knowledge_faqs: [],
+      business_items: [],
+      media_assets: [],
+      payment_methods: [{ id: 'pm-1', user_id: 'u1', version: 3 }],
+      knowledge_embedding_jobs: [],
+    };
+
+    const client = {
+      from(table: string) {
+        const builder: TestRecord = {
+          select: () => builder,
+          in: () => builder,
+          not: () => builder,
+          neq: () => builder,
+          eq: (col: string, val: unknown) => {
+            builder.lastEq = [col, val];
+            return builder;
+          },
+          limit: () => {
+            if (table === 'knowledge_embedding_jobs') return Promise.resolve({ data: [], error: null });
+            return Promise.resolve({ data: sources[table as keyof typeof sources] ?? [], error: null });
+          },
+          insert: (row: unknown) => {
+            inserted.push(row);
+            return Promise.resolve({ error: null });
+          },
+          update: () => ({
+            eq: (_col: string, id: string) => {
+              staleUpdates.push({ table, id });
+              return Promise.resolve({ error: null });
+            },
+          }),
+        };
+        return builder;
+      },
+    };
+
+    const result = await enqueuePendingSources(client as unknown as SupabaseLike, { limit: 10 });
+    expect(result.enqueued).toBe(1);
+    expect(inserted).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ payment_method_id: 'pm-1', user_id: 'u1', source_version: 3 }),
+      ]),
+    );
+    expect(staleUpdates).toEqual(
+      expect.arrayContaining([{ table: 'payment_methods', id: 'pm-1' }]),
+    );
   });
 });
 

@@ -18,6 +18,7 @@ export interface EmbedJobRow {
   faq_id: string | null;
   business_item_id: string | null;
   media_asset_id: string | null;
+  payment_method_id: string | null;
   user_id: string;
   attempts: number;
   source_version: number;
@@ -57,7 +58,13 @@ interface PendingMediaAssetRow {
   version: number;
 }
 
-function sourceTable(kind: SourceKind): 'knowledge_documents' | 'knowledge_faqs' | 'business_items' | 'media_assets' {
+interface PendingPaymentMethodRow {
+  id: string;
+  user_id: string;
+  version: number;
+}
+
+function sourceTable(kind: SourceKind): 'knowledge_documents' | 'knowledge_faqs' | 'business_items' | 'media_assets' | 'payment_methods' {
   switch (kind) {
     case 'document':
       return 'knowledge_documents';
@@ -67,10 +74,12 @@ function sourceTable(kind: SourceKind): 'knowledge_documents' | 'knowledge_faqs'
       return 'business_items';
     case 'media_asset':
       return 'media_assets';
+    case 'payment_method':
+      return 'payment_methods';
   }
 }
 
-function sourceIdColumn(kind: SourceKind): 'document_id' | 'faq_id' | 'business_item_id' | 'media_asset_id' {
+function sourceIdColumn(kind: SourceKind): 'document_id' | 'faq_id' | 'business_item_id' | 'media_asset_id' | 'payment_method_id' {
   switch (kind) {
     case 'document':
       return 'document_id';
@@ -80,6 +89,8 @@ function sourceIdColumn(kind: SourceKind): 'document_id' | 'faq_id' | 'business_
       return 'business_item_id';
     case 'media_asset':
       return 'media_asset_id';
+    case 'payment_method':
+      return 'payment_method_id';
   }
 }
 
@@ -88,7 +99,7 @@ export async function enqueuePendingSources(
   opts: { limit?: number } = {},
 ): Promise<{ enqueued: number }> {
   const limit = opts.limit ?? 50;
-  const [docsRes, faqsRes, itemsRes, assetsRes] = await Promise.all([
+  const [docsRes, faqsRes, itemsRes, assetsRes, methodsRes] = await Promise.all([
     client
       .from('knowledge_documents')
       .select('id, user_id, version')
@@ -116,12 +127,19 @@ export async function enqueuePendingSources(
       .eq('is_archived', false)
       .in('embedding_status', ['pending', 'stale'])
       .limit(limit),
+    client
+      .from('payment_methods')
+      .select('id, user_id, version')
+      .eq('enabled', true)
+      .in('embedding_status', ['pending', 'stale'])
+      .limit(limit),
   ]);
 
   if (docsRes.error) throw new Error(`load pending documents failed: ${docsRes.error.message ?? docsRes.error}`);
   if (faqsRes.error) throw new Error(`load pending faqs failed: ${faqsRes.error.message ?? faqsRes.error}`);
   if (itemsRes.error) throw new Error(`load pending business items failed: ${itemsRes.error.message ?? itemsRes.error}`);
   if (assetsRes.error) throw new Error(`load pending media assets failed: ${assetsRes.error.message ?? assetsRes.error}`);
+  if (methodsRes.error) throw new Error(`load pending payment methods failed: ${methodsRes.error.message ?? methodsRes.error}`);
 
   let enqueued = 0;
   for (const row of (docsRes.data ?? []) as PendingDocumentRow[]) {
@@ -164,6 +182,16 @@ export async function enqueuePendingSources(
     enqueued++;
   }
 
+  for (const row of (methodsRes.data ?? []) as PendingPaymentMethodRow[]) {
+    await enqueueEmbedJob(client, {
+      kind: 'payment_method',
+      sourceId: row.id,
+      userId: row.user_id,
+      sourceVersion: row.version ?? 0,
+    });
+    enqueued++;
+  }
+
   return { enqueued };
 }
 
@@ -187,7 +215,7 @@ export async function claimJobs(
 
   const { data: candidates, error: pickErr } = await client
     .from('knowledge_embedding_jobs')
-    .select('id, document_id, faq_id, business_item_id, media_asset_id, user_id, attempts, source_version')
+    .select('id, document_id, faq_id, business_item_id, media_asset_id, payment_method_id, user_id, attempts, source_version')
     .eq('status', 'queued')
     .lte('scheduled_at', new Date().toISOString())
     .order('scheduled_at', { ascending: true })
@@ -201,7 +229,7 @@ export async function claimJobs(
     .update({ status: 'running', started_at: new Date().toISOString() })
     .in('id', ids)
     .eq('status', 'queued')
-    .select('id, document_id, faq_id, business_item_id, media_asset_id, user_id, attempts, source_version');
+    .select('id, document_id, faq_id, business_item_id, media_asset_id, payment_method_id, user_id, attempts, source_version');
   if (claimErr) throw new Error(`claim jobs failed: ${claimErr.message ?? claimErr}`);
   return (claimed ?? []) as EmbedJobRow[];
 }
@@ -231,11 +259,17 @@ export interface SourceFetchers {
     version?: number;
     isArchived?: boolean;
   }>;
+  fetchPaymentMethod?: (id: string) => Promise<{
+    name: string;
+    ragText: string;
+    version?: number;
+    enabled?: boolean;
+  }>;
 }
 
 type BuildParseResult =
   | { kind: SourceKind; sourceId: string; sourceVersion: number; parseInput: ParseInput }
-  | { kind: 'business_item' | 'media_asset'; sourceId: string; sourceVersion: number; disabledReason: string };
+  | { kind: 'business_item' | 'media_asset' | 'payment_method'; sourceId: string; sourceVersion: number; disabledReason: string };
 
 async function buildParseInput(
   job: EmbedJobRow,
@@ -305,6 +339,26 @@ async function buildParseInput(
       sourceId: job.media_asset_id,
       sourceVersion: asset.version ?? 0,
       parseInput: { kind: 'media_asset', title: asset.name, ragText: asset.ragText },
+    };
+  }
+  if (job.payment_method_id) {
+    if (!fetchers.fetchPaymentMethod) {
+      throw new Error(`job ${job.id} requires fetchPaymentMethod`);
+    }
+    const method = await fetchers.fetchPaymentMethod(job.payment_method_id);
+    if (!method.enabled || !method.ragText.trim()) {
+      return {
+        kind: 'payment_method',
+        sourceId: job.payment_method_id,
+        sourceVersion: method.version ?? 0,
+        disabledReason: 'payment method disabled or empty rag text',
+      };
+    }
+    return {
+      kind: 'payment_method',
+      sourceId: job.payment_method_id,
+      sourceVersion: method.version ?? 0,
+      parseInput: { kind: 'payment_method', title: method.name, ragText: method.ragText },
     };
   }
   throw new Error(`job ${job.id} has no source id`);
