@@ -2,6 +2,7 @@
 
 import type { QualificationOutcomeAction, QualificationQuestion } from '@/app/a/[slug]/_kinds/qualification/schema'
 import type { ActionPageOption, PipelineStageOption } from '../../_lib/queries'
+import { EchoTemplateField } from '../../_components/EchoTemplateField'
 
 function setMatchKind(
   kind: QualificationOutcomeAction['match']['kind'],
@@ -130,11 +131,14 @@ export function OutcomeCard({
       {/* Messenger text */}
       <div className="space-y-1">
         <label className="text-[11px] font-medium text-[#6B7280] uppercase tracking-wide">Messenger reply</label>
-        <textarea
-          value={outcome.messenger_text}
-          onChange={(e) => onChange({ messenger_text: e.target.value })}
+        <EchoTemplateField
+          name={`qual_outcome_messenger_text__${outcome.id}`}
+          kind="qualification"
+          customKeys={[]}
+          defaultValue={outcome.messenger_text ?? ''}
           rows={2}
-          className="w-full rounded border border-[#E5E7EB] px-2 py-1 text-[13px]"
+          compact
+          onChange={(v) => onChange({ messenger_text: v })}
           placeholder="Message sent in Messenger when this outcome is matched"
         />
       </div>

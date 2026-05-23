@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import type { ActionPageKind } from '@/lib/action-pages/kinds'
 import type { PipelineRule } from '../_lib/schemas'
+import { EchoTemplateField } from './EchoTemplateField'
 
 interface Stage {
   id: string
@@ -178,13 +179,15 @@ export function PipelineRulesEditor({
               <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-[#6B7280]">
                 Messenger reply for this outcome (optional)
               </span>
-              <textarea
-                value={rule.notify_text ?? ''}
-                onChange={(e) => update(i, { notify_text: e.target.value })}
+              <EchoTemplateField
+                name={`pipeline_rule_notify_text__${i}`}
+                kind={kind}
+                customKeys={[]}
+                defaultValue={rule.notify_text ?? ''}
                 rows={2}
-                maxLength={640}
+                compact
+                onChange={(v) => update(i, { notify_text: v })}
                 placeholder="Overrides the global Messenger echo when this outcome fires."
-                className="w-full rounded border border-[#E5E7EB] px-2 py-1 text-[13px]"
               />
             </label>
           </div>
