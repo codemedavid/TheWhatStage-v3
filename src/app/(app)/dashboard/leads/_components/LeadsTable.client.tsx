@@ -64,6 +64,7 @@ export function LeadsTableClient({
               </th>
               <Th>Name</Th>
               <Th>Email</Th>
+              <Th>Phone</Th>
               <Th>Company</Th>
               <Th>Stage</Th>
               <Th>Campaign</Th>
@@ -74,7 +75,7 @@ export function LeadsTableClient({
           <tbody>
             {rows.length === 0 && (
               <tr>
-                <td colSpan={8} className="px-6 py-12 text-center" style={{ color: 'var(--lead-muted)' }}>
+                <td colSpan={9} className="px-6 py-12 text-center" style={{ color: 'var(--lead-muted)' }}>
                   <div className="text-[14px] font-medium" style={{ color: 'var(--lead-ink)' }}>
                     No leads match
                   </div>
@@ -116,6 +117,9 @@ export function LeadsTableClient({
                   </td>
                   <td className="px-3 py-2.5" style={{ color: 'var(--lead-body)' }}>
                     {r.email ?? <Em />}
+                  </td>
+                  <td className="px-3 py-2.5 tabular-nums" style={{ color: 'var(--lead-body)' }}>
+                    {r.phone ?? <Em />}
                   </td>
                   <td className="px-3 py-2.5" style={{ color: 'var(--lead-body)' }}>
                     {r.company ?? <Em />}
