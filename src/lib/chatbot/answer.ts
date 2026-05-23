@@ -9,6 +9,7 @@ import { getChatbotConfig, type ChatbotConfig } from './config'
 import { loadPrimaryGoalInstruction } from './primary-goal'
 import { selectMediaForReply, type SelectedMediaAsset } from '@/lib/media/selector'
 import { buildMediaContextBlock } from '@/lib/media/prompt'
+import { paymentEnumBlock as buildPaymentEnumBlock } from '@/lib/chatbot/payment-enum'
 
 export type AnswerHistory = { role: 'user' | 'assistant'; content: string }[]
 
@@ -90,6 +91,7 @@ export async function answer(
       : baseConfig
 
   const embedder = createEmbedder()
+  const paymentBlock = await buildPaymentEnumBlock(supabase, userId, null, null).catch(() => '')
   const llm = new HfRouterLlm()
 
   const ctx = await retrieve(
@@ -108,6 +110,7 @@ export async function answer(
     config,
     maxContext: config.maxContext,
     conversationSummary: options.conversationSummary,
+    paymentEnumBlock: paymentBlock,
   })
 
   // Scan ALL retrieved chunks (including grader-rejected ones) for @asset /
