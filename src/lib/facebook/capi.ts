@@ -124,8 +124,110 @@ export async function dispatchCapiEvent(input: DispatchInput): Promise<void> {
     return
   }
 
-  // Step 6+ filled in by a later task; throw for now so it's obvious if reached.
-  throw new Error('dispatchCapiEvent: network path not implemented yet')
+  // 6) Lead contacts.
+  let leadName: string | null = null
+  let leadPhones: string[] = []
+  let leadEmails: string[] = []
+  if (input.leadId) {
+    const { data: lead } = await input.admin
+      .from('leads')
+      .select('phones, emails, name')
+      .eq('id', input.leadId)
+      .maybeSingle()
+    if (lead) {
+      leadName = typeof lead.name === 'string' ? lead.name : null
+      leadPhones = Array.isArray(lead.phones) ? lead.phones.filter((v: unknown): v is string => typeof v === 'string') : []
+      leadEmails = Array.isArray(lead.emails) ? lead.emails.filter((v: unknown): v is string => typeof v === 'string') : []
+    }
+  }
+
+  // 7) Build envelope.
+  const userData = buildUserData({
+    fbPageId: page.fb_page_id,
+    psid: input.psid,
+    leadId: input.leadId,
+    leadName,
+    leadPhones,
+    leadEmails,
+    clientIp: input.clientIp,
+    clientUserAgent: input.clientUserAgent,
+  })
+  const customData = buildCustomData({
+    kind: input.actionPageKind,
+    actionPageId: input.actionPageId,
+    parsedData: input.parsedData,
+    pageConfig: input.pageConfig,
+    businessOrderId: input.businessOrderId,
+    catalogOrder: input.catalogOrder,
+    submissionId: input.submissionId,
+    hasPayment,
+  })
+  const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? '').replace(/\/+$/, '')
+  const eventSourceUrl = appUrl ? `${appUrl}/a/${input.actionPageSlug}` : null
+
+  const event: CapiEvent = buildEventEnvelope({
+    eventName: mapping.eventName,
+    eventId: input.submissionId,
+    eventTimeMs: input.submissionCreatedAt.getTime(),
+    eventSourceUrl,
+    userData,
+    customData,
+  })
+  const body: Record<string, unknown> = { data: [event] }
+  if (page.capi_test_event_code) body.test_event_code = page.capi_test_event_code
+
+  // 8) POST.
+  const token = decryptToken(page.capi_access_token)
+  const url = `https://graph.facebook.com/${GRAPH_API_VERSION}/${encodeURIComponent(
+    page.capi_dataset_id,
+  )}/events?access_token=${encodeURIComponent(token)}`
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), NETWORK_TIMEOUT_MS)
+
+  const log: LogRow = {
+    ...baseLog(input),
+    event_name: mapping.eventName,
+    request_payload: body,
+  }
+
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    })
+    const traceHeader = res.headers.get('x-fb-trace-id')
+    let parsed: unknown = null
+    try {
+      parsed = await res.json()
+    } catch {
+      parsed = null
+    }
+    const traceFromBody =
+      parsed && typeof parsed === 'object'
+        ? (parsed as Record<string, unknown>).fbtrace_id ??
+          ((parsed as Record<string, unknown>).error as Record<string, unknown> | undefined)?.fbtrace_id
+        : null
+    log.http_status = res.status
+    log.fb_trace_id = traceHeader ?? (typeof traceFromBody === 'string' ? traceFromBody : null)
+    log.response_body = parsed
+    log.status = res.ok ? 'sent' : 'error'
+    if (!res.ok && (!log.error_message)) {
+      const errMsg =
+        parsed && typeof parsed === 'object' && (parsed as Record<string, unknown>).error
+          ? ((parsed as Record<string, unknown>).error as Record<string, unknown>).message
+          : `HTTP ${res.status}`
+      log.error_message = typeof errMsg === 'string' ? errMsg : `HTTP ${res.status}`
+    }
+  } catch (e) {
+    log.status = 'error'
+    log.error_message = e instanceof Error ? e.message : String(e)
+  } finally {
+    clearTimeout(timeout)
+  }
+
+  await writeLog(input.admin, log)
 }
 
 function computeHasPayment(input: DispatchInput): boolean {

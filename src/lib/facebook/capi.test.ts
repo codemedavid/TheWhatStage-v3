@@ -145,3 +145,90 @@ describe('dispatchCapiEvent — skip paths', () => {
     expect(inserts[0].row).toMatchObject({ status: 'skipped', skip_reason: 'outcome_skip' })
   })
 })
+
+describe('dispatchCapiEvent — network paths', () => {
+  const enabledPage = {
+    fb_page_id: 'P1',
+    capi_enabled: true,
+    capi_dataset_id: 'DS123',
+    capi_access_token: 'enc:tok',
+    capi_test_event_code: null,
+  }
+  const noOverride = { capi_event_name_override: null }
+
+  it('logs sent on 2xx with http_status + fb_trace_id', async () => {
+    const { admin, inserts } = makeAdmin({ page: enabledPage, actionPage: noOverride })
+    mocks.fetch.mockResolvedValueOnce(
+      new Response(JSON.stringify({ events_received: 1, fbtrace_id: 'trace-XYZ' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json', 'x-fb-trace-id': 'trace-XYZ' },
+      }),
+    )
+    await dispatchCapiEvent({ ...baseInput({ admin }) })
+    expect(mocks.fetch).toHaveBeenCalledOnce()
+    const [url, init] = mocks.fetch.mock.calls[0]
+    expect(url).toBe('https://graph.facebook.com/v19.0/DS123/events?access_token=decrypted%3Aenc%3Atok')
+    expect((init as RequestInit).method).toBe('POST')
+    expect(inserts[0].row).toMatchObject({
+      status: 'sent',
+      event_name: 'Lead',
+      http_status: 200,
+      fb_trace_id: 'trace-XYZ',
+    })
+  })
+
+  it('logs error on 4xx with response_body', async () => {
+    const { admin, inserts } = makeAdmin({ page: enabledPage, actionPage: noOverride })
+    mocks.fetch.mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: { message: 'bad event_id', fbtrace_id: 'trace-ERR' } }), {
+        status: 400,
+        headers: { 'content-type': 'application/json' },
+      }),
+    )
+    await dispatchCapiEvent({ ...baseInput({ admin }) })
+    expect(inserts[0].row).toMatchObject({
+      status: 'error',
+      http_status: 400,
+      fb_trace_id: 'trace-ERR',
+    })
+    expect(inserts[0].row.response_body).toMatchObject({ error: { message: 'bad event_id' } })
+  })
+
+  it('logs error on network failure', async () => {
+    const { admin, inserts } = makeAdmin({ page: enabledPage, actionPage: noOverride })
+    mocks.fetch.mockRejectedValueOnce(new Error('ENOTFOUND'))
+    await dispatchCapiEvent({ ...baseInput({ admin }) })
+    expect(inserts[0].row).toMatchObject({ status: 'error' })
+    expect(inserts[0].row.error_message).toMatch(/ENOTFOUND/)
+  })
+
+  it('propagates test_event_code when set', async () => {
+    const { admin } = makeAdmin({
+      page: { ...enabledPage, capi_test_event_code: 'TEST123' },
+      actionPage: noOverride,
+    })
+    mocks.fetch.mockResolvedValueOnce(new Response('{}', { status: 200 }))
+    await dispatchCapiEvent({ ...baseInput({ admin }) })
+    const [, init] = mocks.fetch.mock.calls[0]
+    const body = JSON.parse((init as RequestInit).body as string)
+    expect(body.test_event_code).toBe('TEST123')
+    expect(body.data).toHaveLength(1)
+  })
+
+  it('includes lead contact data when leadId is set', async () => {
+    const { admin } = makeAdmin({
+      page: enabledPage,
+      actionPage: noOverride,
+      lead: { phones: ['+63 917 555 1234'], emails: ['Foo@Bar.COM'], name: 'Ada Lovelace' },
+    })
+    mocks.fetch.mockResolvedValueOnce(new Response('{}', { status: 200 }))
+    await dispatchCapiEvent({ ...baseInput({ admin, leadId: 'lead-1' }) })
+    const [, init] = mocks.fetch.mock.calls[0]
+    const body = JSON.parse((init as RequestInit).body as string)
+    expect(body.data[0].user_data.em).toBeDefined()
+    expect(body.data[0].user_data.ph).toBeDefined()
+    expect(body.data[0].user_data.fn).toBeDefined()
+    expect(body.data[0].user_data.ln).toBeDefined()
+    expect(body.data[0].user_data.external_id).toBeDefined()
+  })
+})
