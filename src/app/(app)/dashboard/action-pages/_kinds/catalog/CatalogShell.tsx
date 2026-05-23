@@ -12,6 +12,8 @@ import { TriggerGuard } from '../../_components/TriggerGuard'
 import { TriggerField } from '../../_components/TriggerField'
 import { DraftSaveModal } from '../../_components/DraftSaveModal'
 import { useDraftGate } from '../../_components/useDraftGate'
+import { EchoTemplateField } from '../../_components/EchoTemplateField'
+import { extractCustomKeysFromConfig } from '../../_lib/custom-keys'
 import { KIND_REGISTRY } from '@/lib/action-pages/kinds'
 import CatalogEditor from './Editor'
 
@@ -500,14 +502,22 @@ function WorkflowPanel({
         optional
         help="Plain-text confirmation sent in Messenger after a successful order."
       >
-        <textarea
+        <EchoTemplateField
           name="notification_text"
+          kind="catalog"
+          customKeys={extractCustomKeysFromConfig('catalog', page.config)}
           defaultValue={page.notification_template?.text ?? ''}
-          rows={3}
-          maxLength={640}
+          rows={6}
           placeholder="Thanks! We got your order and will be in touch shortly."
-          className="w-full resize-y rounded-md border border-zinc-200 bg-white px-3 py-2 text-[13px] text-zinc-900 placeholder:text-zinc-400 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
         />
+        <label className="mt-3 flex items-center gap-2 text-[13px] text-[#374151]">
+          <input
+            type="checkbox"
+            name="echo_payment_proof"
+            defaultChecked={page.notification_template?.echo_payment_proof !== false}
+          />
+          Also re-echo the uploaded payment screenshot in Messenger
+        </label>
       </Field>
 
       <div className="rounded-lg border border-zinc-200 bg-zinc-50/50 p-4">

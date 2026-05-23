@@ -11,6 +11,8 @@ import { TriggerGuard } from '../../_components/TriggerGuard'
 import { TriggerField } from '../../_components/TriggerField'
 import { DraftSaveModal } from '../../_components/DraftSaveModal'
 import { useDraftGate } from '../../_components/useDraftGate'
+import { EchoTemplateField } from '../../_components/EchoTemplateField'
+import { extractCustomKeysFromConfig } from '../../_lib/custom-keys'
 import { KIND_REGISTRY } from '@/lib/action-pages/kinds'
 import RealEstateEditor from './Editor'
 
@@ -477,13 +479,13 @@ function WorkflowPanel({
         optional
         help="Plain-text confirmation sent in Messenger after a successful submission."
       >
-        <textarea
+        <EchoTemplateField
           name="notification_text"
+          kind="realestate"
+          customKeys={[]}
           defaultValue={page.notification_template?.text ?? ''}
-          rows={3}
-          maxLength={640}
+          rows={4}
           placeholder="Thanks! We got your viewing request and will be in touch shortly."
-          className="w-full resize-y rounded-md border border-zinc-200 bg-white px-3 py-2 text-[13px] text-zinc-900 placeholder:text-zinc-400 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
         />
       </Field>
 
