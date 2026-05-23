@@ -85,10 +85,62 @@ export function Toolbar({ params }: { params: LeadsQuery }) {
         onChange={(v) => set({ to: v || undefined })}
       />
 
-      <SortPicker
-        value={params.sort}
-        onChange={(v) => set({ sort: v })}
-      />
+      {params.view !== 'contact' && (
+        <SortPicker
+          value={params.sort}
+          onChange={(v) => set({ sort: v })}
+        />
+      )}
+
+      {params.view === 'contact' && (
+        <>
+          <div
+            className="inline-flex h-8 items-center rounded-full p-0.5"
+            style={{ background: 'var(--lead-surface-2)', border: '1px solid var(--lead-line)' }}
+          >
+            {(['either', 'phone', 'email', 'both'] as const).map((f) => {
+              const active = params.contact_filter === f
+              return (
+                <button
+                  key={f}
+                  type="button"
+                  onClick={() => set({ contact_filter: f, page: undefined })}
+                  className="lead-focus h-7 rounded-full px-3 text-[12px] transition-colors"
+                  style={{
+                    background: active ? 'var(--lead-accent)' : 'transparent',
+                    color: active ? '#fff' : 'var(--lead-ink)',
+                  }}
+                >
+                  {f === 'either' ? 'Has either' : f === 'phone' ? 'Has phone' : f === 'email' ? 'Has email' : 'Has both'}
+                </button>
+              )
+            })}
+          </div>
+
+          <label
+            className="relative inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-[12.5px] font-medium transition-colors"
+            style={{
+              color: 'var(--lead-body)',
+              background: 'var(--lead-surface)',
+              border: '1px solid var(--lead-line)',
+            }}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden style={{ color: 'var(--lead-muted)' }}>
+              <path d="M3 6h13M3 12h9M3 18h5M17 8v12m0 0-3-3m3 3 3-3" />
+            </svg>
+            <select
+              value={params.contact_sort}
+              onChange={(e) => set({ contact_sort: e.target.value, page: undefined })}
+              className="bg-transparent pr-1 outline-none lead-focus"
+              style={{ color: 'inherit' }}
+            >
+              <option value="recent_contact">Most recent contact</option>
+              <option value="recent_lead">Most recent lead activity</option>
+              <option value="name_asc">Name A–Z</option>
+            </select>
+          </label>
+        </>
+      )}
 
       {hasFilters && (
         <button
