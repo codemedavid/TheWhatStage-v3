@@ -7,7 +7,9 @@ import { createClient } from '@/lib/supabase/server'
 import { decryptToken, encryptToken } from '@/lib/facebook/crypto'
 import { fetchUserPages } from '@/lib/facebook/oauth'
 import { subscribePageToWebhook } from '@/lib/facebook/messenger'
-import { submitAllPendingTemplates } from '@/app/(app)/dashboard/templates/actions'
+import { createAdminClient } from '@/lib/supabase/admin'
+import { dispatchCapiEvent } from '@/lib/facebook/capi'
+import crypto from 'node:crypto'
 
 const SETTINGS_PATH = '/dashboard/settings/facebook'
 
@@ -88,16 +90,11 @@ export async function savePagesForm(formData: FormData): Promise<void> {
     }),
   )
 
-  // Auto-submit every draft/rejected utility template now that we have a
-  // page to register them against. Meta usually returns APPROVED on the
-  // create response for simple utility templates, so this effectively
-  // pre-approves the user's whole registry on first connect.
-  try {
-    const result = await submitAllPendingTemplates(session.userId)
-    console.log('[savePagesForm] auto-submit templates:', result)
-  } catch (e) {
-    console.error('[savePagesForm] auto-submit templates failed:', e)
-  }
+  // Note: we used to auto-submit every draft/rejected utility template here.
+  // That was removed because Meta will 403 every submission when the app is
+  // missing the `pages_utility_messaging` permission, marking the user's
+  // whole registry as rejected on first connect. Templates are now submitted
+  // explicitly from the Templates dashboard.
 
   revalidatePath(SETTINGS_PATH)
   redirect(SETTINGS_PATH)
@@ -118,4 +115,114 @@ export async function disconnectForm(): Promise<void> {
     errRedirect('disconnect_failed', error.message)
   }
   revalidatePath(SETTINGS_PATH)
+}
+
+export async function saveCapiConfigForm(formData: FormData): Promise<void> {
+  const session = await getSession()
+  if (!session) redirect('/login')
+
+  const pageId = String(formData.get('page_id') ?? '')
+  if (!pageId) errRedirect('missing_page_id')
+
+  const enabled = formData.get('capi_enabled') === 'on'
+  const datasetId = String(formData.get('capi_dataset_id') ?? '').trim() || null
+  const testCode = String(formData.get('capi_test_event_code') ?? '').trim() || null
+  const tokenUnchanged = formData.get('token_unchanged') === '1'
+  const newToken = String(formData.get('capi_access_token') ?? '').trim()
+
+  if (enabled && !datasetId) errRedirect('capi_missing_dataset')
+
+  const supabase = await createClient()
+
+  // Ownership check + load current token.
+  const { data: existing } = await supabase
+    .from('facebook_pages')
+    .select('id, capi_access_token, connection_id')
+    .eq('id', pageId)
+    .maybeSingle<{ id: string; capi_access_token: string | null; connection_id: string }>()
+  if (!existing) errRedirect('page_not_found')
+  const { data: conn } = await supabase
+    .from('facebook_connections')
+    .select('id, user_id')
+    .eq('id', existing.connection_id)
+    .maybeSingle<{ id: string; user_id: string }>()
+  if (!conn || conn.user_id !== session.userId) errRedirect('forbidden')
+
+  let tokenToStore: string | null = existing.capi_access_token
+  if (!tokenUnchanged) {
+    tokenToStore = newToken ? encryptToken(newToken) : null
+  }
+  if (enabled && !tokenToStore) errRedirect('capi_missing_token')
+
+  const { error } = await supabase
+    .from('facebook_pages')
+    .update({
+      capi_enabled: enabled,
+      capi_dataset_id: datasetId,
+      capi_access_token: tokenToStore,
+      capi_test_event_code: testCode,
+    })
+    .eq('id', pageId)
+  if (error) errRedirect('capi_save_failed', error.message)
+
+  revalidatePath(SETTINGS_PATH)
+  redirect(`${SETTINGS_PATH}?capi_saved=1`)
+}
+
+export async function sendCapiTestEventForm(formData: FormData): Promise<void> {
+  const session = await getSession()
+  if (!session) redirect('/login')
+
+  const pageId = String(formData.get('page_id') ?? '')
+  if (!pageId) errRedirect('missing_page_id')
+
+  const admin = createAdminClient()
+  const { data: existing } = await admin
+    .from('facebook_pages')
+    .select('id, connection_id, capi_enabled, capi_dataset_id, capi_access_token, capi_test_event_code')
+    .eq('id', pageId)
+    .maybeSingle<{
+      id: string
+      connection_id: string
+      capi_enabled: boolean
+      capi_dataset_id: string | null
+      capi_access_token: string | null
+      capi_test_event_code: string | null
+    }>()
+  if (!existing) errRedirect('page_not_found')
+
+  const { data: conn } = await admin
+    .from('facebook_connections')
+    .select('user_id')
+    .eq('id', existing.connection_id)
+    .maybeSingle<{ user_id: string }>()
+  if (!conn || conn.user_id !== session.userId) errRedirect('forbidden')
+
+  if (!existing.capi_enabled || !existing.capi_dataset_id || !existing.capi_access_token) {
+    errRedirect('capi_not_configured')
+  }
+
+  const fakeSubmissionId = `test-${crypto.randomUUID()}`
+  await dispatchCapiEvent({
+    admin,
+    userId: session.userId,
+    submissionId: fakeSubmissionId,
+    actionPageId: 'test-action-page',
+    actionPageKind: 'form',
+    actionPageSlug: 'test',
+    outcome: 'submitted',
+    psid: 'TEST_PSID',
+    pageRowId: existing.id,
+    parsedData: {},
+    pageConfig: {},
+    leadId: null,
+    clientIp: '127.0.0.1',
+    clientUserAgent: 'capi-test',
+    submissionCreatedAt: new Date(),
+    businessOrderId: null,
+    catalogOrder: null,
+  })
+
+  revalidatePath(SETTINGS_PATH)
+  redirect(`${SETTINGS_PATH}?capi_test=1`)
 }
