@@ -42,6 +42,37 @@ export async function PUT(req: Request) {
     )
   }
 
+  const allAssetIds = parsed.data.touchpoints
+    .map((t) => t.image_media_asset_id)
+    .filter((v): v is string => !!v)
+  const allPageIds = parsed.data.touchpoints
+    .map((t) => t.action_page_id)
+    .filter((v): v is string => !!v)
+
+  if (allAssetIds.length > 0) {
+    const uniq = Array.from(new Set(allAssetIds))
+    const { data, error: assetErr } = await supabase
+      .from('media_assets')
+      .select('id')
+      .in('id', uniq)
+      .eq('user_id', user.id)
+    if (assetErr || (data?.length ?? 0) !== uniq.length) {
+      return NextResponse.json({ error: 'invalid_attachment_reference' }, { status: 400 })
+    }
+  }
+
+  if (allPageIds.length > 0) {
+    const uniq = Array.from(new Set(allPageIds))
+    const { data, error: pageErr } = await supabase
+      .from('action_pages')
+      .select('id')
+      .in('id', uniq)
+      .eq('user_id', user.id)
+    if (pageErr || (data?.length ?? 0) !== uniq.length) {
+      return NextResponse.json({ error: 'invalid_attachment_reference' }, { status: 400 })
+    }
+  }
+
   const { error } = await supabase.from('chatbot_configs').upsert(
     { user_id: user.id, followup_settings: parsed.data },
     { onConflict: 'user_id' },

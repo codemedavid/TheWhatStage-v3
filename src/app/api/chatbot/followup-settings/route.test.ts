@@ -155,4 +155,111 @@ describe('PUT /api/chatbot/followup-settings', () => {
     const res = await PUT(makeReq({ settings: bad }))
     expect(res.status).toBe(400)
   })
+
+  it('returns 400 when image_media_asset_id belongs to another user', async () => {
+    getUserMock.mockResolvedValue({ data: { user: { id: 'u1' } } })
+
+    const settingsWithImage = {
+      enabled: true,
+      touchpoints: DEFAULT_FOLLOWUP_SETTINGS.touchpoints.map((t, i) => ({
+        ...t,
+        image_media_asset_id: i === 0 ? '11111111-1111-4111-9111-111111111111' : null,
+        action_page_id: null,
+      })),
+    }
+
+    supabaseFromMock.mockImplementation((table: string) => {
+      if (table === 'media_assets') {
+        return {
+          select: () => ({
+            in: () => ({
+              eq: async () => ({ data: [], error: null }),
+            }),
+          }),
+        }
+      }
+      return { upsert: async () => ({ error: null }) }
+    })
+
+    const res = await PUT(makeReq({ settings: settingsWithImage }))
+    expect(res.status).toBe(400)
+    const body = await res.json()
+    expect(body.error).toBe('invalid_attachment_reference')
+  })
+
+  it('returns 400 when action_page_id belongs to another user', async () => {
+    getUserMock.mockResolvedValue({ data: { user: { id: 'u1' } } })
+
+    const settingsWithPage = {
+      enabled: true,
+      touchpoints: DEFAULT_FOLLOWUP_SETTINGS.touchpoints.map((t, i) => ({
+        ...t,
+        image_media_asset_id: null,
+        action_page_id: i === 0 ? '22222222-2222-4222-9222-222222222222' : null,
+      })),
+    }
+
+    supabaseFromMock.mockImplementation((table: string) => {
+      if (table === 'action_pages') {
+        return {
+          select: () => ({
+            in: () => ({
+              eq: async () => ({ data: [], error: null }),
+            }),
+          }),
+        }
+      }
+      return { upsert: async () => ({ error: null }) }
+    })
+
+    const res = await PUT(makeReq({ settings: settingsWithPage }))
+    expect(res.status).toBe(400)
+    const body = await res.json()
+    expect(body.error).toBe('invalid_attachment_reference')
+  })
+
+  it('persists when both attachment ids are owned by the user', async () => {
+    getUserMock.mockResolvedValue({ data: { user: { id: 'u1' } } })
+
+    const settings = {
+      enabled: true,
+      touchpoints: DEFAULT_FOLLOWUP_SETTINGS.touchpoints.map((t, i) => ({
+        ...t,
+        image_media_asset_id: i === 0 ? '11111111-1111-4111-9111-111111111111' : null,
+        action_page_id:        i === 0 ? '22222222-2222-4222-9222-222222222222' : null,
+      })),
+    }
+
+    let upserted = false
+    supabaseFromMock.mockImplementation((table: string) => {
+      if (table === 'media_assets') {
+        return {
+          select: () => ({
+            in: () => ({
+              eq: async () => ({ data: [{ id: '11111111-1111-4111-9111-111111111111' }], error: null }),
+            }),
+          }),
+        }
+      }
+      if (table === 'action_pages') {
+        return {
+          select: () => ({
+            in: () => ({
+              eq: async () => ({ data: [{ id: '22222222-2222-4222-9222-222222222222' }], error: null }),
+            }),
+          }),
+        }
+      }
+      if (table === 'chatbot_configs') {
+        return {
+          upsert: async () => { upserted = true; return { error: null } },
+        }
+      }
+      return { select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: null, error: null }) }) }) }
+    })
+
+    const res = await PUT(makeReq({ settings }))
+    expect(res.status).toBe(200)
+    expect(upserted).toBe(true)
+  })
 })
