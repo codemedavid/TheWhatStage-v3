@@ -19,14 +19,16 @@ export function extractEmails(text: string): string[] {
   return [...new Set(raw.map((e) => e.toLowerCase().trim()).filter(Boolean))]
 }
 
+export type ContactSource = 'form' | 'booking' | 'catalog' | 'messenger' | 'manual'
+
 /**
- * Atomically append contact values to a lead's phones/emails arrays,
- * deduplicating in Postgres. Best-effort: logs but never throws.
+ * Atomically append contact values to a lead's phones/emails arrays and to the
+ * normalized lead_contact_values table. Best-effort: logs but never throws.
  */
 export async function appendLeadContacts(
   admin: SupabaseClient,
   leadId: string,
-  contacts: { phones?: string[]; emails?: string[] },
+  contacts: { phones?: string[]; emails?: string[]; source?: ContactSource },
 ): Promise<void> {
   const phones = (contacts.phones ?? []).filter(Boolean)
   const emails = (contacts.emails ?? []).filter(Boolean)
@@ -36,6 +38,7 @@ export async function appendLeadContacts(
     p_lead_id: leadId,
     p_phones: phones,
     p_emails: emails,
+    p_source: contacts.source ?? 'manual',
   })
   if (error) {
     console.warn('[lead.contacts] append failed', { leadId, error: error.message })
