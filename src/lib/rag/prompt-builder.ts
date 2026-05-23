@@ -83,10 +83,18 @@ function numbered(items: string[]): string {
     : items.map((line, i) => `${i + 1}. ${line.trim()}`).join('\n');
 }
 
+function renderChunkMarker(c: RetrievedChunk): string {
+  if (c.business_item_id) return `[product: ${c.business_item_id.slice(0, 8)}]`
+  if (c.payment_method_id) return `[payment]`
+  if (c.faq_id) return `[faq]`
+  if (c.document_id) return `[doc]`
+  return `[kb]`
+}
+
 function buildContextBlock(chunks: Array<RetrievedChunk & { score: number }>): string {
   if (chunks.length === 0) return '(no relevant context found)';
   return chunks
-    .map((c, i) => `[${i + 1}]\n${c.content.trim()}`)
+    .map((c, i) => `[${i + 1}] ${renderChunkMarker(c)}\n${c.content.trim()}`)
     .join('\n\n---\n\n');
 }
 
