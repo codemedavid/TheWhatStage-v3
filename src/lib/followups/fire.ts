@@ -72,8 +72,8 @@ export async function handleFollowupSend(
     return
   }
 
-  const imageMediaAssetId = (entry as { image_media_asset_id?: string | null }).image_media_asset_id ?? null
-  const actionPageId      = (entry as { action_page_id?: string | null }).action_page_id ?? null
+  const imageMediaAssetId = entry.image_media_asset_id
+  const actionPageId      = entry.action_page_id
 
   // Re-check gates: a lead who booked between scheduling and firing should
   // not receive the touchpoint.
@@ -241,9 +241,9 @@ export async function handleFollowupSend(
       }
     }
     if (actionPageId) {
-      const url = await mintActionPageDeeplink(admin, actionPageId, {
+      const url = await mintActionPageDeeplink(admin, actionPageId, schedule.user_id, {
         psid: thread.psid,
-        pageId: thread.page_id,
+        pageId: schedule.page_id,
       })
       if (url) {
         try {

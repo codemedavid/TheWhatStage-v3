@@ -344,6 +344,14 @@ describe('handleFollowupSend — attachments', () => {
       ctaLabel: 'View',
       url: 'https://app/a/booking?psid=p&pid=g&exp=1&sig=x',
     })
+    // Regression: pageId must come from the schedule, not thread (thread select
+    // does not include page_id). userId must be passed for ownership check.
+    expect(mintDeeplinkMock).toHaveBeenCalledWith(
+      expect.anything(),
+      '22222222-2222-4222-9222-222222222222',
+      'u1',
+      expect.objectContaining({ pageId: 'p1' }),
+    )
   })
 
   it('sends text only when policy is HUMAN_AGENT, even with attachments configured', async () => {

@@ -19,7 +19,10 @@ export async function ensureDefaultFolder(
 
   const { data: created, error } = await supabase
     .from('media_folders')
-    .insert({ user_id: userId, name: DEFAULT_NAME, slug: DEFAULT_SLUG })
+    .upsert(
+      { user_id: userId, name: DEFAULT_NAME, slug: DEFAULT_SLUG },
+      { onConflict: 'user_id,slug', ignoreDuplicates: false },
+    )
     .select('id')
     .single<{ id: string }>()
 

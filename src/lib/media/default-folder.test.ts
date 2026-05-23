@@ -15,7 +15,7 @@ function makeClient(opts: {
       chain.order = () => chain
       chain.limit = () => chain
       chain.maybeSingle = async () => ({ data: opts.existing ?? null, error: null })
-      chain.insert = () => ({
+      chain.upsert = () => ({
         select: () => ({
           single: async () => {
             insertCalled = true

@@ -27,12 +27,14 @@ export async function mintMediaAssetUrl(
 export async function mintActionPageDeeplink(
   admin: SupabaseClient,
   pageId: string,
+  userId: string,
   recipient: { psid: string; pageId: string },
 ): Promise<string | null> {
   const { data: page } = await admin
     .from('action_pages')
     .select('slug, signing_secret')
     .eq('id', pageId)
+    .eq('user_id', userId)
     .maybeSingle<{ slug: string; signing_secret: string }>()
   if (!page) return null
 

@@ -74,7 +74,7 @@ describe('mintMediaAssetUrl', () => {
 describe('mintActionPageDeeplink', () => {
   it('returns the signed deeplink with PSID, pageId, and exp claims', async () => {
     const admin = makeAdmin({ page: { slug: 'booking', signing_secret: 'secret-xyz' } })
-    const url = await mintActionPageDeeplink(admin as never, 'page-1', {
+    const url = await mintActionPageDeeplink(admin as never, 'page-1', 'u1', {
       psid: 'PSID123',
       pageId: 'pageuuid-456',
     })
@@ -83,7 +83,7 @@ describe('mintActionPageDeeplink', () => {
 
   it('returns null when the action page is missing', async () => {
     const admin = makeAdmin({ page: null })
-    const url = await mintActionPageDeeplink(admin as never, 'page-1', {
+    const url = await mintActionPageDeeplink(admin as never, 'page-1', 'u1', {
       psid: 'PSID123',
       pageId: 'pageuuid-456',
     })
