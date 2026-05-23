@@ -4,6 +4,8 @@ import { redirect } from 'next/navigation'
 import { z } from 'zod'
 import { createClient } from '@/lib/supabase/server'
 import { LeadInput, BulkUpdateInput } from '../_lib/schemas'
+import { appendLeadContacts } from '@/lib/leads/contact-append'
+import { createAdminClient } from '@/lib/supabase/admin'
 
 async function requireUser() {
   const supabase = await createClient()
@@ -69,8 +71,28 @@ export async function createLead(raw: unknown) {
 export async function updateLead(id: string, raw: unknown) {
   const input = normalize(LeadInput.parse(raw))
   const { supabase } = await requireUser()
+
+  // Read prior phone/email so we only write a per-value row when something actually changed.
+  const { data: prior } = await supabase
+    .from('leads').select('phone, email').eq('id', id).maybeSingle()
+
   const { error } = await supabase.from('leads').update(input).eq('id', id)
   if (error) throw error
+
+  const phoneChanged =
+    typeof input.phone === 'string' && input.phone.trim() !== '' && input.phone !== prior?.phone
+  const emailChanged =
+    typeof input.email === 'string' && input.email.trim() !== '' && input.email !== prior?.email
+
+  if (phoneChanged || emailChanged) {
+    const admin = createAdminClient()
+    await appendLeadContacts(admin, id, {
+      phones: phoneChanged ? [input.phone as string] : [],
+      emails: emailChanged ? [input.email as string] : [],
+      source: 'manual',
+    })
+  }
+
   revalidatePath('/dashboard/leads', 'layout')
 }
 
