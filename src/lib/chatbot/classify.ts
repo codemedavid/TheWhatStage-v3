@@ -309,6 +309,12 @@ export async function answerWithClassification(
     resolveSourceTitles(supabase, userId, built.contextChunkIds),
     mediaPromise,
   ])
+  console.log('[chatbot.classify] media resolved', {
+    userId,
+    count: media.length,
+    slugs: media.map((m) => m.slug),
+    refChunkCount: refChunks.length,
+  })
   return { text, sourceTitles, media, stageChange, actionPage, productRecommendation, propertyRecommendation }
 }
 

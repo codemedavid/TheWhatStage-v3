@@ -709,6 +709,13 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
           .catch((e) => console.warn('[messenger.worker] summary update failed', e))
       }
 
+      console.log('[messenger.worker] media handoff', {
+        jobId: job.id,
+        threadId: thread.id,
+        selectedCount: selectedMedia.length,
+        slugs: selectedMedia.map((m) => m.slug),
+        alreadySent: job.outbound_media.length,
+      })
       await sendSelectedMedia(admin, { job, thread, pageToken, selectedMedia })
 
       // Product recommendation — fired when the LLM picked recommend_product
@@ -755,6 +762,8 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
                   title: match.product.title,
                   price_label: match.product.price_label,
                   cover_image_url: match.product.cover_image_url,
+                  summary: match.product.summary,
+                  description: match.product.description,
                 },
                 confidence: match.confidence,
               })
@@ -856,6 +865,7 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
                   cover_image_url: match.product.cover_image_url,
                   city: match.product.city,
                   region: match.product.region,
+                  description: match.product.description || match.product.summary,
                 },
                 confidence: match.confidence,
               })
@@ -929,7 +939,7 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
               exp,
             })
             const aiBtnText = (actionPageChoice.button_text ?? '').trim()
-            const btnText = (aiBtnText || chosen.title).slice(0, 640)
+            let btnText = (aiBtnText || chosen.title).slice(0, 640)
 
             // For catalog action pages, send a horizontally-scrollable
             // carousel of products (image + title + price/summary + per-card
@@ -1034,6 +1044,43 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
                 })
               }
             }
+            // For sales pages: send the primary gallery image and include the
+            // product description in the button card text.
+            if (!buttonFbId && chosen.kind === 'sales') {
+              try {
+                const { SalesConfigSchema } = await import(
+                  '@/app/a/[slug]/_kinds/sales/schema'
+                )
+                const salesConfig = SalesConfigSchema.parse(chosen.config)
+                const primaryImg =
+                  salesConfig.gallery.find((g: { primary: boolean }) => g.primary) ??
+                  salesConfig.gallery[0]
+                if (primaryImg?.url) {
+                  await sendOutbound({
+                    admin,
+                    thread: {
+                      id: thread.id,
+                      psid: thread.psid,
+                      last_inbound_at: thread.last_inbound_at,
+                    },
+                    pageToken,
+                    payload: { kind: 'image', imageUrl: primaryImg.url },
+                    kind: 'bot',
+                  })
+                }
+                const desc = (
+                  salesConfig.product.tagline ||
+                  salesConfig.product.description ||
+                  ''
+                ).trim()
+                if (desc) {
+                  btnText = `${btnText}\n\n${desc}`.slice(0, 640)
+                }
+              } catch (e) {
+                console.warn('[messenger.worker] sales page config parse failed', e)
+              }
+            }
+
             if (!buttonFbId) {
               const btnResult = await sendOutbound({
                 admin,
@@ -1789,9 +1836,17 @@ async function sendSelectedMedia(
 ): Promise<void> {
   const sent = [...args.job.outbound_media]
   const sentIds = new Set(sent.map((m) => m.media_asset_id))
+  let sentThisCall = 0
 
   for (const asset of args.selectedMedia.slice(0, 4)) {
-    if (sentIds.has(asset.id)) continue
+    if (sentIds.has(asset.id)) {
+      console.log('[messenger.worker] media skip dedup', {
+        jobId: args.job.id,
+        assetId: asset.id,
+        slug: asset.slug,
+      })
+      continue
+    }
     try {
       const { data: signed, error: signErr } = await admin.storage
         .from('media-assets')
@@ -1805,7 +1860,14 @@ async function sendSelectedMedia(
       })
       sent.push({ media_asset_id: asset.id, fb_message_id: fb.message_id })
       sentIds.add(asset.id)
+      sentThisCall++
       await admin.from('messenger_jobs').update({ outbound_media: sent }).eq('id', args.job.id)
+      console.log('[messenger.worker] media sent', {
+        jobId: args.job.id,
+        assetId: asset.id,
+        slug: asset.slug,
+        fbMessageId: fb.message_id,
+      })
 
       const { error: insertErr } = await admin.from('messenger_messages').insert({
         thread_id: args.thread.id,
@@ -1821,10 +1883,18 @@ async function sendSelectedMedia(
     } catch (e) {
       console.error('[messenger.worker] media send failed', {
         assetId: asset.id,
+        slug: asset.slug,
+        storagePath: asset.storagePath,
         err: e instanceof Error ? e.message : String(e),
       })
     }
   }
+  console.log('[messenger.worker] media done', {
+    jobId: args.job.id,
+    requested: args.selectedMedia.length,
+    sentThisCall,
+    totalSent: sent.length,
+  })
 }
 
 async function processReminderHooks(

@@ -164,6 +164,12 @@ export async function answer(
     resolveSourceTitles(supabase, userId, built.contextChunkIds),
     mediaPromise,
   ])
+  console.log('[chatbot.answer] media resolved', {
+    userId,
+    count: media.length,
+    slugs: media.map((m) => m.slug),
+    refChunkCount: refChunks.length,
+  })
 
   // Anti-hallucination guard: if the model invented a phone number, URL, or
   // email that is NOT present in the retrieved context or system prompt,

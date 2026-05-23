@@ -65,6 +65,14 @@ export async function selectMediaForReply(args: {
   const refs = extractMediaRefs(refText)
   const selected: SelectedMediaAsset[] = []
 
+  console.log('[media.selector] scan', {
+    userId: args.userId,
+    chunks: args.retrievedChunks.length,
+    refTextChars: refText.length,
+    assetSlugs: refs.assetSlugs,
+    folderSlugs: refs.folderSlugs,
+  })
+
   // Lazy semantic ranking — fetched only when needed (folder pick or fallback).
   let semanticRanking: Map<string, number> | null = null
   const loadSemanticRanking = async (): Promise<Map<string, number>> => {
@@ -101,6 +109,12 @@ export async function selectMediaForReply(args: {
       .in('slug', refs.assetSlugs)
     if (error) throw new Error(`load media asset refs failed: ${error.message ?? error}`)
     const bySlug = new Map<string, MediaAssetRow>((data ?? []).map((row: MediaAssetRow) => [row.slug, row]))
+    const missing = refs.assetSlugs.filter((s) => !bySlug.has(s))
+    console.log('[media.selector] asset_ref lookup', {
+      requested: refs.assetSlugs,
+      hits: refs.assetSlugs.filter((s) => bySlug.has(s)),
+      missing,
+    })
     for (const slug of refs.assetSlugs) {
       const row = bySlug.get(slug)
       if (row) addUnique(selected, row, 'asset_ref', limit)
@@ -117,6 +131,11 @@ export async function selectMediaForReply(args: {
     if (folderErr) throw new Error(`load media folder refs failed: ${folderErr.message ?? folderErr}`)
     const folderRows = (folders ?? []) as { id: string; slug: string }[]
     const folderIds = folderRows.map((f) => f.id)
+    console.log('[media.selector] folder_ref lookup', {
+      requested: refs.folderSlugs,
+      hits: folderRows.map((f) => f.slug),
+      missing: refs.folderSlugs.filter((s) => !folderRows.some((f) => f.slug === s)),
+    })
     if (folderIds.length) {
       const { data, error } = await args.client
         .from('media_assets')
@@ -147,7 +166,12 @@ export async function selectMediaForReply(args: {
   // Images are only sent when retrieved knowledge explicitly references them
   // via @asset or #folder. No semantic fallback — keeps the bot from attaching
   // images on every reply just because something looked vaguely similar.
-  return selected.slice(0, limit)
+  const finalSelection = selected.slice(0, limit)
+  console.log('[media.selector] result', {
+    count: finalSelection.length,
+    picks: finalSelection.map((a) => ({ slug: a.slug, reason: a.matchReason })),
+  })
+  return finalSelection
 }
 
 function pickBestAsset(candidates: MediaAssetRow[], ranking: Map<string, number>): MediaAssetRow | null {
