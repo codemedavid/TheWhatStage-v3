@@ -117,42 +117,67 @@ export async function disconnectForm(): Promise<void> {
   revalidatePath(SETTINGS_PATH)
 }
 
-export async function saveCapiConfigForm(formData: FormData): Promise<void> {
+export type CapiFormState =
+  | { status: 'idle' }
+  | { status: 'ok'; message: string }
+  | { status: 'error'; message: string; field?: 'dataset' | 'token' | 'page' | 'general' }
+
+export const CAPI_FORM_IDLE: CapiFormState = { status: 'idle' }
+
+export async function saveCapiConfigAction(
+  _prev: CapiFormState,
+  formData: FormData,
+): Promise<CapiFormState> {
   const session = await getSession()
-  if (!session) redirect('/login')
+  if (!session) return { status: 'error', message: 'Your session expired. Please sign in again.' }
 
   const pageId = String(formData.get('page_id') ?? '')
-  if (!pageId) errRedirect('missing_page_id')
+  if (!pageId) return { status: 'error', message: 'Missing page id.', field: 'page' }
 
   const enabled = formData.get('capi_enabled') === 'on'
   const datasetId = String(formData.get('capi_dataset_id') ?? '').trim() || null
   const testCode = String(formData.get('capi_test_event_code') ?? '').trim() || null
-  const tokenUnchanged = formData.get('token_unchanged') === '1'
   const newToken = String(formData.get('capi_access_token') ?? '').trim()
 
-  if (enabled && !datasetId) errRedirect('capi_missing_dataset')
+  if (datasetId && !/^\d{6,}$/.test(datasetId)) {
+    return {
+      status: 'error',
+      message: 'Dataset ID should be the numeric Pixel ID from Events Manager.',
+      field: 'dataset',
+    }
+  }
+  if (enabled && !datasetId) {
+    return { status: 'error', message: 'Dataset ID is required when CAPI is enabled.', field: 'dataset' }
+  }
 
   const supabase = await createClient()
 
-  // Ownership check + load current token.
   const { data: existing } = await supabase
     .from('facebook_pages')
     .select('id, capi_access_token, connection_id')
     .eq('id', pageId)
     .maybeSingle<{ id: string; capi_access_token: string | null; connection_id: string }>()
-  if (!existing) errRedirect('page_not_found')
+  if (!existing) return { status: 'error', message: 'Page not found.', field: 'page' }
+
   const { data: conn } = await supabase
     .from('facebook_connections')
     .select('id, user_id')
     .eq('id', existing.connection_id)
     .maybeSingle<{ id: string; user_id: string }>()
-  if (!conn || conn.user_id !== session.userId) errRedirect('forbidden')
-
-  let tokenToStore: string | null = existing.capi_access_token
-  if (!tokenUnchanged) {
-    tokenToStore = newToken ? encryptToken(newToken) : null
+  if (!conn || conn.user_id !== session.userId) {
+    return { status: 'error', message: 'You do not have access to this page.', field: 'page' }
   }
-  if (enabled && !tokenToStore) errRedirect('capi_missing_token')
+
+  // Blank token never wipes a stored one. Explicit clear happens via a
+  // separate "Clear token" action, not by submitting an empty input.
+  const tokenToStore: string | null = newToken ? encryptToken(newToken) : existing.capi_access_token
+  if (enabled && !tokenToStore) {
+    return {
+      status: 'error',
+      message: 'Paste a CAPI access token before enabling. You can create one in Events Manager → Settings → Conversions API.',
+      field: 'token',
+    }
+  }
 
   const { error } = await supabase
     .from('facebook_pages')
@@ -163,18 +188,24 @@ export async function saveCapiConfigForm(formData: FormData): Promise<void> {
       capi_test_event_code: testCode,
     })
     .eq('id', pageId)
-  if (error) errRedirect('capi_save_failed', error.message)
+  if (error) return { status: 'error', message: error.message }
 
   revalidatePath(SETTINGS_PATH)
-  redirect(`${SETTINGS_PATH}?capi_saved=1`)
+  return {
+    status: 'ok',
+    message: enabled ? 'Saved. Events will be sent on the next action page submission.' : 'Saved.',
+  }
 }
 
-export async function sendCapiTestEventForm(formData: FormData): Promise<void> {
+export async function sendCapiTestEventAction(
+  _prev: CapiFormState,
+  formData: FormData,
+): Promise<CapiFormState> {
   const session = await getSession()
-  if (!session) redirect('/login')
+  if (!session) return { status: 'error', message: 'Your session expired. Please sign in again.' }
 
   const pageId = String(formData.get('page_id') ?? '')
-  if (!pageId) errRedirect('missing_page_id')
+  if (!pageId) return { status: 'error', message: 'Missing page id.', field: 'page' }
 
   const admin = createAdminClient()
   const { data: existing } = await admin
@@ -189,40 +220,55 @@ export async function sendCapiTestEventForm(formData: FormData): Promise<void> {
       capi_access_token: string | null
       capi_test_event_code: string | null
     }>()
-  if (!existing) errRedirect('page_not_found')
+  if (!existing) return { status: 'error', message: 'Page not found.', field: 'page' }
 
   const { data: conn } = await admin
     .from('facebook_connections')
     .select('user_id')
     .eq('id', existing.connection_id)
     .maybeSingle<{ user_id: string }>()
-  if (!conn || conn.user_id !== session.userId) errRedirect('forbidden')
+  if (!conn || conn.user_id !== session.userId) {
+    return { status: 'error', message: 'You do not have access to this page.', field: 'page' }
+  }
 
   if (!existing.capi_enabled || !existing.capi_dataset_id || !existing.capi_access_token) {
-    errRedirect('capi_not_configured')
+    return {
+      status: 'error',
+      message: 'Enable CAPI and save a dataset ID + token before sending a test event.',
+    }
   }
 
   const fakeSubmissionId = crypto.randomUUID()
-  await dispatchCapiEvent({
-    admin,
-    userId: session.userId,
-    submissionId: fakeSubmissionId,
-    actionPageId: 'test-action-page',
-    actionPageKind: 'form',
-    actionPageSlug: 'test',
-    outcome: 'submitted',
-    psid: 'TEST_PSID',
-    pageRowId: existing.id,
-    parsedData: {},
-    pageConfig: {},
-    leadId: null,
-    clientIp: '127.0.0.1',
-    clientUserAgent: 'capi-test',
-    submissionCreatedAt: new Date(),
-    businessOrderId: null,
-    catalogOrder: null,
-  })
+  try {
+    await dispatchCapiEvent({
+      admin,
+      userId: session.userId,
+      submissionId: fakeSubmissionId,
+      actionPageId: 'test-action-page',
+      actionPageKind: 'form',
+      actionPageSlug: 'test',
+      outcome: 'submitted',
+      psid: 'TEST_PSID',
+      pageRowId: existing.id,
+      parsedData: {},
+      pageConfig: {},
+      leadId: null,
+      clientIp: '127.0.0.1',
+      clientUserAgent: 'capi-test',
+      submissionCreatedAt: new Date(),
+      businessOrderId: null,
+      catalogOrder: null,
+    })
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'Unknown error'
+    return { status: 'error', message: `Test event failed: ${msg}` }
+  }
 
   revalidatePath(SETTINGS_PATH)
-  redirect(`${SETTINGS_PATH}?capi_test=1`)
+  return {
+    status: 'ok',
+    message: existing.capi_test_event_code
+      ? `Test event sent. Check Events Manager → Test events (code: ${existing.capi_test_event_code}).`
+      : 'Test event sent. Check Events Manager for delivery.',
+  }
 }
