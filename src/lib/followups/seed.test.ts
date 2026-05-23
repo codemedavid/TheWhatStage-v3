@@ -73,13 +73,13 @@ describe('maybeScheduleFollowup', () => {
     expect(inserted.started_at).toBe(lastInboundAt)
     expect(inserted.next_run_at).toBe(new Date(Date.parse(lastInboundAt) + 5 * 60_000).toISOString())
     expect(inserted.offsets_snapshot).toEqual([
-      { offset_ms: 300000,   slot: 0, instruction: 'Quick light hello — just ask if still interested po.' },
-      { offset_ms: 3600000,  slot: 1, instruction: 'Friendly nudge — offer to answer any questions.' },
-      { offset_ms: 18000000, slot: 2, instruction: 'Share one concrete benefit or social proof — keep it short.' },
-      { offset_ms: 28800000, slot: 3, instruction: "Ask one focused question to surface what's blocking them." },
-      { offset_ms: 43200000, slot: 4, instruction: 'Light reminder — emphasize convenience and flexibility.' },
-      { offset_ms: 64800000, slot: 5, instruction: 'Soft scarcity or a clear call to decide — no pressure.' },
-      { offset_ms: 86400000, slot: 6, instruction: 'Last graceful check — invite them to message anytime.' },
+      { offset_ms: 300000,   slot: 0, instruction: 'Quick light hello — just ask if still interested po.',          image_media_asset_id: null, action_page_id: null },
+      { offset_ms: 3600000,  slot: 1, instruction: 'Friendly nudge — offer to answer any questions.',                image_media_asset_id: null, action_page_id: null },
+      { offset_ms: 18000000, slot: 2, instruction: 'Share one concrete benefit or social proof — keep it short.',   image_media_asset_id: null, action_page_id: null },
+      { offset_ms: 28800000, slot: 3, instruction: "Ask one focused question to surface what's blocking them.",     image_media_asset_id: null, action_page_id: null },
+      { offset_ms: 43200000, slot: 4, instruction: 'Light reminder — emphasize convenience and flexibility.',       image_media_asset_id: null, action_page_id: null },
+      { offset_ms: 64800000, slot: 5, instruction: 'Soft scarcity or a clear call to decide — no pressure.',        image_media_asset_id: null, action_page_id: null },
+      { offset_ms: 86400000, slot: 6, instruction: 'Last graceful check — invite them to message anytime.',         image_media_asset_id: null, action_page_id: null },
     ])
   })
 
@@ -134,10 +134,10 @@ describe('maybeScheduleFollowup', () => {
     })
     const ins = captured.find((c) => c.op === 'insert')!.values as Record<string, unknown>
     expect(ins.offsets_snapshot).toEqual([
-      { offset_ms: 300000,   slot: 0, instruction: 'Quick light hello — just ask if still interested po.' },
-      { offset_ms: 18000000, slot: 2, instruction: 'Share one concrete benefit or social proof — keep it short.' },
-      { offset_ms: 43200000, slot: 4, instruction: 'Light reminder — emphasize convenience and flexibility.' },
-      { offset_ms: 86400000, slot: 6, instruction: 'Last graceful check — invite them to message anytime.' },
+      { offset_ms: 300000,   slot: 0, instruction: 'Quick light hello — just ask if still interested po.',        image_media_asset_id: null, action_page_id: null },
+      { offset_ms: 18000000, slot: 2, instruction: 'Share one concrete benefit or social proof — keep it short.', image_media_asset_id: null, action_page_id: null },
+      { offset_ms: 43200000, slot: 4, instruction: 'Light reminder — emphasize convenience and flexibility.',     image_media_asset_id: null, action_page_id: null },
+      { offset_ms: 86400000, slot: 6, instruction: 'Last graceful check — invite them to message anytime.',       image_media_asset_id: null, action_page_id: null },
     ])
     // next_run_at uses the first enabled offset (slot 0 = 5m).
     expect(ins.next_run_at).toBe(new Date(Date.parse(lastInboundAt) + 300_000).toISOString())
@@ -155,5 +155,31 @@ describe('maybeScheduleFollowup', () => {
       lastInboundAt: new Date().toISOString(),
     })
     expect(captured.find((c) => c.op === 'insert')).toBeUndefined()
+  })
+
+  it('persists attachment fields from settings into offsets_snapshot', async () => {
+    mockShouldSeed.mockResolvedValue({ ok: true, inboundCount: 2 })
+    mockLoadSettings.mockResolvedValue({
+      ...DEFAULT_FOLLOWUP_SETTINGS,
+      touchpoints: DEFAULT_FOLLOWUP_SETTINGS.touchpoints.map((t, i) => ({
+        ...t,
+        image_media_asset_id: i === 2 ? '11111111-1111-4111-9111-111111111111' : null,
+        action_page_id:        i === 2 ? '22222222-2222-4222-9222-222222222222' : null,
+      })),
+    })
+
+    const { admin, captured } = makeAdmin()
+    await maybeScheduleFollowup(admin as unknown as Parameters<typeof maybeScheduleFollowup>[0], {
+      threadId: 't1', leadId: 'l1', userId: 'u1', pageId: 'p1',
+      lastInboundAt: new Date().toISOString(),
+    })
+
+    const insert = captured.find((c) => c.table === 'lead_followup_schedules' && c.op === 'insert')
+    expect(insert).toBeTruthy()
+    const snapshot = (insert!.values as { offsets_snapshot: Array<Record<string, unknown>> }).offsets_snapshot
+    const slot2 = snapshot.find((s) => s.slot === 2)
+    expect(slot2).toBeTruthy()
+    expect(slot2!.image_media_asset_id).toBe('11111111-1111-4111-9111-111111111111')
+    expect(slot2!.action_page_id).toBe('22222222-2222-4222-9222-222222222222')
   })
 })
