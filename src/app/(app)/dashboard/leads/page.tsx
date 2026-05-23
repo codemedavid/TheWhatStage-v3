@@ -3,13 +3,14 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { LeadsQuery } from './_lib/schemas'
 import { seedDefaultStagesIfEmpty } from './_lib/seed'
-import { fetchStages, fetchStagesCached, fetchFieldDefsCached, fetchLeadsTotal, fetchCampaignOptions } from './_lib/queries'
+import { fetchStages, fetchStagesCached, fetchFieldDefsCached, fetchLeadsTotal, fetchContactLeadsTotal, fetchCampaignOptions } from './_lib/queries'
 import { getChatbotConfig } from '@/lib/chatbot/config'
 import { LeadsShell } from './_components/LeadsShell'
 import { LeadsHeader } from './_components/LeadsHeader'
 import { Toolbar } from './_components/Toolbar'
 import { KanbanBoard } from './_components/KanbanBoard'
 import { LeadsTable } from './_components/LeadsTable'
+import { ContactList } from './_components/ContactList'
 import { StageRulesTip } from './_components/StageRulesTip'
 
 export default async function LeadsPage({
@@ -41,10 +42,15 @@ async function LeadsBody({ params }: { params: ReturnType<typeof LeadsQuery.pars
 
   const justSeeded = await seedDefaultStagesIfEmpty(supabase, user.id)
 
+  const totalPromise =
+    params.view === 'contact'
+      ? fetchContactLeadsTotal(supabase, user.id, params)
+      : fetchLeadsTotal(supabase, user.id, params)
+
   const [stages, fieldDefs, total, campaigns, chatbotConfig] = await Promise.all([
     justSeeded ? fetchStages(supabase, user.id) : fetchStagesCached(user.id),
     fetchFieldDefsCached(user.id),
-    fetchLeadsTotal(supabase, user.id, params),
+    totalPromise,
     fetchCampaignOptions(supabase, user.id),
     getChatbotConfig(supabase, user.id),
   ])
@@ -71,6 +77,8 @@ async function LeadsBody({ params }: { params: ReturnType<typeof LeadsQuery.pars
       <div className="mt-5">
         {params.view === 'kanban' ? (
           <KanbanBoard userId={user.id} stages={stages} fieldDefs={fieldDefs} campaigns={campaigns} params={params} />
+        ) : params.view === 'contact' ? (
+          <ContactList userId={user.id} stages={stages} fieldDefs={fieldDefs} campaigns={campaigns} params={params} />
         ) : (
           <LeadsTable userId={user.id} stages={stages} fieldDefs={fieldDefs} campaigns={campaigns} params={params} />
         )}
