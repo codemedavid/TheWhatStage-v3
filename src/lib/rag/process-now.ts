@@ -13,6 +13,8 @@ function sourceColumn(kind: SourceKind): 'document_id' | 'faq_id' | 'business_it
       return 'business_item_id';
     case 'media_asset':
       return 'media_asset_id';
+    default:
+      throw new Error(`unsupported source kind: ${kind}`);
   }
 }
 
