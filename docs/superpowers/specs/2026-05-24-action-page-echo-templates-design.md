@@ -140,7 +140,7 @@ Catalogue:
 
 | Group | Variable | Kinds | Source |
 |---|---|---|---|
-| Facebook | `fb.name` | all (when PSID) | `messenger_threads.fb_first_name + fb_last_name` |
+| Facebook | `fb.name` | all (when PSID) | `messenger_threads.full_name` |
 | Lead | `lead.name`, `lead.phone`, `lead.email` | all (when lead known) | `leads` row |
 | Customer | `customer.name`, `customer.phone`, `customer.email`, `customer.notes` | catalog, sales, booking, property | `parsedData.customer` |
 | Custom | `custom.<key>` | catalog, booking, property | page config field defs (extends `known` dynamically) |
@@ -170,7 +170,7 @@ export async function buildEchoContext(args: {
 }): Promise<{ ctx: Record<string, unknown>; known: Set<string>; customKeys: string[] }>
 ```
 
-Reads `messenger_threads` (for `fb.name`) and `leads` (for `lead.*`) in parallel via `Promise.all`. The existing submit route already does a `messenger_threads` lookup near line 696 — the context builder reuses the same row to avoid a second query. Returns the `known` set with `custom.<key>` paths added for whatever keys the page declares.
+Reads `messenger_threads` (for `fb.name` from `full_name`) and `leads` (for `lead.*` — `name`/`email`/`phone`) in parallel via `Promise.all`. The existing submit route already does a `messenger_threads` lookup near line 696 — the context builder reuses the same row to avoid a second query. Returns the `known` set with `custom.<key>` paths added for whatever keys the page declares.
 
 Dates render in the page's timezone:
 - Booking pages: `config.appointment.timezone` (defaults to `Asia/Manila`).
