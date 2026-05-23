@@ -61,10 +61,31 @@ export default async function FacebookSettingsPage({
         has_capi_token: Boolean(p.capi_access_token),
         capi_test_event_code: p.capi_test_event_code ?? null,
       }))
+
+      const { data: capiLogs } = await supabase
+        .from('capi_event_logs')
+        .select('id, created_at, status, skip_reason, event_name, http_status, fb_trace_id, error_message, page_id')
+        .eq('user_id', session.userId)
+        .order('created_at', { ascending: false })
+        .limit(20)
+
+      const pageNameById = new Map((pages ?? []).map((p) => [p.id, p.name]))
+      const recentRows = (capiLogs ?? []).map((row) => ({
+        id: row.id,
+        created_at: row.created_at,
+        status: row.status as 'sent' | 'skipped' | 'error',
+        skip_reason: row.skip_reason,
+        event_name: row.event_name,
+        http_status: row.http_status,
+        fb_trace_id: row.fb_trace_id,
+        error_message: row.error_message,
+        page_name: row.page_id ? pageNameById.get(row.page_id) ?? null : null,
+      }))
+
       body = (
         <>
           <ConnectedView pages={pages} />
-          <CapiSection pages={capiPages} />
+          <CapiSection pages={capiPages} recentRows={recentRows} />
         </>
       )
     }

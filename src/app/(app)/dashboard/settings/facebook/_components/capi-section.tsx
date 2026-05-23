@@ -1,4 +1,7 @@
 import { CapiPageForm } from './capi-page-form'
+import { CapiRecentEvents } from './capi-recent-events'
+
+type LogRow = Parameters<typeof CapiRecentEvents>[0]['rows'][number]
 
 type Page = {
   id: string
@@ -9,7 +12,13 @@ type Page = {
   capi_test_event_code: string | null
 }
 
-export function CapiSection({ pages }: { pages: Page[] }) {
+export function CapiSection({
+  pages,
+  recentRows,
+}: {
+  pages: Page[]
+  recentRows: LogRow[]
+}) {
   if (pages.length === 0) return null
   return (
     <section className="space-y-4 border-t pt-6 mt-6">
@@ -33,6 +42,10 @@ export function CapiSection({ pages }: { pages: Page[] }) {
         {pages.map((p) => (
           <CapiPageForm key={p.id} page={p} />
         ))}
+      </div>
+      <div className="space-y-2 pt-4 border-t">
+        <h3 className="text-sm font-semibold">Recent events (last 20)</h3>
+        <CapiRecentEvents rows={recentRows} />
       </div>
     </section>
   )
