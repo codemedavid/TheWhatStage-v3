@@ -48,16 +48,16 @@ describe('generatePersonality', () => {
     expect(out.name).toBe('Nena')
   })
 
-  it('throws generation_failed when both attempts fail', async () => {
+  it('throws generation_failed when all attempts fail', async () => {
     const { HfRouterLlm } = await import('@/lib/rag')
     const badImpl = function Bad(this: { complete: ReturnType<typeof vi.fn> }) {
       this.complete = vi.fn(async () => 'nope')
       return this
     }
-    ;(HfRouterLlm as unknown as { mockImplementationOnce: (fn: () => unknown) => void })
-      .mockImplementationOnce(badImpl)
-    ;(HfRouterLlm as unknown as { mockImplementationOnce: (fn: () => unknown) => void })
-      .mockImplementationOnce(badImpl)
+    const mock = HfRouterLlm as unknown as { mockImplementationOnce: (fn: () => unknown) => void }
+    mock.mockImplementationOnce(badImpl)
+    mock.mockImplementationOnce(badImpl)
+    mock.mockImplementationOnce(badImpl)
     await expect(generatePersonality({ basics, seeds: {}, lang: 'tl' })).rejects.toThrow(/generation_failed/i)
   })
 })

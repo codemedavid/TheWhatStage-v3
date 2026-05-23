@@ -67,7 +67,7 @@ function baseInput(overrides: Partial<Parameters<typeof dispatchCapiEvent>[0]> =
     admin: undefined as unknown as Parameters<typeof dispatchCapiEvent>[0]['admin'],
     userId: 'u1',
     submissionId: 'sub-1',
-    actionPageId: 'ap-1',
+    actionPageId: '00000000-0000-0000-0000-000000000001',
     actionPageKind: 'form' as const,
     outcome: 'submitted',
     psid: 'PSID1',

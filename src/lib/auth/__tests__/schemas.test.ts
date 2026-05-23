@@ -6,12 +6,14 @@ describe('signUpSchema', () => {
     const out = signUpSchema.parse({
       full_name: '  Ada Lovelace  ',
       email: 'Ada@Example.COM',
-      password: 'hunter12a',
+      password: 'hunter12ab',
+      agree: 'on',
     })
     expect(out).toEqual({
       full_name: 'Ada Lovelace',
       email: 'ada@example.com',
-      password: 'hunter12a',
+      password: 'hunter12ab',
+      agree: 'on',
     })
   })
 
@@ -19,7 +21,8 @@ describe('signUpSchema', () => {
     const r = signUpSchema.safeParse({
       full_name: 'A',
       email: 'a@b.co',
-      password: 'abcdefgh',
+      password: 'abcdefghij',
+      agree: 'on',
     })
     expect(r.success).toBe(false)
   })
@@ -28,16 +31,18 @@ describe('signUpSchema', () => {
     const r = signUpSchema.safeParse({
       full_name: 'A',
       email: 'a@b.co',
-      password: '12345678',
+      password: '1234567890',
+      agree: 'on',
     })
     expect(r.success).toBe(false)
   })
 
-  it('rejects password under 8 chars', () => {
+  it('rejects password under 10 chars', () => {
     const r = signUpSchema.safeParse({
       full_name: 'A',
       email: 'a@b.co',
       password: 'abc1',
+      agree: 'on',
     })
     expect(r.success).toBe(false)
   })
@@ -46,7 +51,8 @@ describe('signUpSchema', () => {
     const r = signUpSchema.safeParse({
       full_name: '   ',
       email: 'a@b.co',
-      password: 'abcdefg1',
+      password: 'abcdefgh1j',
+      agree: 'on',
     })
     expect(r.success).toBe(false)
   })
@@ -55,7 +61,8 @@ describe('signUpSchema', () => {
     const r = signUpSchema.safeParse({
       full_name: 'a'.repeat(81),
       email: 'a@b.co',
-      password: 'abcdefg1',
+      password: 'abcdefgh1j',
+      agree: 'on',
     })
     expect(r.success).toBe(false)
   })
@@ -64,7 +71,18 @@ describe('signUpSchema', () => {
     const r = signUpSchema.safeParse({
       full_name: 'A',
       email: 'not-an-email',
-      password: 'abcdefg1',
+      password: 'abcdefgh1j',
+      agree: 'on',
+    })
+    expect(r.success).toBe(false)
+  })
+
+  it('rejects when agree is not "on"', () => {
+    const r = signUpSchema.safeParse({
+      full_name: 'A',
+      email: 'a@b.co',
+      password: 'abcdefgh1j',
+      agree: 'off',
     })
     expect(r.success).toBe(false)
   })
