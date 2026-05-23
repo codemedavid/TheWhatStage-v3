@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   decryptToken: vi.fn((token: string) => `decrypted:${token}`),
   sendMessengerText: vi.fn(async () => ({ message_id: 'mid.echo.1' })),
   sendOutbound: vi.fn(async () => ({ sent: true, messageId: 'mid.outbound.1' })),
+  dispatchCapiEvent: vi.fn(async () => undefined),
 }))
 
 vi.mock('@/lib/supabase/admin', () => ({
@@ -27,6 +28,10 @@ vi.mock('@/lib/messenger/outbound', () => ({
 
 vi.mock('@/lib/action-pages/urls', () => ({
   deeplinkActionPageUrl: vi.fn(() => 'https://app.test/a/book-call?p=signed'),
+}))
+
+vi.mock('@/lib/facebook/capi', () => ({
+  dispatchCapiEvent: mocks.dispatchCapiEvent,
 }))
 
 function makeActionPageConfig() {
@@ -433,6 +438,38 @@ describe('POST /api/action-pages/submit', () => {
 
     expect(res.status).toBe(200)
     expect(updates.leads).toContainEqual({ current_funnel_id: 'funnel_2' })
+  })
+
+  it('calls dispatchCapiEvent with the submission context when CAPI plumbing is reachable', async () => {
+    const { admin } = makeAdminMock()
+    mocks.admin = admin
+    mocks.dispatchCapiEvent.mockClear()
+    const deeplinkParams = buildDeeplinkParams('secret', {
+      slug: 'welcome-form',
+      psid: 'PSID42',
+      pageId: 'page-1',
+      exp: Math.floor(Date.now() / 1000) + 60,
+    })
+    const req = makeJsonRequest({
+      slug: 'welcome-form',
+      data: { full_name: 'Ada Lovelace', email: 'ada@example.com' },
+      p: deeplinkParams.get('p'),
+      g: deeplinkParams.get('g'),
+      e: deeplinkParams.get('e'),
+      t: deeplinkParams.get('t'),
+    })
+    const res = await POST(req as any)
+    expect(res.status).toBe(200)
+    expect(mocks.dispatchCapiEvent).toHaveBeenCalledTimes(1)
+    const call = mocks.dispatchCapiEvent.mock.calls[0][0]
+    expect(call).toMatchObject({
+      userId: 'user_1',
+      actionPageKind: 'form',
+      actionPageSlug: 'welcome-form',
+      outcome: 'submitted',
+      psid: 'PSID42',
+      pageRowId: 'page-1',
+    })
   })
 
   it('moves by default stage and sends outcome message plus attached action page', async () => {

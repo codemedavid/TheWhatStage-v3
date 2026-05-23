@@ -19,6 +19,7 @@ import { getDefaultStageKind, resolveDefaultStageId } from '@/lib/action-pages/d
 import { createFromSubmission, snapshotMethod } from '@/lib/order-payments/server'
 import type { PaymentMethod } from '@/lib/payment-methods/types'
 import { convertVisitorCart } from '@/lib/action-pages/visitor-cart'
+import { dispatchCapiEvent } from '@/lib/facebook/capi'
 
 export const dynamic = 'force-dynamic'
 
@@ -550,6 +551,39 @@ export async function POST(req: NextRequest) {
       leadId: leadId ?? null,
       threadId: messengerThreadId ?? null,
     }).catch((e) => console.error('[action-pages.submit] dispatchSubmissionReceived threw', e))
+  }
+
+  // Fire Conversions API event for Meta. Best-effort — never blocks the response.
+  if (subInsert?.id) {
+    dispatchCapiEvent({
+      admin,
+      userId: page.user_id,
+      submissionId: subInsert.id,
+      actionPageId: page.id,
+      actionPageKind: page.kind as ActionPageKind,
+      actionPageSlug: page.slug,
+      outcome: parsed.outcome,
+      psid,
+      pageRowId: fbPageId,
+      parsedData: parsed.data,
+      pageConfig: page.config,
+      leadId,
+      clientIp: ip,
+      clientUserAgent: ua,
+      submissionCreatedAt: new Date(),
+      businessOrderId,
+      catalogOrder: catalogOrderResult
+        ? {
+            subtotal: catalogOrderResult.subtotal,
+            currency: catalogOrderResult.currency,
+            lines: catalogOrderResult.lines.map((l) => ({
+              business_item_id: l.business_item_id,
+              quantity: l.quantity,
+            })),
+            paymentStatus: catalogOrderResult.paymentStatus,
+          }
+        : null,
+    }).catch((e) => console.error('[action-pages.submit] dispatchCapiEvent threw', e))
   }
 
   // For booking submissions: persist a structured booking_events row (A1/A2)
