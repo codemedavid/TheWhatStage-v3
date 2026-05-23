@@ -5,7 +5,6 @@ type LogRow = {
   skip_reason: string | null
   event_name: string | null
   http_status: number | null
-  fb_trace_id: string | null
   page_name: string | null
   error_message: string | null
 }

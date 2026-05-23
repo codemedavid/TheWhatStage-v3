@@ -64,7 +64,7 @@ export default async function FacebookSettingsPage({
 
       const { data: capiLogs } = await supabase
         .from('capi_event_logs')
-        .select('id, created_at, status, skip_reason, event_name, http_status, fb_trace_id, error_message, page_id')
+        .select('id, created_at, status, skip_reason, event_name, http_status, error_message, page_id')
         .eq('user_id', session.userId)
         .order('created_at', { ascending: false })
         .limit(20)
@@ -77,7 +77,6 @@ export default async function FacebookSettingsPage({
         skip_reason: row.skip_reason,
         event_name: row.event_name,
         http_status: row.http_status,
-        fb_trace_id: row.fb_trace_id,
         error_message: row.error_message,
         page_name: row.page_id ? pageNameById.get(row.page_id) ?? null : null,
       }))
