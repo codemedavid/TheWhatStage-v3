@@ -403,6 +403,7 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
         void appendLeadContacts(admin, leadIdForContacts, {
           phones: detectedPhones,
           emails: detectedEmails,
+          source: 'messenger',
         }).catch((e) => console.warn('[messenger.worker] appendLeadContacts failed', e))
       }
     }

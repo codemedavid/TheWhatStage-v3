@@ -456,7 +456,7 @@ export async function POST(req: NextRequest) {
   if (leadId) {
     try {
       const contacts = extractContactsFromSubmission(page.kind, parsed.data, page.config)
-      await appendLeadContacts(admin, leadId, contacts)
+      await appendLeadContacts(admin, leadId, { ...contacts, source: page.kind as 'form' | 'booking' | 'catalog' })
     } catch (e) {
       console.warn('[action-pages.submit] contact append failed', {
         leadId,
