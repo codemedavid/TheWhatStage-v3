@@ -18,6 +18,7 @@ import {
   duplicateTemplate,
   listCategories,
   refreshTemplateStatus,
+  resetRejectedTemplates,
   setTemplateCategories,
   submitTemplateForReview,
   updateTemplate,
@@ -205,22 +206,22 @@ export function TemplatesClient({ initialTemplates, initialCategories }: Props) 
       footer: draft.footer,
     }
     startTransition(async () => {
-      try {
-        let id: string
-        if (draft.id) {
-          await updateTemplate(draft.id, input)
-          id = draft.id
-        } else {
-          id = await createTemplate(input)
-        }
-        await setTemplateCategories(id, draftCategoryIds)
-        if (draft.id) {
-          window.location.reload()
-        } else {
-          window.location.href = `/dashboard/templates?selected=${id}`
-        }
-      } catch (e) {
-        setError(e instanceof Error ? e.message : String(e))
+      let id: string
+      if (draft.id) {
+        const r = await updateTemplate(draft.id, input)
+        if (!r.ok) { setError(r.error); return }
+        id = draft.id
+      } else {
+        const r = await createTemplate(input)
+        if (!r.ok) { setError(r.error); return }
+        id = r.data.id
+      }
+      const c = await setTemplateCategories(id, draftCategoryIds)
+      if (!c.ok) { setError(c.error); return }
+      if (draft.id) {
+        window.location.reload()
+      } else {
+        window.location.href = `/dashboard/templates?selected=${id}`
       }
     })
   }
@@ -229,17 +230,14 @@ export function TemplatesClient({ initialTemplates, initialCategories }: Props) 
     if (!draft.id) return
     if (!confirm('Delete this template? This cannot be undone.')) return
     startTransition(async () => {
-      try {
-        await deleteTemplate(draft.id!)
-        setTemplates((prev) => prev.filter((t) => t.id !== draft.id))
-        const next = templates.find((t) => t.id !== draft.id) ?? null
-        if (next) selectTemplate(next)
-        else {
-          setSelectedId(null)
-          setDraft(emptyDraft())
-        }
-      } catch (e) {
-        setError(e instanceof Error ? e.message : String(e))
+      const r = await deleteTemplate(draft.id!)
+      if (!r.ok) { setError(r.error); return }
+      setTemplates((prev) => prev.filter((t) => t.id !== draft.id))
+      const next = templates.find((t) => t.id !== draft.id) ?? null
+      if (next) selectTemplate(next)
+      else {
+        setSelectedId(null)
+        setDraft(emptyDraft())
       }
     })
   }
@@ -247,14 +245,9 @@ export function TemplatesClient({ initialTemplates, initialCategories }: Props) 
   function handleDuplicate() {
     if (!draft.id) return
     startTransition(async () => {
-      try {
-        const newId = await duplicateTemplate(draft.id!)
-        // Lightweight refetch via reload — duplicate copies many fields and
-        // we'd rather not reproduce that logic on the client.
-        window.location.href = `/dashboard/templates?selected=${newId}`
-      } catch (e) {
-        setError(e instanceof Error ? e.message : String(e))
-      }
+      const r = await duplicateTemplate(draft.id!)
+      if (!r.ok) { setError(r.error); return }
+      window.location.href = `/dashboard/templates?selected=${r.data.id}`
     })
   }
 
@@ -262,15 +255,12 @@ export function TemplatesClient({ initialTemplates, initialCategories }: Props) 
     if (!draft.id) return
     if (!confirm('Submit this template to Meta for review? The body will be locked while pending.')) return
     startTransition(async () => {
-      try {
-        await submitTemplateForReview(draft.id!)
-        // Reload to pick up the canonical status returned by Meta — utility
-        // templates often come back as 'approved' immediately, so we can't
-        // optimistically assume 'pending' here.
-        window.location.reload()
-      } catch (e) {
-        setError(e instanceof Error ? e.message : String(e))
-      }
+      const r = await submitTemplateForReview(draft.id!)
+      if (!r.ok) { setError(r.error); return }
+      // Reload to pick up the canonical status returned by Meta — utility
+      // templates often come back as 'approved' immediately, so we can't
+      // optimistically assume 'pending' here.
+      window.location.reload()
     })
   }
 
@@ -278,12 +268,20 @@ export function TemplatesClient({ initialTemplates, initialCategories }: Props) 
     if (!draft.id) return
     setError(null)
     startTransition(async () => {
-      try {
-        await refreshTemplateStatus(draft.id!)
-        window.location.reload()
-      } catch (e) {
-        setError(e instanceof Error ? e.message : String(e))
-      }
+      const r = await refreshTemplateStatus(draft.id!)
+      if (!r.ok) { setError(r.error); return }
+      window.location.reload()
+    })
+  }
+
+  function handleResetRejected() {
+    const count = templates.filter((t) => t.meta_status === 'rejected').length
+    if (count === 0) return
+    if (!confirm(`Move ${count} rejected template${count === 1 ? '' : 's'} back to draft? You can re-submit them once your Facebook app has the right permissions.`)) return
+    startTransition(async () => {
+      const r = await resetRejectedTemplates()
+      if (!r.ok) { setError(r.error); return }
+      window.location.reload()
     })
   }
 
@@ -356,17 +354,14 @@ export function TemplatesClient({ initialTemplates, initialCategories }: Props) 
                       title="Delete category"
                       onClick={async () => {
                         if (!confirm(`Delete category "${c.label}"? Templates tagged with it will be untagged.`)) return
-                        try {
-                          await deleteCategory(c.id)
-                          setCategories((prev) => prev.filter((x) => x.id !== c.id))
-                          setSelectedCategoryIds((prev) => prev.filter((x) => x !== c.id))
-                          setDraftCategoryIds((prev) => prev.filter((x) => x !== c.id))
-                          setTemplates((prev) =>
-                            prev.map((t) => ({ ...t, categories: t.categories.filter((x) => x.id !== c.id) })),
-                          )
-                        } catch (e) {
-                          setError(e instanceof Error ? e.message : String(e))
-                        }
+                        const r = await deleteCategory(c.id)
+                        if (!r.ok) { setError(r.error); return }
+                        setCategories((prev) => prev.filter((x) => x.id !== c.id))
+                        setSelectedCategoryIds((prev) => prev.filter((x) => x !== c.id))
+                        setDraftCategoryIds((prev) => prev.filter((x) => x !== c.id))
+                        setTemplates((prev) =>
+                          prev.map((t) => ({ ...t, categories: t.categories.filter((x) => x.id !== c.id) })),
+                        )
                       }}
                       style={{
                         border: 'none', background: 'transparent', color: S.ink4,
@@ -388,16 +383,13 @@ export function TemplatesClient({ initialTemplates, initialCategories }: Props) 
                   onKeyDown={async (e) => {
                     if (e.key === 'Escape') { setShowNewCategory(false); setNewCategoryLabel('') }
                     if (e.key === 'Enter') {
-                      try {
-                        const id = await createCategory(newCategoryLabel)
-                        const next = await listCategories()
-                        setCategories(next)
-                        setShowNewCategory(false)
-                        setNewCategoryLabel('')
-                        setSelectedCategoryIds((prev) => [...prev, id])
-                      } catch (err) {
-                        setError(err instanceof Error ? err.message : String(err))
-                      }
+                      const r = await createCategory(newCategoryLabel)
+                      if (!r.ok) { setError(r.error); return }
+                      const next = await listCategories()
+                      setCategories(next)
+                      setShowNewCategory(false)
+                      setNewCategoryLabel('')
+                      setSelectedCategoryIds((prev) => [...prev, r.data.id])
                     }
                   }}
                   placeholder="New category"
@@ -432,6 +424,45 @@ export function TemplatesClient({ initialTemplates, initialCategories }: Props) 
             <option value="all">All ({templates.length})</option>
           </select>
         </div>
+
+        {/* Reset banner: only shown when there are rejected templates AND the
+            user is currently looking at them. Bulk resubmission only makes
+            sense after the underlying cause (e.g. an App permission gap) is
+            fixed, so we expose this as an explicit action rather than auto-
+            retrying anything. */}
+        {statusFilter === 'rejected' &&
+          templates.some((t) => t.meta_status === 'rejected') && (
+            <div
+              style={{
+                background: S.warnSoft,
+                color: S.warn,
+                border: `1px solid ${S.border}`,
+                borderRadius: 6,
+                padding: '8px 10px',
+                marginBottom: 10,
+                fontSize: 11,
+                lineHeight: 1.4,
+              }}
+            >
+              <div style={{ marginBottom: 6 }}>
+                Meta rejected these templates. Open one to see the reason — a
+                common cause is the Facebook app missing the
+                {' '}<code>pages_utility_messaging</code> permission.
+              </div>
+              <button
+                onClick={handleResetRejected}
+                disabled={pending}
+                style={{
+                  ...btnSecondary,
+                  padding: '4px 10px',
+                  fontSize: 11,
+                }}
+              >
+                Move all rejected back to draft
+              </button>
+            </div>
+          )}
+
         <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
           {visibleTemplates.length === 0 && (
             <li style={{ fontSize: 12, color: S.ink3, padding: '8px 4px' }}>
