@@ -9,7 +9,7 @@
 alter table public.facebook_pages
   add column capi_enabled         boolean not null default false,
   add column capi_dataset_id      text,
-  add column capi_access_token    text,
+  add column capi_access_token    text,   -- AES-256-GCM encrypted; see src/lib/facebook/crypto.ts
   add column capi_test_event_code text;
 
 alter table public.facebook_pages
@@ -54,6 +54,9 @@ create index capi_event_logs_event_id_idx on public.capi_event_logs (event_id);
 
 alter table public.capi_event_logs enable row level security;
 
+-- INSERT is intentionally omitted for the 'authenticated' role.
+-- All writes come from the server-side admin client (service_role),
+-- which bypasses RLS. Authenticated users may only SELECT their own rows.
 create policy capi_event_logs_owner_read on public.capi_event_logs
   for select to authenticated using (user_id = auth.uid());
 
