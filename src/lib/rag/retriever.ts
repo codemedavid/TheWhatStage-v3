@@ -8,6 +8,7 @@ export interface RetrievedChunk {
   document_id: string | null;
   faq_id: string | null;
   business_item_id?: string | null;
+  payment_method_id?: string | null;
   content: string;
   heading_path: string | null;
 }
@@ -15,6 +16,7 @@ export interface RetrievedChunk {
 type RawRetrievedChunk = Omit<RetrievedChunk, 'id'> & {
   id?: string;
   chunk_id?: string;
+  payment_method_id?: string | null;
 };
 
 export interface RetrievalContext {
@@ -45,6 +47,7 @@ async function searchOnce(
   deps: RetrieverDeps,
   userId: string,
   query: string,
+  paymentMethodIds?: string[] | null,
 ): Promise<RetrievedChunk[]> {
   const tEmbed = Date.now();
   const qvec = await deps.embedder.embed(query);
@@ -58,6 +61,7 @@ async function searchOnce(
     p_query_text: query,
     p_query_embed: qvec,
     p_match_limit: ragConfig.retrievalLimit,
+    p_payment_method_ids: paymentMethodIds ?? null,
   });
   console.log('[rag.timing] rpc', { ms: Date.now() - tRpc });
   if (error) throw new Error(`hybrid_search failed: ${error.message ?? error}`);
@@ -67,6 +71,7 @@ async function searchOnce(
       document_id: row.document_id,
       faq_id: row.faq_id,
       business_item_id: row.business_item_id,
+      payment_method_id: row.payment_method_id ?? null,
       content: row.content,
       heading_path: row.heading_path,
     }))
@@ -128,12 +133,12 @@ const emptyPass = (): GradedPass => ({
 
 export async function retrieve(
   deps: RetrieverDeps,
-  args: { userId: string; query: string },
+  args: { userId: string; query: string; paymentMethodIds?: string[] | null },
 ): Promise<RetrievalContext> {
   const high = ragConfig.cragThreshold;
   const low = Math.max(0, high - 0.2);
 
-  const candidates = await searchOnce(deps, args.userId, args.query);
+  const candidates = await searchOnce(deps, args.userId, args.query, args.paymentMethodIds);
   const firstPass: GradedPass =
     candidates.length === 0
       ? emptyPass()
@@ -160,7 +165,7 @@ export async function retrieve(
     const rewritten = await Promise.race([rewritePromise, timeoutPromise]);
     console.log('[rag.timing] rewrite', { ms: Date.now() - tRewrite, gotRewrite: !!rewritten });
     if (rewritten && rewritten !== args.query.trim()) {
-      const second = await searchOnce(deps, args.userId, rewritten);
+      const second = await searchOnce(deps, args.userId, rewritten, args.paymentMethodIds);
       const secondPass: GradedPass =
         second.length === 0
           ? emptyPass()

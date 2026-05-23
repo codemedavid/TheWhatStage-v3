@@ -17,6 +17,7 @@ import { selectMediaForReply, type SelectedMediaAsset } from '@/lib/media/select
 import { buildMediaContextBlock } from '@/lib/media/prompt'
 import { logChatbotUsage, type AnswerHistory, type AnswerOptions, type AnswerResult } from './answer'
 import { decideForceSend } from '@/lib/action-pages/force-send'
+import { paymentEnumBlock } from '@/lib/chatbot/payment-enum'
 
 export interface StageBrief {
   id: string
@@ -94,6 +95,7 @@ export async function answerWithClassification(
     activeCatalogPageId?: string | null
     /** Same idea, but for a realestate action page — gates `recommend_property`. */
     activeRealestatePageId?: string | null
+    activeSalesPageId?: string | null
     leadId?: string | null
     threadId?: string | null
   } = {},
@@ -114,6 +116,39 @@ export async function answerWithClassification(
   const embedder = createEmbedder()
   const llm = new HfRouterLlm()
 
+  // Resolve which action page (if any) the lead is currently on, so we can
+  // scope payment methods and pass the page title to the enum block.
+  const activePageId =
+    options.activeCatalogPageId ??
+    options.activeSalesPageId ??
+    options.activeRealestatePageId ??
+    null
+
+  let activePaymentMethodIds: string[] | null = null
+  let activePageTitle: string | null = null
+
+  if (activePageId) {
+    const { data: pageRow } = await supabase
+      .from('action_pages')
+      .select('title, config')
+      .eq('id', activePageId)
+      .maybeSingle()
+    if (pageRow) {
+      activePageTitle = pageRow.title ?? null
+      const cfg = (pageRow.config ?? {}) as { payment_method_ids?: string[] }
+      if (Array.isArray(cfg.payment_method_ids) && cfg.payment_method_ids.length > 0) {
+        activePaymentMethodIds = cfg.payment_method_ids
+      }
+    }
+  }
+
+  const paymentBlock = await paymentEnumBlock(
+    supabase, userId, activePageTitle, activePaymentMethodIds,
+  ).catch((err) => {
+    console.warn('[classify] paymentEnumBlock failed', err)
+    return ''
+  })
+
   const ctx = await retrieve(
     {
       client: supabase,
@@ -121,7 +156,7 @@ export async function answerWithClassification(
       rewriteQuery: (q) => llm.rewriteQuery(q),
       rpcName: options.rpcName,
     },
-    { userId, query: message },
+    { userId, query: message, paymentMethodIds: activePaymentMethodIds },
   )
 
   const built = buildPrompt({
@@ -130,6 +165,7 @@ export async function answerWithClassification(
     config,
     maxContext: config.maxContext,
     conversationSummary: options.conversationSummary,
+    paymentEnumBlock: paymentBlock,
   })
 
   const actionPages = options.actionPages ?? []
