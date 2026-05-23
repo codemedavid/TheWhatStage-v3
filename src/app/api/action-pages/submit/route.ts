@@ -795,6 +795,7 @@ export async function POST(req: NextRequest) {
 interface CatalogOrderResult {
   orderId: string
   lines: Array<{
+    business_item_id: string
     title_snapshot: string
     quantity: number
     unit_amount: number
@@ -805,6 +806,7 @@ interface CatalogOrderResult {
   currency: string
   customer: { name: string | null; phone: string | null; email: string | null; notes: string | null }
   customFields: Record<string, string>
+  paymentStatus: 'unpaid' | 'pending' | 'paid'
 }
 
 function buildOrderEcho(order: CatalogOrderResult, notifyText: string | undefined): string {
@@ -982,7 +984,14 @@ async function createBusinessOrderFromCatalog(args: {
   }
   return {
     orderId: String(orderId),
-    lines,
+    lines: lines.map((l) => ({
+      business_item_id: l.business_item_id,
+      title_snapshot: l.title_snapshot,
+      quantity: l.quantity,
+      unit_amount: l.unit_amount,
+      line_total_amount: l.line_total_amount,
+      currency: l.currency,
+    })),
     subtotal,
     currency,
     customer: {
@@ -992,6 +1001,7 @@ async function createBusinessOrderFromCatalog(args: {
       notes: (customer.notes as string | null) ?? null,
     },
     customFields,
+    paymentStatus: paymentStatus as 'unpaid' | 'pending' | 'paid',
   }
 }
 
