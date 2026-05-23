@@ -348,6 +348,9 @@ export async function fetchContactLeadsPage(
   if (params.contact_sort === 'name_asc') {
     query = query.order('name', { ascending: true })
   } else {
+    // DB-level fallback: order by updated_at. For recent_contact sort, this is
+    // overridden in-memory below for the current page. Cross-page ordering under
+    // recent_contact is approximate (updated_at proxy) — acceptable for MVP.
     query = query.order('updated_at', { ascending: false })
   }
 

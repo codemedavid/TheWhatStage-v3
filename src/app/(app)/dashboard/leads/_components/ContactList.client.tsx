@@ -2,6 +2,8 @@
 import { useState } from 'react'
 import { LeadDrawer } from './LeadDrawer'
 import type { ContactLeadRow, StageRow, FieldDefRow, CampaignOption } from '../_lib/queries'
+import { Pagination } from './Pagination'
+import type { LeadsQuery } from '../_lib/schemas'
 
 function relativeAge(iso: string | null): string {
   if (!iso) return '—'
@@ -27,7 +29,7 @@ function sourceLabel(s: string): string {
 }
 
 export function ContactListClient({
-  rows, total, stages, fieldDefs, campaigns, page,
+  rows, total, stages, fieldDefs, campaigns, page, params,
 }: {
   rows: ContactLeadRow[]
   total: number
@@ -35,6 +37,7 @@ export function ContactListClient({
   fieldDefs: FieldDefRow[]
   campaigns: CampaignOption[]
   page: number
+  params: LeadsQuery
 }) {
   const [editing, setEditing] = useState<ContactLeadRow | null>(null)
 
@@ -163,9 +166,7 @@ export function ContactListClient({
         </table>
       </div>
 
-      <div className="flex items-center justify-between px-3 py-2 text-[12px]" style={{ color: 'var(--lead-muted)', borderTop: '1px solid var(--lead-line)' }}>
-        <span>Page {page} · {total} {total === 1 ? 'lead' : 'leads'}</span>
-      </div>
+      <Pagination total={total} page={page} makeHref={(p) => buildHref(params, p)} />
 
       {editing && (
         <LeadDrawer
@@ -179,4 +180,16 @@ export function ContactListClient({
       )}
     </div>
   )
+}
+
+function buildHref(params: LeadsQuery, page: number) {
+  const u = new URLSearchParams()
+  u.set('view', 'contact')
+  if (params.q) u.set('q', params.q)
+  if (params.from) u.set('from', params.from)
+  if (params.to) u.set('to', params.to)
+  u.set('contact_filter', params.contact_filter)
+  u.set('contact_sort', params.contact_sort)
+  u.set('page', String(page))
+  return `/dashboard/leads?${u.toString()}`
 }

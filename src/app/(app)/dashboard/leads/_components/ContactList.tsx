@@ -24,6 +24,7 @@ export async function ContactList({
       fieldDefs={fieldDefs}
       campaigns={campaigns}
       page={params.page}
+      params={params}
     />
   )
 }
