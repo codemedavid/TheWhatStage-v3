@@ -7,6 +7,7 @@ import {
   hashList,
   buildUserData,
   buildCustomData,
+  buildEventEnvelope,
 } from './capi-payload'
 
 describe('normalizeEmail', () => {
@@ -200,5 +201,43 @@ describe('buildCustomData', () => {
       catalogOrder: null,
     })
     expect(cd).toEqual({ content_ids: ['ap-3'], content_type: 'product' })
+  })
+})
+
+describe('buildEventEnvelope', () => {
+  it('assembles a complete event with all fields', () => {
+    const userData = { page_id: 'P', page_scoped_user_id: 'X' }
+    const customData = { content_ids: ['ap-1'], content_type: 'product' as const }
+    const env = buildEventEnvelope({
+      eventName: 'Lead',
+      eventId: 'sub-1',
+      eventTimeMs: 1716480000000, // 2024-05-23T16:00:00Z
+      eventSourceUrl: 'https://app.test/a/welcome',
+      userData,
+      customData,
+    })
+    expect(env).toEqual({
+      event_name: 'Lead',
+      event_time: 1716480000,
+      event_id: 'sub-1',
+      action_source: 'business_messaging',
+      messaging_channel: 'messenger',
+      event_source_url: 'https://app.test/a/welcome',
+      user_data: userData,
+      custom_data: customData,
+    })
+  })
+
+  it('omits event_source_url and custom_data when not provided', () => {
+    const env = buildEventEnvelope({
+      eventName: 'Lead',
+      eventId: 'sub-1',
+      eventTimeMs: 1716480000000,
+      eventSourceUrl: null,
+      userData: { page_id: 'P', page_scoped_user_id: 'X' },
+      customData: null,
+    })
+    expect(env).not.toHaveProperty('event_source_url')
+    expect(env).not.toHaveProperty('custom_data')
   })
 })

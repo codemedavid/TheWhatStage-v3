@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import type { ActionPageKind } from '@/lib/action-pages/kinds'
+import type { CapiStandardEvent } from './capi-mapping'
 
 export function sha256(s: string): string {
   return createHash('sha256').update(s, 'utf8').digest('hex')
@@ -168,4 +169,38 @@ export function buildCustomData(input: BuildCustomDataInput): CustomData {
     content_ids: [input.actionPageId],
     content_type: 'product',
   }
+}
+
+export interface CapiEvent {
+  event_name: CapiStandardEvent
+  event_time: number
+  event_id: string
+  action_source: 'business_messaging'
+  messaging_channel: 'messenger'
+  event_source_url?: string
+  user_data: UserData
+  custom_data?: CustomData
+}
+
+export interface BuildEnvelopeInput {
+  eventName: CapiStandardEvent
+  eventId: string
+  eventTimeMs: number
+  eventSourceUrl: string | null
+  userData: UserData
+  customData: CustomData | null
+}
+
+export function buildEventEnvelope(input: BuildEnvelopeInput): CapiEvent {
+  const out: CapiEvent = {
+    event_name: input.eventName,
+    event_time: Math.floor(input.eventTimeMs / 1000),
+    event_id: input.eventId,
+    action_source: 'business_messaging',
+    messaging_channel: 'messenger',
+    user_data: input.userData,
+  }
+  if (input.eventSourceUrl) out.event_source_url = input.eventSourceUrl
+  if (input.customData) out.custom_data = input.customData
+  return out
 }
