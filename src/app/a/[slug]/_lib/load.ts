@@ -33,7 +33,7 @@ async function fetchPublishedPageBySlug(
   const { data, error } = await admin
     .from('action_pages')
     .select(
-      'id, user_id, kind, slug, title, description, status, config, pipeline_rules, notification_template, cta_label, bot_send_instructions, signing_secret, created_at, updated_at',
+      'id, user_id, kind, slug, title, description, status, config, pipeline_rules, capi_event_name_override, notification_template, cta_label, bot_send_instructions, signing_secret, created_at, updated_at',
     )
     .eq('slug', slug)
     .maybeSingle()
@@ -51,6 +51,7 @@ async function fetchPublishedPageBySlug(
     status: data.status as ActionPageRow['status'],
     config: (data.config as Record<string, unknown>) ?? {},
     pipeline_rules: (data.pipeline_rules as ActionPageRow['pipeline_rules']) ?? [],
+    capi_event_name_override: (data.capi_event_name_override as string | null) ?? null,
     notification_template:
       (data.notification_template as ActionPageRow['notification_template']) ?? null,
     cta_label: (data.cta_label as string | null) ?? null,

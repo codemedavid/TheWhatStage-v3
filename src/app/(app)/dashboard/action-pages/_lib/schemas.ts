@@ -31,6 +31,15 @@ export const UpdateActionPageInput = z.object({
   slug: slug,
   status: ActionPageStatus,
   pipeline_rules: z.array(PipelineRule).max(20),
+  capi_event_name_override: z
+    .enum([
+      'Lead', 'Schedule', 'Purchase', 'InitiateCheckout',
+      'CompleteRegistration', 'Contact', 'Subscribe',
+      'SubmitApplication', 'AddToCart', 'ViewContent', 'SKIP',
+    ])
+    .nullable()
+    .optional()
+    .default(null),
   notification_template: z
     .object({
       text: z.string().max(640).optional(),

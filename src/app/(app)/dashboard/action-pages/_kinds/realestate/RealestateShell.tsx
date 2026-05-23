@@ -452,6 +452,31 @@ function WorkflowPanel({
       </div>
 
       <Field
+        label="CAPI event override"
+        optional
+        help="Which Meta Conversions API event to fire on submission. Leave empty to use the default (Lead / Schedule)."
+      >
+        <select
+          name="capi_event_name_override"
+          defaultValue={page.capi_event_name_override ?? ''}
+          className="w-full rounded-md border border-zinc-200 bg-white px-3 py-2 text-[13px] text-zinc-900 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+        >
+          <option value="">Use default (Lead / Schedule)</option>
+          <option value="Lead">Lead</option>
+          <option value="Schedule">Schedule</option>
+          <option value="Purchase">Purchase</option>
+          <option value="InitiateCheckout">InitiateCheckout</option>
+          <option value="CompleteRegistration">CompleteRegistration</option>
+          <option value="Contact">Contact</option>
+          <option value="Subscribe">Subscribe</option>
+          <option value="SubmitApplication">SubmitApplication</option>
+          <option value="AddToCart">AddToCart</option>
+          <option value="ViewContent">ViewContent</option>
+          <option value="SKIP">Don&apos;t send</option>
+        </select>
+      </Field>
+
+      <Field
         label="Messenger reply"
         optional
         help="Plain-text confirmation sent in Messenger after a successful submission."

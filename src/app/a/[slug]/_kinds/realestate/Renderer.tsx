@@ -53,6 +53,7 @@ interface LinkedPage {
   status: ActionPageRow['status']
   config: Record<string, unknown>
   pipeline_rules: ActionPageRow['pipeline_rules']
+  capi_event_name_override: string | null
   notification_template: ActionPageRow['notification_template']
   cta_label: string | null
   bot_send_instructions: string | null
@@ -70,7 +71,7 @@ async function loadLinkedPages(
   const { data, error } = await admin
     .from('action_pages')
     .select(
-      'id, user_id, kind, slug, title, description, status, config, pipeline_rules, notification_template, cta_label, bot_send_instructions, signing_secret, created_at, updated_at',
+      'id, user_id, kind, slug, title, description, status, config, pipeline_rules, capi_event_name_override, notification_template, cta_label, bot_send_instructions, signing_secret, created_at, updated_at',
     )
     .in('id', ids)
     .eq('status', 'published')
@@ -89,6 +90,7 @@ async function loadLinkedPages(
       status: row.status,
       config: row.config ?? {},
       pipeline_rules: row.pipeline_rules ?? [],
+      capi_event_name_override: row.capi_event_name_override ?? null,
       notification_template: row.notification_template ?? null,
       cta_label: row.cta_label ?? null,
       bot_send_instructions: row.bot_send_instructions ?? null,

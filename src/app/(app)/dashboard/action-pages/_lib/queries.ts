@@ -12,6 +12,7 @@ export interface ActionPageRow {
   status: 'draft' | 'published' | 'archived'
   config: Record<string, unknown>
   pipeline_rules: PipelineRule[]
+  capi_event_name_override: string | null
   notification_template: { text?: string } | null
   cta_label: string | null
   bot_send_instructions: string | null
@@ -74,7 +75,7 @@ export async function fetchActionPage(
   const { data, error } = await supabase
     .from('action_pages')
     .select(
-      'id, kind, slug, title, description, status, config, pipeline_rules, notification_template, cta_label, bot_send_instructions, signing_secret, created_at, updated_at',
+      'id, kind, slug, title, description, status, config, pipeline_rules, capi_event_name_override, notification_template, cta_label, bot_send_instructions, signing_secret, created_at, updated_at',
     )
     .eq('id', id)
     .eq('user_id', userId)

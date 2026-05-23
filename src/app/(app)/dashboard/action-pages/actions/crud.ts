@@ -102,6 +102,7 @@ export async function updateActionPage(formData: FormData): Promise<void> {
   } catch {
     pipeline_rules = []
   }
+  const capiEventRaw = String(formData.get('capi_event_name_override') ?? '').trim() || null
   const notificationText = String(formData.get('notification_text') ?? '').trim()
   const ctaLabelRaw = String(formData.get('cta_label') ?? '').trim()
   const botInstructionsRaw = String(formData.get('bot_send_instructions') ?? '').trim()
@@ -125,6 +126,7 @@ export async function updateActionPage(formData: FormData): Promise<void> {
       .toLowerCase(),
     status: formData.get('status'),
     pipeline_rules,
+    capi_event_name_override: capiEventRaw,
     notification_template: notificationText ? { text: notificationText } : null,
     cta_label: ctaLabelRaw ? ctaLabelRaw.slice(0, 50) : null,
     bot_send_instructions: botInstructionsRaw ? botInstructionsRaw.slice(0, 2000) : null,
@@ -158,6 +160,7 @@ export async function updateActionPage(formData: FormData): Promise<void> {
     slug: parsed.data.slug,
     status: parsed.data.status,
     pipeline_rules: parsed.data.pipeline_rules,
+    capi_event_name_override: parsed.data.capi_event_name_override ?? null,
     notification_template: parsed.data.notification_template ?? null,
     cta_label: parsed.data.cta_label ?? null,
     bot_send_instructions: parsed.data.bot_send_instructions ?? null,

@@ -603,7 +603,7 @@ async function loadLinkedPages(
   const { data, error } = await admin
     .from('action_pages')
     .select(
-      'id, user_id, kind, slug, title, description, status, config, pipeline_rules, notification_template, cta_label, bot_send_instructions, signing_secret, created_at, updated_at',
+      'id, user_id, kind, slug, title, description, status, config, pipeline_rules, capi_event_name_override, notification_template, cta_label, bot_send_instructions, signing_secret, created_at, updated_at',
     )
     .in('id', ids)
     .eq('status', 'published')
@@ -623,6 +623,7 @@ async function loadLinkedPages(
       status: row.status as ActionPageRow['status'],
       config: (row.config as Record<string, unknown>) ?? {},
       pipeline_rules: (row.pipeline_rules as ActionPageRow['pipeline_rules']) ?? [],
+      capi_event_name_override: (row.capi_event_name_override as string | null) ?? null,
       notification_template:
         (row.notification_template as ActionPageRow['notification_template']) ?? null,
       cta_label: (row.cta_label as string | null) ?? null,

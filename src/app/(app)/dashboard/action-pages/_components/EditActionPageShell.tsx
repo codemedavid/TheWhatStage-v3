@@ -303,6 +303,22 @@ function EditActionPageShellInner({
 
                 <div className="ap-section">
                   <div className="ap-section-head">
+                    <h2>Conversion event</h2>
+                    <p>
+                      Override which Meta CAPI event is fired on submission.
+                      Leave empty to use the default for this page type.
+                    </p>
+                  </div>
+                  <div className="ap-section-body">
+                    <CapiEventField
+                      kind={page.kind}
+                      defaultValue={page.capi_event_name_override ?? ''}
+                    />
+                  </div>
+                </div>
+
+                <div className="ap-section">
+                  <div className="ap-section-head">
                     <h2>Messenger echo</h2>
                     <p>
                       Plain-text confirmation sent back in Messenger after a
@@ -678,6 +694,61 @@ function CtaField({ defaultValue }: { defaultValue: string }) {
         placeholder="Book a demo"
         className="ap-input"
       />
+    </Field>
+  )
+}
+
+const CAPI_EVENT_OPTIONS = [
+  'Lead',
+  'Schedule',
+  'Purchase',
+  'InitiateCheckout',
+  'CompleteRegistration',
+  'Contact',
+  'Subscribe',
+  'SubmitApplication',
+  'AddToCart',
+  'ViewContent',
+  'SKIP',
+] as const
+
+function kindDefaultLabel(kind: string): string {
+  switch (kind) {
+    case 'form': return 'Lead'
+    case 'booking': return 'Schedule'
+    case 'qualification': return 'Lead'
+    case 'sales': return 'InitiateCheckout / Purchase'
+    case 'catalog': return 'InitiateCheckout / Purchase'
+    case 'realestate': return 'Lead / Schedule'
+    default: return 'Lead'
+  }
+}
+
+function CapiEventField({
+  kind,
+  defaultValue,
+}: {
+  kind: string
+  defaultValue: string
+}) {
+  return (
+    <Field
+      label="CAPI event override"
+      optional
+      help="Which Meta Conversions API event to fire when a submission is received."
+    >
+      <select
+        name="capi_event_name_override"
+        defaultValue={defaultValue}
+        className="ap-select"
+      >
+        <option value="">Use default ({kindDefaultLabel(kind)})</option>
+        {CAPI_EVENT_OPTIONS.map((ev) => (
+          <option key={ev} value={ev}>
+            {ev === 'SKIP' ? "Don't send" : ev}
+          </option>
+        ))}
+      </select>
     </Field>
   )
 }
