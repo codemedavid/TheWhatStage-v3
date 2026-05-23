@@ -11,7 +11,7 @@ vi.mock('@/lib/rag/config', () => ({
   ragConfig: { classifierModel: 'fake-model' },
 }))
 
-import { generateFollowupMessage } from './generateMessage'
+import { generateFollowupMessage, buildSystemPromptForTest } from './generateMessage'
 
 describe('generateFollowupMessage', () => {
   beforeEach(() => {
@@ -155,5 +155,30 @@ describe('generateFollowupMessage', () => {
     })
     // Fallback for slot 4 generic.
     expect(text).toBe('Hi Jay, available pa po kayo to chat?')
+  })
+})
+
+describe('buildSystemPrompt — attachmentHint', () => {
+  const baseArgs = {
+    kind: 'real' as const,
+    slot: 2,
+    leadName: 'Maria',
+    personalityBlock: 'Casual Taglish.',
+    recentMessages: [],
+    instruction: 'Share one concrete benefit.',
+  }
+
+  it('omits the attachment block when attachmentHint is empty', () => {
+    const prompt = buildSystemPromptForTest({ ...baseArgs, attachmentHint: '' })
+    expect(prompt).not.toContain('This message will be followed by')
+  })
+
+  it('appends the attachment block when attachmentHint is set', () => {
+    const prompt = buildSystemPromptForTest({
+      ...baseArgs,
+      attachmentHint: 'a card linking to Booking',
+    })
+    expect(prompt).toContain('This message will be followed by: a card linking to Booking')
+    expect(prompt).toContain('do not paste a URL')
   })
 })
