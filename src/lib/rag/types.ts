@@ -1,7 +1,7 @@
 // Shared types for the RAG pipeline. Kept dependency-free so any module
 // (pure or networked) can import them without pulling in clients.
 
-export type SourceKind = 'document' | 'faq' | 'business_item' | 'media_asset';
+export type SourceKind = 'document' | 'faq' | 'business_item' | 'media_asset' | 'payment_method';
 
 export interface ParsedSource {
   kind: SourceKind;
