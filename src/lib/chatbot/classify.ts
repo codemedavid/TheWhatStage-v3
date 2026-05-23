@@ -14,6 +14,7 @@ import {
   type ActionPageRecommendationRules,
 } from './config'
 import { selectMediaForReply, type SelectedMediaAsset } from '@/lib/media/selector'
+import { buildMediaContextBlock } from '@/lib/media/prompt'
 import { logChatbotUsage, type AnswerHistory, type AnswerOptions, type AnswerResult } from './answer'
 import { decideForceSend } from '@/lib/action-pages/force-send'
 
@@ -149,7 +150,6 @@ export async function answerWithClassification(
     ? `# Lead\nThe customer's first name is ${firstName}. Address them by their first name when greeting or when it feels natural.`
     : null
   const leadContext = options.leadContextBlock?.trim()
-  const system = [built.system, stageSystem, leadNameBlock, leadContext].filter(Boolean).join('\n\n')
 
   // Scan ALL retrieved chunks (including grader-rejected ones) for @asset /
   // #folder references — a slug-only paragraph often scores low in the
@@ -159,7 +159,9 @@ export async function answerWithClassification(
     ...ctx.buckets.ambiguous,
     ...ctx.buckets.reject,
   ]
-  const mediaPromise = selectMediaForReply({
+  // Resolve media BEFORE the LLM call so the reply (which is a structured
+  // JSON envelope) can tee up the attached images naturally in its `reply` field.
+  const media = await selectMediaForReply({
     client: supabase,
     embedder,
     userId,
@@ -171,6 +173,10 @@ export async function answerWithClassification(
     console.warn('[classify.media] selection failed', err)
     return [] as SelectedMediaAsset[]
   })
+  const mediaBlock = buildMediaContextBlock(media)
+  const system = [built.system, stageSystem, leadNameBlock, leadContext, mediaBlock]
+    .filter(Boolean)
+    .join('\n\n')
 
   const t0 = Date.now()
   const completion = await llm.completeWithUsage(
@@ -305,10 +311,7 @@ export async function answerWithClassification(
     console.error('[force-send] decideForceSend threw — keeping LLM choice', e)
   }
 
-  const [sourceTitles, media] = await Promise.all([
-    resolveSourceTitles(supabase, userId, built.contextChunkIds),
-    mediaPromise,
-  ])
+  const sourceTitles = await resolveSourceTitles(supabase, userId, built.contextChunkIds)
   console.log('[chatbot.classify] media resolved', {
     userId,
     count: media.length,

@@ -8,6 +8,7 @@ import {
 import { getChatbotConfig, type ChatbotConfig } from './config'
 import { loadPrimaryGoalInstruction } from './primary-goal'
 import { selectMediaForReply, type SelectedMediaAsset } from '@/lib/media/selector'
+import { buildMediaContextBlock } from '@/lib/media/prompt'
 
 export type AnswerHistory = { role: 'user' | 'assistant'; content: string }[]
 
@@ -135,7 +136,13 @@ export async function answer(
   const leadNameBlock = firstName
     ? `# Lead\nThe customer's first name is ${firstName}. Address them by their first name when greeting or when it feels natural.`
     : null
-  const system = [built.system, leadNameBlock, options.leadContextBlock?.trim() || null]
+
+  // Resolve media BEFORE the LLM call so the model can tee up the attached
+  // images naturally instead of producing a reply that ignores them.
+  const media = await mediaPromise
+  const mediaBlock = buildMediaContextBlock(media)
+
+  const system = [built.system, leadNameBlock, options.leadContextBlock?.trim() || null, mediaBlock]
     .filter(Boolean)
     .join('\n\n')
 
@@ -160,10 +167,7 @@ export async function answer(
     ms: Date.now() - t0,
   })
 
-  const [sourceTitles, media] = await Promise.all([
-    resolveSourceTitles(supabase, userId, built.contextChunkIds),
-    mediaPromise,
-  ])
+  const sourceTitles = await resolveSourceTitles(supabase, userId, built.contextChunkIds)
   console.log('[chatbot.answer] media resolved', {
     userId,
     count: media.length,
