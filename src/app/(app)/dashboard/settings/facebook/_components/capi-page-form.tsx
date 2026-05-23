@@ -2,12 +2,8 @@
 
 import { useActionState, useId, useState } from 'react'
 import { useFormStatus } from 'react-dom'
-import {
-  CAPI_FORM_IDLE,
-  saveCapiConfigAction,
-  sendCapiTestEventAction,
-  type CapiFormState,
-} from '../actions'
+import { saveCapiConfigAction, sendCapiTestEventAction } from '../actions'
+import { CAPI_FORM_IDLE, type CapiFormState } from '../_lib/capi-form-state'
 
 type Page = {
   id: string

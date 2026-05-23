@@ -10,6 +10,7 @@ import { subscribePageToWebhook } from '@/lib/facebook/messenger'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { dispatchCapiEvent } from '@/lib/facebook/capi'
 import crypto from 'node:crypto'
+import type { CapiFormState } from './_lib/capi-form-state'
 
 const SETTINGS_PATH = '/dashboard/settings/facebook'
 
@@ -116,13 +117,6 @@ export async function disconnectForm(): Promise<void> {
   }
   revalidatePath(SETTINGS_PATH)
 }
-
-export type CapiFormState =
-  | { status: 'idle' }
-  | { status: 'ok'; message: string }
-  | { status: 'error'; message: string; field?: 'dataset' | 'token' | 'page' | 'general' }
-
-export const CAPI_FORM_IDLE: CapiFormState = { status: 'idle' }
 
 export async function saveCapiConfigAction(
   _prev: CapiFormState,
