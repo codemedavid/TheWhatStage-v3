@@ -3,13 +3,24 @@
 
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 
-const { sendOutboundMock, generateMock, shouldSeedMock } = vi.hoisted(() => ({
+const { sendOutboundMock, generateMock, shouldSeedMock, resolvePolicyMock, mintAssetMock, mintDeeplinkMock } = vi.hoisted(() => ({
   sendOutboundMock: vi.fn(),
   generateMock: vi.fn(),
   shouldSeedMock: vi.fn(),
+  resolvePolicyMock: vi.fn(),
+  mintAssetMock: vi.fn(),
+  mintDeeplinkMock: vi.fn(),
 }))
 
-vi.mock('@/lib/messenger/outbound', () => ({ sendOutbound: sendOutboundMock }))
+vi.mock('@/lib/messenger/outbound', () => ({
+  sendOutbound: sendOutboundMock,
+  resolveSendPolicy: resolvePolicyMock,
+}))
+
+vi.mock('./attachments', () => ({
+  mintMediaAssetUrl:      mintAssetMock,
+  mintActionPageDeeplink: mintDeeplinkMock,
+}))
 vi.mock('@/lib/facebook/crypto', () => ({ decryptToken: (s: string) => `dec:${s}` }))
 vi.mock('@/lib/agent/classifyPolicy', () => ({
   isInsideWindow: (s: string | null) => !!s && Date.now() - new Date(s).getTime() < 24 * 3600_000,
@@ -60,6 +71,8 @@ function makeAdmin(seed: {
         if (table === 'facebook_pages') return { data: seed.page, error: null }
         if (table === 'leads') return { data: seed.lead, error: null }
         if (table === 'chatbot_configs') return { data: seed.chatbot, error: null }
+        if (table === 'media_assets') return { data: { name: 'My asset' }, error: null }
+        if (table === 'action_pages') return { data: { title: 'My page' }, error: null }
         return { data: null, error: null }
       }
       chain.update = (values: unknown) => {
@@ -100,6 +113,16 @@ beforeEach(() => {
   sendOutboundMock.mockReset()
   generateMock.mockReset()
   shouldSeedMock.mockReset()
+  resolvePolicyMock.mockReset()
+  mintAssetMock.mockReset()
+  mintDeeplinkMock.mockReset()
+
+  shouldSeedMock.mockResolvedValue({ ok: true, inboundCount: 1 })
+  generateMock.mockResolvedValue('Hi Maria, balikan lang po.')
+  sendOutboundMock.mockResolvedValue({ sent: true, messageId: 'fbm-1' })
+  resolvePolicyMock.mockResolvedValue({ mode: 'RESPONSE' })
+  mintAssetMock.mockResolvedValue('https://signed/img.jpg')
+  mintDeeplinkMock.mockResolvedValue('https://app/a/booking?psid=p&pid=g&exp=1&sig=x')
 })
 
 describe('handleFollowupSend', () => {
@@ -272,5 +295,123 @@ describe('handleFollowupSend', () => {
     expect(generateMock).toHaveBeenCalledWith(
       expect.objectContaining({ slot: 1, instruction: '' }),
     )
+  })
+})
+
+describe('handleFollowupSend — attachments', () => {
+  function attachSeed(snapshotEntry: Record<string, unknown> = {}) {
+    return {
+      schedule: {
+        id: 's1', user_id: 'u1', lead_id: 'l1', thread_id: 't1', page_id: 'p1',
+        started_at: new Date(Date.now() - 5 * 60_000).toISOString(),
+        next_offset_idx: 0,
+        conversation_kind: 'real' as const,
+        status: 'pending',
+        offsets_snapshot: [{
+          slot: 0,
+          offset_ms: 5 * 60_000,
+          instruction: 'hello',
+          image_media_asset_id: null,
+          action_page_id: null,
+          ...snapshotEntry,
+        }],
+      },
+      thread:  { id: 't1', psid: 'PSID', last_inbound_at: new Date(Date.now() - 60_000).toISOString(), full_name: 'Maria' },
+      page:    { id: 'p1', page_access_token: 'enc-token' },
+      lead:    { name: 'Maria' },
+      chatbot: { persona: null, instructions: null },
+      history: [],
+    }
+  }
+
+  it('sends text → image → button in order when policy is RESPONSE and both attachments are set', async () => {
+    const seed = attachSeed({
+      image_media_asset_id: '11111111-1111-4111-9111-111111111111',
+      action_page_id:        '22222222-2222-4222-9222-222222222222',
+    })
+    const { admin } = makeAdmin(seed)
+    await handleFollowupSend(admin as never, { scheduleId: 's1' })
+
+    expect(sendOutboundMock).toHaveBeenCalledTimes(3)
+    const kinds = sendOutboundMock.mock.calls.map((c: [{ payload: { kind: string } }]) => c[0].payload.kind)
+    expect(kinds).toEqual(['text', 'image', 'button'])
+    expect(sendOutboundMock.mock.calls[1][0].payload).toMatchObject({
+      kind: 'image', imageUrl: 'https://signed/img.jpg',
+    })
+    expect(sendOutboundMock.mock.calls[2][0].payload).toMatchObject({
+      kind: 'button',
+      text: 'Tap below to continue 👇',
+      ctaLabel: 'View',
+      url: 'https://app/a/booking?psid=p&pid=g&exp=1&sig=x',
+    })
+  })
+
+  it('sends text only when policy is HUMAN_AGENT, even with attachments configured', async () => {
+    resolvePolicyMock.mockResolvedValue({ mode: 'HUMAN_AGENT' })
+    const seed = attachSeed({
+      image_media_asset_id: '11111111-1111-4111-9111-111111111111',
+      action_page_id:        '22222222-2222-4222-9222-222222222222',
+    })
+    const { admin } = makeAdmin(seed)
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    await handleFollowupSend(admin as never, { scheduleId: 's1' })
+
+    expect(sendOutboundMock).toHaveBeenCalledTimes(1)
+    expect(sendOutboundMock.mock.calls[0][0].payload.kind).toBe('text')
+    expect(mintAssetMock).not.toHaveBeenCalled()
+    expect(mintDeeplinkMock).not.toHaveBeenCalled()
+    expect(warn).toHaveBeenCalledWith(
+      '[followups.fire] attachments skipped — outside 24h window',
+      expect.objectContaining({ dropped_image: true, dropped_action_page: true }),
+    )
+    warn.mockRestore()
+  })
+
+  it('sends only text + image when action_page_id is null', async () => {
+    const seed = attachSeed({
+      image_media_asset_id: '11111111-1111-4111-9111-111111111111',
+      action_page_id: null,
+    })
+    const { admin } = makeAdmin(seed)
+    await handleFollowupSend(admin as never, { scheduleId: 's1' })
+    const kinds = sendOutboundMock.mock.calls.map((c: [{ payload: { kind: string } }]) => c[0].payload.kind)
+    expect(kinds).toEqual(['text', 'image'])
+  })
+
+  it('skips the image silently when mintMediaAssetUrl returns null', async () => {
+    mintAssetMock.mockResolvedValue(null)
+    const seed = attachSeed({
+      image_media_asset_id: '11111111-1111-4111-9111-111111111111',
+      action_page_id: null,
+    })
+    const { admin } = makeAdmin(seed)
+    await handleFollowupSend(admin as never, { scheduleId: 's1' })
+    const kinds = sendOutboundMock.mock.calls.map((c: [{ payload: { kind: string } }]) => c[0].payload.kind)
+    expect(kinds).toEqual(['text'])
+  })
+
+  it('passes a non-empty attachmentHint to the generator inside the window', async () => {
+    const seed = attachSeed({
+      image_media_asset_id: '11111111-1111-4111-9111-111111111111',
+      action_page_id:        '22222222-2222-4222-9222-222222222222',
+    })
+    const { admin } = makeAdmin(seed)
+    await handleFollowupSend(admin as never, { scheduleId: 's1' })
+    expect(generateMock).toHaveBeenCalledWith(expect.objectContaining({
+      attachmentHint: expect.stringContaining('photo'),
+    }))
+  })
+
+  it('passes empty attachmentHint when policy is HUMAN_AGENT', async () => {
+    resolvePolicyMock.mockResolvedValue({ mode: 'HUMAN_AGENT' })
+    const seed = attachSeed({
+      image_media_asset_id: '11111111-1111-4111-9111-111111111111',
+      action_page_id:        '22222222-2222-4222-9222-222222222222',
+    })
+    const { admin } = makeAdmin(seed)
+    await handleFollowupSend(admin as never, { scheduleId: 's1' })
+    expect(generateMock).toHaveBeenCalledWith(expect.objectContaining({
+      attachmentHint: '',
+    }))
   })
 })

@@ -11,11 +11,16 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { decryptToken } from '@/lib/facebook/crypto'
-import { sendOutbound } from '@/lib/messenger/outbound'
+import { sendOutbound, resolveSendPolicy } from '@/lib/messenger/outbound'
 import { isInsideWindow } from '@/lib/agent/classifyPolicy'
 import { shouldSeed } from './gates'
 import { generateFollowupMessage } from './generateMessage'
+import { mintMediaAssetUrl, mintActionPageDeeplink } from './attachments'
 import type { SnapshotEntry } from './settings'
+
+function insideWindowKind(lastInboundAt: string | null): 'bot' | 'workflow_human_agent' {
+  return isInsideWindow(lastInboundAt) ? 'bot' : 'workflow_human_agent'
+}
 
 interface ScheduleRow {
   id: string
@@ -66,6 +71,9 @@ export async function handleFollowupSend(
     await markDone(admin, schedule.id)
     return
   }
+
+  const imageMediaAssetId = (entry as { image_media_asset_id?: string | null }).image_media_asset_id ?? null
+  const actionPageId      = (entry as { action_page_id?: string | null }).action_page_id ?? null
 
   // Re-check gates: a lead who booked between scheduling and firing should
   // not receive the touchpoint.
@@ -136,6 +144,32 @@ export async function handleFollowupSend(
 
   const leadName = leadRow?.name ?? thread.full_name ?? null
 
+  const policy = await resolveSendPolicy(admin, thread.id, thread.last_inbound_at, insideWindowKind(thread.last_inbound_at))
+  const canAttach = policy.mode === 'RESPONSE'
+
+  let attachmentHint = ''
+  if (canAttach) {
+    const hintParts: string[] = []
+    if (imageMediaAssetId) {
+      const { data: asset } = await admin
+        .from('media_assets')
+        .select('name')
+        .eq('id', imageMediaAssetId)
+        .eq('user_id', schedule.user_id)
+        .maybeSingle<{ name: string }>()
+      if (asset?.name) hintParts.push(`a photo (${asset.name})`)
+    }
+    if (actionPageId) {
+      const { data: pageRow } = await admin
+        .from('action_pages')
+        .select('title')
+        .eq('id', actionPageId)
+        .maybeSingle<{ title: string }>()
+      if (pageRow?.title) hintParts.push(`a card linking to ${pageRow.title}`)
+    }
+    attachmentHint = hintParts.join(' and ')
+  }
+
   const text = await generateFollowupMessage({
     kind: schedule.conversation_kind,
     slot: entry.slot,
@@ -143,6 +177,7 @@ export async function handleFollowupSend(
     personalityBlock,
     recentMessages,
     instruction: entry.instruction ?? '',
+    attachmentHint,
   })
 
   if (!text) {
@@ -187,6 +222,51 @@ export async function handleFollowupSend(
         console.warn('[followups.fire] message insert failed', error.message)
       }
     })
+
+  if (canAttach) {
+    if (imageMediaAssetId) {
+      const imageUrl = await mintMediaAssetUrl(admin, imageMediaAssetId, schedule.user_id)
+      if (imageUrl) {
+        try {
+          await sendOutbound({
+            admin,
+            thread: { id: thread.id, psid: thread.psid, last_inbound_at: thread.last_inbound_at },
+            pageToken,
+            payload: { kind: 'image', imageUrl },
+            kind: 'bot',
+          })
+        } catch (e) {
+          console.warn('[followups.fire] image send failed', schedule.id, e instanceof Error ? e.message : String(e))
+        }
+      }
+    }
+    if (actionPageId) {
+      const url = await mintActionPageDeeplink(admin, actionPageId, {
+        psid: thread.psid,
+        pageId: thread.page_id,
+      })
+      if (url) {
+        try {
+          await sendOutbound({
+            admin,
+            thread: { id: thread.id, psid: thread.psid, last_inbound_at: thread.last_inbound_at },
+            pageToken,
+            payload: { kind: 'button', text: 'Tap below to continue 👇', url, ctaLabel: 'View' },
+            kind: 'bot',
+          })
+        } catch (e) {
+          console.warn('[followups.fire] button send failed', schedule.id, e instanceof Error ? e.message : String(e))
+        }
+      }
+    }
+  } else if (imageMediaAssetId || actionPageId) {
+    console.warn('[followups.fire] attachments skipped — outside 24h window', {
+      scheduleId: schedule.id,
+      slot: entry.slot,
+      dropped_image: !!imageMediaAssetId,
+      dropped_action_page: !!actionPageId,
+    })
+  }
 
   await advanceSchedule(admin, schedule)
 }
