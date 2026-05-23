@@ -202,7 +202,7 @@ export async function sendCapiTestEventForm(formData: FormData): Promise<void> {
     errRedirect('capi_not_configured')
   }
 
-  const fakeSubmissionId = `test-${crypto.randomUUID()}`
+  const fakeSubmissionId = crypto.randomUUID()
   await dispatchCapiEvent({
     admin,
     userId: session.userId,

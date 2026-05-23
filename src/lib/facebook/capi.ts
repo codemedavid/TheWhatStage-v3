@@ -36,11 +36,17 @@ export interface DispatchInput {
   catalogOrder: CatalogOrderForCapi | null
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+function isUuid(s: string): boolean {
+  return UUID_RE.test(s)
+}
+
 type LogRow = {
   user_id: string
   page_id: string | null
-  submission_id: string
-  action_page_id: string
+  submission_id: string | null
+  action_page_id: string | null
   event_name: string | null
   event_id: string
   status: 'sent' | 'skipped' | 'error'
@@ -65,8 +71,8 @@ function baseLog(input: DispatchInput): LogRow {
   return {
     user_id: input.userId,
     page_id: input.pageRowId,
-    submission_id: input.submissionId,
-    action_page_id: input.actionPageId,
+    submission_id: isUuid(input.submissionId) ? input.submissionId : null,
+    action_page_id: isUuid(input.actionPageId) ? input.actionPageId : null,
     event_name: null,
     event_id: input.submissionId,
     status: 'skipped',
