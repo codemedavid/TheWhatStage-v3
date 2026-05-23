@@ -6,7 +6,7 @@
 create table if not exists public.lead_contact_values (
   id           uuid primary key default gen_random_uuid(),
   lead_id      uuid not null references public.leads(id) on delete cascade,
-  user_id      uuid not null,
+  user_id      uuid not null references auth.users(id) on delete cascade,
   kind         text not null check (kind in ('phone','email')),
   value        text not null,
   source       text not null check (source in ('form','booking','catalog','messenger','manual')),
@@ -26,15 +26,12 @@ create policy "lead_contact_values_select_own"
   on public.lead_contact_values for select
   using (user_id = auth.uid());
 
-create policy "lead_contact_values_modify_own"
-  on public.lead_contact_values for all
-  using (user_id = auth.uid())
-  with check (user_id = auth.uid());
-
 -- Rewrite of append_lead_contacts:
 --  * Inserts a per-value row into lead_contact_values (dedup via unique).
 --  * Continues to maintain the denormalized arrays on leads.
 --  * Adds p_source (default 'manual') so legacy callers stay correct.
+drop function if exists public.append_lead_contacts(uuid, text[], text[]);
+
 create or replace function public.append_lead_contacts(
   p_lead_id uuid,
   p_phones  text[],
