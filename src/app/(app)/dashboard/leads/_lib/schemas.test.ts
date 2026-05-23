@@ -39,4 +39,26 @@ describe('schemas', () => {
   it('stage name length bound', () => {
     expect(() => StageInput.parse({ name: '' })).toThrow()
   })
+
+  it('accepts view=contact', () => {
+    const parsed = LeadsQuery.parse({ view: 'contact' })
+    expect(parsed.view).toBe('contact')
+  })
+
+  it('defaults contact_filter to "either" and contact_sort to "recent_contact"', () => {
+    const parsed = LeadsQuery.parse({ view: 'contact' })
+    expect(parsed.contact_filter).toBe('either')
+    expect(parsed.contact_sort).toBe('recent_contact')
+  })
+
+  it('rejects unknown contact_filter values', () => {
+    expect(() => LeadsQuery.parse({ view: 'contact', contact_filter: 'nope' })).toThrow()
+  })
+
+  it('accepts each valid contact_filter', () => {
+    for (const f of ['phone', 'email', 'either', 'both'] as const) {
+      const parsed = LeadsQuery.parse({ view: 'contact', contact_filter: f })
+      expect(parsed.contact_filter).toBe(f)
+    }
+  })
 })

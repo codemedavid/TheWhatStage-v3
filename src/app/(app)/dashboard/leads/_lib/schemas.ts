@@ -37,13 +37,15 @@ export const BulkUpdateInput = LeadInput.partial().omit({ stage_id: true })
 export type BulkUpdateInput = z.infer<typeof BulkUpdateInput>
 
 export const LeadsQuery = z.object({
-  view: z.enum(['kanban', 'table']).default('kanban'),
+  view: z.enum(['kanban', 'table', 'contact']).default('kanban'),
   stage: z.string().uuid().optional(),
   page: z.coerce.number().int().min(1).default(1),
   q: z.string().trim().max(120).optional(),
   from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   sort: z.enum(['recent', 'oldest', 'name_asc', 'value_desc']).default('recent'),
+  contact_filter: z.enum(['phone', 'email', 'either', 'both']).default('either'),
+  contact_sort: z.enum(['recent_contact', 'recent_lead', 'name_asc']).default('recent_contact'),
 })
 export type LeadsQuery = z.infer<typeof LeadsQuery>
 

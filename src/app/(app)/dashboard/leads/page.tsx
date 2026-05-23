@@ -21,6 +21,8 @@ export default async function LeadsPage({
   const params = LeadsQuery.parse({
     view: sp.view, stage: sp.stage, page: sp.page,
     q: sp.q, from: sp.from, to: sp.to, sort: sp.sort,
+    contact_filter: sp.contact_filter,
+    contact_sort: sp.contact_sort,
   })
 
   return (
@@ -77,7 +79,7 @@ async function LeadsBody({ params }: { params: ReturnType<typeof LeadsQuery.pars
   )
 }
 
-function LeadsBodyFallback({ view }: { view: 'kanban' | 'table' }) {
+function LeadsBodyFallback({ view }: { view: 'kanban' | 'table' | 'contact' }) {
   return (
     <div className="animate-pulse">
       <div

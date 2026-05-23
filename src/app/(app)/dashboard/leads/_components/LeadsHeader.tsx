@@ -5,7 +5,7 @@ import { AutoClassifyToggle } from './AutoClassifyToggle'
 export function LeadsHeader({
   view, stageCount, leadCount, stages, fieldDefs, campaigns, autoClassifyEnabled,
 }: {
-  view: 'kanban' | 'table'
+  view: 'kanban' | 'table' | 'contact'
   stageCount: number
   leadCount: number
   stages: StageRow[]

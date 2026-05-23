@@ -10,7 +10,7 @@ import type { StageRow, FieldDefRow, CampaignOption } from '../_lib/queries'
 export function LeadsHeaderActions({
   view, stages, fieldDefs, campaigns,
 }: {
-  view: 'kanban' | 'table'
+  view: 'kanban' | 'table' | 'contact'
   stages: StageRow[]
   fieldDefs: FieldDefRow[]
   campaigns: CampaignOption[]
@@ -64,14 +64,14 @@ function Divider() {
   )
 }
 
-function ViewSwitch({ view }: { view: 'kanban' | 'table' }) {
+function ViewSwitch({ view }: { view: 'kanban' | 'table' | 'contact' }) {
   const { set } = useUrlState()
   return (
     <div
       className="inline-flex h-8 items-center rounded-full p-0.5"
       style={{ background: 'var(--lead-surface-2)', border: '1px solid var(--lead-line)' }}
     >
-      {(['kanban', 'table'] as const).map((v) => {
+      {(['kanban', 'table', 'contact'] as const).map((v) => {
         const active = view === v
         return (
           <button
@@ -92,12 +92,18 @@ function ViewSwitch({ view }: { view: 'kanban' | 'table' }) {
                 <rect x="10" y="4" width="5" height="10" rx="1" />
                 <rect x="17" y="4" width="4" height="13" rx="1" />
               </svg>
-            ) : (
+            ) : v === 'table' ? (
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
                 <path d="M3 6h18M3 12h18M3 18h18" />
               </svg>
+            ) : (
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+                <circle cx="12" cy="12" r="1" />
+                <circle cx="5" cy="12" r="1" />
+                <circle cx="19" cy="12" r="1" />
+              </svg>
             )}
-            {v === 'kanban' ? 'Board' : 'Table'}
+            {v === 'kanban' ? 'Board' : v === 'table' ? 'Table' : 'Contacts'}
           </button>
         )
       })}
