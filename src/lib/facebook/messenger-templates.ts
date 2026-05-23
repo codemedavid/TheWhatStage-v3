@@ -14,7 +14,7 @@
 
 import type { TemplateButton } from '@/lib/messenger-templates/types'
 
-const GRAPH = 'https://graph.facebook.com/v19.0'
+const GRAPH = 'https://graph.facebook.com/v24.0'
 
 export interface CreateTemplateArgs {
   fbPageId: string // Meta's page id (not our internal uuid)

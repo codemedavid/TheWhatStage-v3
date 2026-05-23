@@ -232,9 +232,12 @@ export async function sendCapiTestEventAction(
     }
   }
 
-  const fakeSubmissionId = crypto.randomUUID()
+  // Prefix with 'test-' so isUuid() returns false and the log row's
+  // submission_id stays null — avoiding a FK violation against action_page_submissions.
+  const fakeSubmissionId = `test-${crypto.randomUUID()}`
+  let result: Awaited<ReturnType<typeof dispatchCapiEvent>>
   try {
-    await dispatchCapiEvent({
+    result = await dispatchCapiEvent({
       admin,
       userId: session.userId,
       submissionId: fakeSubmissionId,
@@ -256,6 +259,13 @@ export async function sendCapiTestEventAction(
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Unknown error'
     return { status: 'error', message: `Test event failed: ${msg}` }
+  }
+
+  if (result.status === 'error') {
+    return {
+      status: 'error',
+      message: `Test event rejected by Meta: ${result.error_message ?? 'unknown error'}`,
+    }
   }
 
   revalidatePath(SETTINGS_PATH)

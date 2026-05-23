@@ -47,7 +47,7 @@ describe('facebook comment helpers', () => {
       isHidden: false,
     })
     const url = new URL(fetchMock.mock.calls[0][0] as string)
-    expect(url.pathname).toBe('/v19.0/c_1')
+    expect(url.pathname).toBe('/v24.0/c_1')
     expect(url.searchParams.get('access_token')).toBe('tok')
     expect(url.searchParams.get('fields')).toContain('can_reply_privately')
   })
@@ -74,7 +74,7 @@ describe('facebook comment helpers', () => {
       }),
     ).resolves.toEqual({ id: 'm_1' })
     const url = new URL(fetchMock.mock.calls[0][0] as string)
-    expect(url.pathname).toBe('/v19.0/me/messages')
+    expect(url.pathname).toBe('/v24.0/me/messages')
     const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string)
     expect(body.recipient).toEqual({ comment_id: 'c_1' })
     expect(body.messaging_type).toBe('RESPONSE')

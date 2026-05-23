@@ -14,7 +14,7 @@ describe('facebook/oauth', () => {
   it('builds a consent URL with the right scopes and redirect', async () => {
     const { buildAuthUrl } = await import('./oauth')
     const url = new URL(buildAuthUrl('signed-state'))
-    expect(url.origin + url.pathname).toBe('https://www.facebook.com/v19.0/dialog/oauth')
+    expect(url.origin + url.pathname).toBe('https://www.facebook.com/v24.0/dialog/oauth')
     expect(url.searchParams.get('client_id')).toBe('app-id')
     expect(url.searchParams.get('redirect_uri')).toBe(
       'https://app.example.com/api/auth/facebook/callback',
@@ -36,7 +36,7 @@ describe('facebook/oauth', () => {
     const tok = await exchangeCodeForToken('the-code')
     expect(tok).toBe('short-1')
     const calledUrl = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0] as string
-    expect(calledUrl).toContain('https://graph.facebook.com/v19.0/oauth/access_token')
+    expect(calledUrl).toContain('https://graph.facebook.com/v24.0/oauth/access_token')
     expect(calledUrl).toContain('code=the-code')
     expect(calledUrl).toContain('client_id=app-id')
     expect(calledUrl).toContain('client_secret=app-secret')

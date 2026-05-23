@@ -1,4 +1,4 @@
-const GRAPH = 'https://graph.facebook.com/v19.0'
+const GRAPH = 'https://graph.facebook.com/v24.0'
 
 export interface FacebookComment {
   id: string

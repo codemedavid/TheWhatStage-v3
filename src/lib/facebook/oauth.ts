@@ -1,5 +1,5 @@
-const GRAPH = 'https://graph.facebook.com/v19.0'
-const DIALOG = 'https://www.facebook.com/v19.0/dialog/oauth'
+const GRAPH = 'https://graph.facebook.com/v24.0'
+const DIALOG = 'https://www.facebook.com/v24.0/dialog/oauth'
 const SCOPES =
   'pages_show_list,pages_read_engagement,pages_manage_metadata,pages_messaging,pages_manage_engagement'
 

@@ -9,7 +9,7 @@ import {
   type CatalogOrderForCapi,
 } from './capi-payload'
 
-const GRAPH_API_VERSION = 'v19.0'
+const GRAPH_API_VERSION = 'v24.0'
 const NETWORK_TIMEOUT_MS = 10_000
 
 type Admin = {
@@ -85,11 +85,13 @@ function baseLog(input: DispatchInput): LogRow {
   }
 }
 
-export async function dispatchCapiEvent(input: DispatchInput): Promise<void> {
+export type DispatchResult = { status: 'sent' | 'skipped' | 'error'; error_message: string | null }
+
+export async function dispatchCapiEvent(input: DispatchInput): Promise<DispatchResult> {
   // 1) Skip if no messenger context.
   if (!input.psid || !input.pageRowId) {
     await writeLog(input.admin, { ...baseLog(input), status: 'skipped', skip_reason: 'no_messenger_context' })
-    return
+    return { status: 'skipped', error_message: null }
   }
 
   // 2) Load page CAPI config.
@@ -100,20 +102,23 @@ export async function dispatchCapiEvent(input: DispatchInput): Promise<void> {
     .maybeSingle()
   if (!page || page.capi_enabled !== true) {
     await writeLog(input.admin, { ...baseLog(input), status: 'skipped', skip_reason: 'disabled' })
-    return
+    return { status: 'skipped', error_message: null }
   }
   if (!page.capi_dataset_id || !page.capi_access_token) {
     await writeLog(input.admin, { ...baseLog(input), status: 'skipped', skip_reason: 'not_configured' })
-    return
+    return { status: 'skipped', error_message: null }
   }
 
-  // 3) Load per-action-page override.
-  const { data: ap } = await input.admin
-    .from('action_pages')
-    .select('capi_event_name_override')
-    .eq('id', input.actionPageId)
-    .maybeSingle()
-  const override = (ap?.capi_event_name_override as string | null) ?? null
+  // 3) Load per-action-page override (skip for non-UUID IDs such as test invocations).
+  let override: string | null = null
+  if (isUuid(input.actionPageId)) {
+    const { data: ap } = await input.admin
+      .from('action_pages')
+      .select('capi_event_name_override')
+      .eq('id', input.actionPageId)
+      .maybeSingle()
+    override = (ap?.capi_event_name_override as string | null) ?? null
+  }
 
   // 4) Compute hasPayment.
   const hasPayment = computeHasPayment(input)
@@ -127,7 +132,7 @@ export async function dispatchCapiEvent(input: DispatchInput): Promise<void> {
   })
   if (!mapping.send) {
     await writeLog(input.admin, { ...baseLog(input), status: 'skipped', skip_reason: 'outcome_skip' })
-    return
+    return { status: 'skipped', error_message: null }
   }
 
   // 6) Lead contacts.
@@ -234,6 +239,7 @@ export async function dispatchCapiEvent(input: DispatchInput): Promise<void> {
   }
 
   await writeLog(input.admin, log)
+  return { status: log.status, error_message: log.error_message }
 }
 
 function computeHasPayment(input: DispatchInput): boolean {

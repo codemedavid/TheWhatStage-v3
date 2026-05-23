@@ -167,7 +167,7 @@ describe('dispatchCapiEvent — network paths', () => {
     await dispatchCapiEvent({ ...baseInput({ admin }) })
     expect(mocks.fetch).toHaveBeenCalledOnce()
     const [url, init] = mocks.fetch.mock.calls[0]
-    expect(url).toBe('https://graph.facebook.com/v19.0/DS123/events?access_token=decrypted%3Aenc%3Atok')
+    expect(url).toBe('https://graph.facebook.com/v24.0/DS123/events?access_token=decrypted%3Aenc%3Atok')
     expect((init as RequestInit).method).toBe('POST')
     expect(inserts[0].row).toMatchObject({
       status: 'sent',
