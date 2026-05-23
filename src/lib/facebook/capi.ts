@@ -22,15 +22,12 @@ export interface DispatchInput {
   submissionId: string
   actionPageId: string
   actionPageKind: ActionPageKind
-  actionPageSlug: string
   outcome: string
   psid: string | null
   pageRowId: string | null
   parsedData: Record<string, unknown>
   pageConfig: Record<string, unknown>
   leadId: string | null
-  clientIp: string | null
-  clientUserAgent: string | null
   submissionCreatedAt: Date
   businessOrderId: string | null
   catalogOrder: CatalogOrderForCapi | null
@@ -160,8 +157,6 @@ export async function dispatchCapiEvent(input: DispatchInput): Promise<DispatchR
     leadName,
     leadPhones,
     leadEmails,
-    clientIp: input.clientIp,
-    clientUserAgent: input.clientUserAgent,
   })
   const customData = buildCustomData({
     kind: input.actionPageKind,
@@ -173,14 +168,11 @@ export async function dispatchCapiEvent(input: DispatchInput): Promise<DispatchR
     submissionId: input.submissionId,
     hasPayment,
   })
-  const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? '').replace(/\/+$/, '')
-  const eventSourceUrl = appUrl ? `${appUrl}/a/${input.actionPageSlug}` : null
 
   const event: CapiEvent = buildEventEnvelope({
     eventName: mapping.eventName,
     eventId: input.submissionId,
     eventTimeMs: input.submissionCreatedAt.getTime(),
-    eventSourceUrl,
     userData,
     customData,
   })

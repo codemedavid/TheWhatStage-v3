@@ -48,10 +48,11 @@ export interface BuildUserDataInput {
   leadName: string | null
   leadPhones: string[]
   leadEmails: string[]
-  clientIp: string | null
-  clientUserAgent: string | null
 }
 
+// Meta rejects client_ip_address / client_user_agent / event_source_url
+// for action_source: "business_messaging" (error subcode 2804064), so
+// they are intentionally absent from this shape.
 export interface UserData {
   page_id: string
   page_scoped_user_id: string
@@ -60,8 +61,6 @@ export interface UserData {
   fn?: string[]
   ln?: string[]
   external_id?: string[]
-  client_ip_address?: string
-  client_user_agent?: string
 }
 
 export function buildUserData(input: BuildUserDataInput): UserData {
@@ -94,9 +93,6 @@ export function buildUserData(input: BuildUserDataInput): UserData {
     const ext = hashList([input.leadId])
     if (ext) out.external_id = ext
   }
-
-  if (input.clientIp) out.client_ip_address = input.clientIp
-  if (input.clientUserAgent) out.client_user_agent = input.clientUserAgent
 
   return out
 }
@@ -177,7 +173,6 @@ export interface CapiEvent {
   event_id: string
   action_source: 'business_messaging'
   messaging_channel: 'messenger'
-  event_source_url?: string
   user_data: UserData
   custom_data?: CustomData
 }
@@ -186,7 +181,6 @@ export interface BuildEnvelopeInput {
   eventName: CapiStandardEvent
   eventId: string
   eventTimeMs: number
-  eventSourceUrl: string | null
   userData: UserData
   customData: CustomData | null
 }
@@ -200,7 +194,6 @@ export function buildEventEnvelope(input: BuildEnvelopeInput): CapiEvent {
     messaging_channel: 'messenger',
     user_data: input.userData,
   }
-  if (input.eventSourceUrl) out.event_source_url = input.eventSourceUrl
   if (input.customData) out.custom_data = input.customData
   return out
 }

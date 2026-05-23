@@ -75,8 +75,6 @@ describe('buildUserData', () => {
     leadName: 'John Angelo David',
     leadPhones: ['+63 917 555 1234', '09175551234'],
     leadEmails: ['Foo@Bar.COM'],
-    clientIp: '203.0.113.10',
-    clientUserAgent: 'vitest',
   }
 
   it('hashes all contact fields and splits name', () => {
@@ -88,8 +86,12 @@ describe('buildUserData', () => {
     expect(ud.fn).toEqual([sha256('john')])
     expect(ud.ln).toEqual([sha256('angelo david')])
     expect(ud.external_id).toEqual([sha256('lead-uuid-1')])
-    expect(ud.client_ip_address).toBe('203.0.113.10')
-    expect(ud.client_user_agent).toBe('vitest')
+  })
+
+  it('never emits client_ip_address / client_user_agent — Meta rejects them for business_messaging', () => {
+    const ud = buildUserData(base)
+    expect(ud).not.toHaveProperty('client_ip_address')
+    expect(ud).not.toHaveProperty('client_user_agent')
   })
 
   it('omits empty hashed arrays entirely', () => {
@@ -99,12 +101,6 @@ describe('buildUserData', () => {
     expect(ud).not.toHaveProperty('fn')
     expect(ud).not.toHaveProperty('ln')
     expect(ud).not.toHaveProperty('external_id')
-  })
-
-  it('omits missing ip / user-agent', () => {
-    const ud = buildUserData({ ...base, clientIp: null, clientUserAgent: null })
-    expect(ud).not.toHaveProperty('client_ip_address')
-    expect(ud).not.toHaveProperty('client_user_agent')
   })
 
   it('single-token name → fn only, ln omitted', () => {
@@ -205,14 +201,13 @@ describe('buildCustomData', () => {
 })
 
 describe('buildEventEnvelope', () => {
-  it('assembles a complete event with all fields', () => {
+  it('assembles a complete event without event_source_url (Meta rejects it for business_messaging)', () => {
     const userData = { page_id: 'P', page_scoped_user_id: 'X' }
     const customData = { content_ids: ['ap-1'], content_type: 'product' as const }
     const env = buildEventEnvelope({
       eventName: 'Lead',
       eventId: 'sub-1',
       eventTimeMs: 1716480000000, // 2024-05-23T16:00:00Z
-      eventSourceUrl: 'https://app.test/a/welcome',
       userData,
       customData,
     })
@@ -222,22 +217,20 @@ describe('buildEventEnvelope', () => {
       event_id: 'sub-1',
       action_source: 'business_messaging',
       messaging_channel: 'messenger',
-      event_source_url: 'https://app.test/a/welcome',
       user_data: userData,
       custom_data: customData,
     })
+    expect(env).not.toHaveProperty('event_source_url')
   })
 
-  it('omits event_source_url and custom_data when not provided', () => {
+  it('omits custom_data when not provided', () => {
     const env = buildEventEnvelope({
       eventName: 'Lead',
       eventId: 'sub-1',
       eventTimeMs: 1716480000000,
-      eventSourceUrl: null,
       userData: { page_id: 'P', page_scoped_user_id: 'X' },
       customData: null,
     })
-    expect(env).not.toHaveProperty('event_source_url')
     expect(env).not.toHaveProperty('custom_data')
   })
 })

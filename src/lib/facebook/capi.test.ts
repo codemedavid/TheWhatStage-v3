@@ -62,22 +62,19 @@ function makeAdmin(opts: {
   return { admin: { from }, inserts }
 }
 
-function baseInput(overrides: Partial<Parameters<typeof dispatchCapiEvent>[0]> = {}) {
+function baseInput(overrides: Partial<Parameters<typeof dispatchCapiEvent>[0]> = {}): Parameters<typeof dispatchCapiEvent>[0] {
   return {
-    admin: undefined as unknown,
+    admin: undefined as unknown as Parameters<typeof dispatchCapiEvent>[0]['admin'],
     userId: 'u1',
     submissionId: 'sub-1',
     actionPageId: 'ap-1',
     actionPageKind: 'form' as const,
-    actionPageSlug: 'welcome',
     outcome: 'submitted',
     psid: 'PSID1',
     pageRowId: 'page-row-1',
     parsedData: {},
     pageConfig: {},
     leadId: null,
-    clientIp: '203.0.113.10',
-    clientUserAgent: 'vitest',
     submissionCreatedAt: new Date('2024-05-23T16:00:00Z'),
     businessOrderId: null,
     catalogOrder: null,
