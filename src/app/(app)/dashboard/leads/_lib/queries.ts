@@ -281,3 +281,128 @@ export async function fetchCampaignOptions(
   if (error) throw error
   return (data ?? []) as CampaignOption[]
 }
+
+export type ContactValueRef = {
+  value: string
+  source: 'form' | 'booking' | 'catalog' | 'messenger' | 'manual'
+  collected_at: string
+}
+
+export type ContactLeadRow = LeadRow & {
+  latest_phone: ContactValueRef | null
+  latest_email: ContactValueRef | null
+  latest_contact_at: string | null
+}
+
+export async function fetchContactLeadsTotal(
+  supabase: SupabaseClient,
+  userId: string,
+  params: LeadsQuery,
+): Promise<number> {
+  let query = supabase
+    .from('leads').select('id', { count: 'exact', head: true })
+    .eq('user_id', userId)
+
+  if (params.contact_filter === 'phone') query = query.not('phones', 'eq', '{}')
+  else if (params.contact_filter === 'email') query = query.not('emails', 'eq', '{}')
+  else if (params.contact_filter === 'both') query = query.not('phones', 'eq', '{}').not('emails', 'eq', '{}')
+  else query = query.or('phones.neq.{},emails.neq.{}')
+
+  if (params.q) {
+    const term = `%${params.q}%`
+    query = query.or(
+      `name.ilike.${term},email.ilike.${term},phone.ilike.${term},company.ilike.${term}`,
+    )
+  }
+  if (params.from) query = query.gte('created_at', `${params.from}T00:00:00Z`)
+  if (params.to)   query = query.lte('created_at', `${params.to}T23:59:59Z`)
+  const { count, error } = await query
+  if (error) throw error
+  return count ?? 0
+}
+
+export async function fetchContactLeadsPage(
+  supabase: SupabaseClient,
+  userId: string,
+  params: LeadsQuery,
+): Promise<{ rows: ContactLeadRow[]; total: number }> {
+  let query = supabase
+    .from('leads')
+    .select('*, messenger_threads(picture_url), campaigns(name)', { count: 'exact' })
+    .eq('user_id', userId)
+
+  if (params.contact_filter === 'phone') query = query.not('phones', 'eq', '{}')
+  else if (params.contact_filter === 'email') query = query.not('emails', 'eq', '{}')
+  else if (params.contact_filter === 'both') query = query.not('phones', 'eq', '{}').not('emails', 'eq', '{}')
+  else query = query.or('phones.neq.{},emails.neq.{}')
+
+  if (params.q) {
+    const term = `%${params.q}%`
+    query = query.or(
+      `name.ilike.${term},email.ilike.${term},phone.ilike.${term},company.ilike.${term}`,
+    )
+  }
+  if (params.from) query = query.gte('created_at', `${params.from}T00:00:00Z`)
+  if (params.to)   query = query.lte('created_at', `${params.to}T23:59:59Z`)
+
+  if (params.contact_sort === 'name_asc') {
+    query = query.order('name', { ascending: true })
+  } else {
+    query = query.order('updated_at', { ascending: false })
+  }
+
+  const from = (params.page - 1) * PAGE_SIZE
+  const to   = from + PAGE_SIZE - 1
+  const { data, error, count } = await query.range(from, to)
+  if (error) throw error
+  const baseRows = ((data ?? []) as LeadRowWithJoins[]).map(flattenLead)
+
+  const leadIds = baseRows.map((l) => l.id)
+  type RawContact = {
+    lead_id: string
+    kind: 'phone' | 'email'
+    value: string
+    source: ContactValueRef['source']
+    collected_at: string
+  }
+  const latestByLead = new Map<string, { phone: ContactValueRef | null; email: ContactValueRef | null }>()
+  if (leadIds.length > 0) {
+    const { data: cv } = await supabase
+      .from('lead_contact_values')
+      .select('lead_id, kind, value, source, collected_at')
+      .in('lead_id', leadIds)
+      .order('collected_at', { ascending: false })
+    for (const row of (cv ?? []) as RawContact[]) {
+      let bucket = latestByLead.get(row.lead_id)
+      if (!bucket) {
+        bucket = { phone: null, email: null }
+        latestByLead.set(row.lead_id, bucket)
+      }
+      if (row.kind === 'phone' && !bucket.phone) {
+        bucket.phone = { value: row.value, source: row.source, collected_at: row.collected_at }
+      } else if (row.kind === 'email' && !bucket.email) {
+        bucket.email = { value: row.value, source: row.source, collected_at: row.collected_at }
+      }
+    }
+  }
+
+  let rows: ContactLeadRow[] = baseRows.map((l) => {
+    const bucket = latestByLead.get(l.id) ?? { phone: null, email: null }
+    const latest_contact_at =
+      bucket.phone && bucket.email
+        ? (bucket.phone.collected_at > bucket.email.collected_at ? bucket.phone.collected_at : bucket.email.collected_at)
+        : (bucket.phone?.collected_at ?? bucket.email?.collected_at ?? null)
+    return { ...l, latest_phone: bucket.phone, latest_email: bucket.email, latest_contact_at }
+  })
+
+  if (params.contact_sort === 'recent_contact') {
+    rows = rows.sort((a, b) => {
+      if (a.latest_contact_at === b.latest_contact_at) return 0
+      if (a.latest_contact_at === null) return 1
+      if (b.latest_contact_at === null) return -1
+      return a.latest_contact_at < b.latest_contact_at ? 1 : -1
+    })
+  }
+
+  return { rows, total: count ?? 0 }
+}
