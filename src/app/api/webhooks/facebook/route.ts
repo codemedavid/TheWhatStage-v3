@@ -58,6 +58,10 @@ type FbMessaging = {
     mid?: string
     text?: string
     is_echo?: boolean
+    // Present on Send-API echoes (our bot, our dashboard, any other connected
+    // app). Absent on echoes of replies typed in Page Inbox / Meta Business
+    // Suite / Messenger app — those are how we detect a human takeover.
+    app_id?: number | string
     attachments?: FbAttachment[]
   }
   optin?: {
@@ -208,6 +212,126 @@ async function handleOtnGrant(admin: AdminClient, fbPageId: string, ev: FbMessag
   })
 }
 
+/**
+ * Human takeover from outside WhatStage. Fired when Meta echoes a message
+ * that wasn't sent through our app (no `app_id`) — i.e. the page admin
+ * replied in Page Inbox, Meta Business Suite, or the Messenger app. Mirrors
+ * `replyAsOperator` (dashboard path): persists the outbound message and
+ * stamps `bot_paused_until` so the reactive bot stops interrupting.
+ */
+async function handleOperatorEcho(
+  admin: AdminClient,
+  fbPageId: string,
+  ev: FbMessaging,
+): Promise<void> {
+  const msg = ev.message
+  if (!msg) return
+  // On echoes, the customer's PSID is in `recipient.id`; `sender.id` is the page.
+  const psid = ev.recipient?.id
+  const mid = msg.mid
+  if (!psid || !mid) return
+
+  const { data: page, error: pageErr } = await admin
+    .from('facebook_pages')
+    .select('id, facebook_connections(user_id)')
+    .eq('fb_page_id', fbPageId)
+    .maybeSingle()
+  if (pageErr || !page) {
+    console.warn('[fb.webhook] operator echo: unknown page', { fbPageId, err: pageErr?.message })
+    return
+  }
+  const conn = (page as { facebook_connections?: { user_id?: string } | { user_id?: string }[] })
+    .facebook_connections
+  const userId = Array.isArray(conn) ? conn[0]?.user_id : conn?.user_id
+  if (!userId) return
+  if (!(await isUserActive(admin, userId))) return
+
+  // Don't create threads from echoes — only react if the customer's thread
+  // already exists. If the operator messages a brand-new PSID from Meta's UI,
+  // there's no inbound message yet so nothing for the bot to interrupt.
+  const { data: thread } = await admin
+    .from('messenger_threads')
+    .select('id, controlled_by_run_id')
+    .eq('page_id', (page as { id: string }).id)
+    .eq('psid', psid)
+    .maybeSingle<{ id: string; controlled_by_run_id: string | null }>()
+  if (!thread) {
+    console.log('[fb.webhook] operator echo: no matching thread, skipping', { fbPageId, psid })
+    return
+  }
+
+  const text = msg.text ?? ''
+  const attachments = msg.attachments ?? null
+
+  // unique(fb_message_id) makes this idempotent. If our worker/dashboard
+  // already wrote this row (shouldn't happen — those carry app_id — but
+  // belt-and-suspenders), the 23505 conflict is benign.
+  const { data: inserted, error: insertErr } = await admin
+    .from('messenger_messages')
+    .insert({
+      thread_id: thread.id,
+      user_id: userId,
+      direction: 'outbound',
+      sender: 'operator',
+      fb_message_id: mid,
+      body: text,
+      attachments,
+    })
+    .select('id')
+    .maybeSingle()
+  if (insertErr) {
+    if ((insertErr as { code?: string }).code === '23505') return
+    console.error('[fb.webhook] operator echo: message insert failed', insertErr.message)
+    return
+  }
+  if (!inserted) return
+
+  const { data: cfg } = await admin
+    .from('chatbot_configs')
+    .select('human_takeover_minutes')
+    .eq('user_id', userId)
+    .maybeSingle<{ human_takeover_minutes: number }>()
+  const pauseMinutes = cfg?.human_takeover_minutes ?? 0
+
+  const threadUpdate: Record<string, unknown> = {
+    last_message_at: new Date().toISOString(),
+    last_message_preview: text.slice(0, 200) || '[attachment]',
+  }
+  if (pauseMinutes > 0) {
+    threadUpdate.bot_paused_until = new Date(Date.now() + pauseMinutes * 60_000).toISOString()
+  }
+
+  // Mirror replyAsOperator: a human reply during a workflow run trumps it.
+  // Clear the lock and park the run for 24h so it doesn't keep stepping past
+  // the takeover.
+  if (thread.controlled_by_run_id) {
+    threadUpdate.controlled_by_run_id = null
+    const resumeAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+    const { data: runRow } = await admin
+      .from('workflow_runs')
+      .select('state')
+      .eq('id', thread.controlled_by_run_id)
+      .in('status', ['running', 'waiting'])
+      .maybeSingle<{ state: Record<string, unknown> }>()
+    if (runRow) {
+      await admin
+        .from('workflow_runs')
+        .update({
+          status: 'waiting',
+          next_run_at: resumeAt,
+          state: { ...runRow.state, waiting_for: 'operator_took_over' },
+        })
+        .eq('id', thread.controlled_by_run_id)
+    }
+  }
+
+  await admin.from('messenger_threads').update(threadUpdate).eq('id', thread.id)
+  console.log('[fb.webhook] operator echo: takeover engaged', {
+    threadId: thread.id,
+    pauseMinutes,
+  })
+}
+
 async function handleEvent(
   admin: AdminClient,
   fbPageId: string,
@@ -220,7 +344,16 @@ async function handleEvent(
   }
 
   const msg = ev.message
-  if (!msg || msg.is_echo) return null
+  if (!msg) return null
+  if (msg.is_echo) {
+    // Send-API echoes (our worker, our dashboard, any connected app) carry
+    // `app_id`. Echoes typed in Meta's own UIs (Page Inbox, Business Suite,
+    // Messenger app) do not — those are human takeovers we must respect.
+    if (msg.app_id === undefined || msg.app_id === null) {
+      await handleOperatorEcho(admin, fbPageId, ev)
+    }
+    return null
+  }
   const psid = ev.sender?.id
   const mid = msg.mid
   if (!psid || !mid) return null

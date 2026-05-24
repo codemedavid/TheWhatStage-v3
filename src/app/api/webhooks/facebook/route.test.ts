@@ -429,6 +429,248 @@ describe('facebook webhook comment events', () => {
     expect(global.fetch).not.toHaveBeenCalled()
   })
 
+  it('drops echoes from Send-API senders (our bot/dashboard) without engaging takeover', async () => {
+    // Wire a strict mock: any DB touch from the echo path fails the test.
+    mocks.from.mockImplementation((table: string) => {
+      throw new Error(`should not touch ${table} for app_id-tagged echo`)
+    })
+
+    const res = await postWebhook({
+      object: 'page',
+      entry: [
+        {
+          id: 'fb-page-1',
+          messaging: [
+            {
+              sender: { id: 'fb-page-1' },
+              recipient: { id: 'psid-1' },
+              message: {
+                mid: 'mid-our-bot-echo',
+                text: 'Bot reply',
+                is_echo: true,
+                app_id: 1234567890,
+              },
+            },
+          ],
+        },
+      ],
+    })
+
+    expect(res.status).toBe(200)
+    expect(mocks.from).not.toHaveBeenCalled()
+    expect(mocks.after).not.toHaveBeenCalled()
+    expect(global.fetch).not.toHaveBeenCalled()
+  })
+
+  it('engages human takeover on echoes without app_id (Meta UI replies)', async () => {
+    const threadUpdateSpy = vi.fn(async () => ({ error: null }))
+    const messageInsertSpy = vi.fn<(row: Record<string, unknown>) => void>()
+    const threadUpdatePatches: Record<string, unknown>[] = []
+
+    mocks.from.mockImplementation((table: string) => {
+      if (table === 'facebook_pages') return pageLookup()
+      if (table === 'profiles') return profilesLookup('active')
+      if (table === 'messenger_threads') {
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              eq: vi.fn(() => ({
+                maybeSingle: vi.fn(async () => ({
+                  data: { id: 'thread-1', controlled_by_run_id: null },
+                  error: null,
+                })),
+              })),
+            })),
+          })),
+          update: vi.fn((patch: Record<string, unknown>) => {
+            threadUpdatePatches.push(patch)
+            return { eq: threadUpdateSpy }
+          }),
+        }
+      }
+      if (table === 'messenger_messages') {
+        return {
+          insert: vi.fn((row: Record<string, unknown>) => {
+            messageInsertSpy(row)
+            return {
+              select: vi.fn(() => ({
+                maybeSingle: vi.fn(async () => ({ data: { id: 'message-op-1' }, error: null })),
+              })),
+            }
+          }),
+        }
+      }
+      if (table === 'chatbot_configs') {
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              maybeSingle: vi.fn(async () => ({
+                data: { human_takeover_minutes: 90 },
+                error: null,
+              })),
+            })),
+          })),
+        }
+      }
+      throw new Error(`unexpected table ${table}`)
+    })
+
+    const t0 = Date.now()
+    const res = await postWebhook({
+      object: 'page',
+      entry: [
+        {
+          id: 'fb-page-1',
+          messaging: [
+            {
+              sender: { id: 'fb-page-1' },
+              recipient: { id: 'psid-1' },
+              message: {
+                mid: 'mid-meta-ui',
+                text: 'Hey, this is the operator',
+                is_echo: true,
+              },
+            },
+          ],
+        },
+      ],
+    })
+    const t1 = Date.now()
+
+    expect(res.status).toBe(200)
+    expect(messageInsertSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        thread_id: 'thread-1',
+        user_id: 'user-1',
+        direction: 'outbound',
+        sender: 'operator',
+        fb_message_id: 'mid-meta-ui',
+        body: 'Hey, this is the operator',
+      }),
+    )
+    const pausePatch = threadUpdatePatches.find((p) => 'bot_paused_until' in p)
+    expect(pausePatch).toBeDefined()
+    const pausedAt = Date.parse(pausePatch?.bot_paused_until as string)
+    expect(pausedAt).toBeGreaterThanOrEqual(t0 + 90 * 60_000 - 50)
+    expect(pausedAt).toBeLessThanOrEqual(t1 + 90 * 60_000 + 50)
+    expect(pausePatch?.last_message_preview).toBe('Hey, this is the operator')
+    // No messenger worker fetch — echoes never feed the reply worker.
+    expect(global.fetch).not.toHaveBeenCalled()
+  })
+
+  it('records the operator echo but skips bot_paused_until when takeover is disabled (0 minutes)', async () => {
+    const threadUpdatePatches: Record<string, unknown>[] = []
+
+    mocks.from.mockImplementation((table: string) => {
+      if (table === 'facebook_pages') return pageLookup()
+      if (table === 'profiles') return profilesLookup('active')
+      if (table === 'messenger_threads') {
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              eq: vi.fn(() => ({
+                maybeSingle: vi.fn(async () => ({
+                  data: { id: 'thread-1', controlled_by_run_id: null },
+                  error: null,
+                })),
+              })),
+            })),
+          })),
+          update: vi.fn((patch: Record<string, unknown>) => {
+            threadUpdatePatches.push(patch)
+            return { eq: vi.fn(async () => ({ error: null })) }
+          }),
+        }
+      }
+      if (table === 'messenger_messages') {
+        return {
+          insert: vi.fn(() => ({
+            select: vi.fn(() => ({
+              maybeSingle: vi.fn(async () => ({ data: { id: 'message-op-2' }, error: null })),
+            })),
+          })),
+        }
+      }
+      if (table === 'chatbot_configs') {
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              maybeSingle: vi.fn(async () => ({
+                data: { human_takeover_minutes: 0 },
+                error: null,
+              })),
+            })),
+          })),
+        }
+      }
+      throw new Error(`unexpected table ${table}`)
+    })
+
+    const res = await postWebhook({
+      object: 'page',
+      entry: [
+        {
+          id: 'fb-page-1',
+          messaging: [
+            {
+              sender: { id: 'fb-page-1' },
+              recipient: { id: 'psid-1' },
+              message: { mid: 'mid-no-pause', text: 'ok', is_echo: true },
+            },
+          ],
+        },
+      ],
+    })
+
+    expect(res.status).toBe(200)
+    expect(threadUpdatePatches.some((p) => 'bot_paused_until' in p)).toBe(false)
+    // Tail still bumped so the dashboard timeline reflects the reply.
+    expect(threadUpdatePatches.some((p) => 'last_message_at' in p)).toBe(true)
+  })
+
+  it('skips operator echo when no matching thread exists', async () => {
+    const messageInsertSpy = vi.fn()
+
+    mocks.from.mockImplementation((table: string) => {
+      if (table === 'facebook_pages') return pageLookup()
+      if (table === 'profiles') return profilesLookup('active')
+      if (table === 'messenger_threads') {
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              eq: vi.fn(() => ({
+                maybeSingle: vi.fn(async () => ({ data: null, error: null })),
+              })),
+            })),
+          })),
+        }
+      }
+      if (table === 'messenger_messages') {
+        return { insert: messageInsertSpy }
+      }
+      throw new Error(`unexpected table ${table}`)
+    })
+
+    const res = await postWebhook({
+      object: 'page',
+      entry: [
+        {
+          id: 'fb-page-1',
+          messaging: [
+            {
+              sender: { id: 'fb-page-1' },
+              recipient: { id: 'psid-new' },
+              message: { mid: 'mid-new-thread', text: 'first contact', is_echo: true },
+            },
+          ],
+        },
+      ],
+    })
+
+    expect(res.status).toBe(200)
+    expect(messageInsertSpy).not.toHaveBeenCalled()
+  })
+
   it('enqueues normally when bot_paused_until is in the past', async () => {
     const pastDate = new Date(Date.now() - 60 * 60 * 1000).toISOString() // 1 hour ago
     const { messengerJobInsert } = makeMessengerAdminMock({
