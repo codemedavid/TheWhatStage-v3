@@ -42,6 +42,7 @@ export function MediaPickerModal({
   // list comes back from the server.
   useEffect(() => {
     if (!open) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true)
     setError(null)
     setOverCap(false)
