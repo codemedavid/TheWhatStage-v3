@@ -87,7 +87,6 @@ export async function handleFollowupSend(
   }
 
   const imageMediaAssetIds = readImageIds(entry)
-  const imageMediaAssetId = imageMediaAssetIds[0] ?? null   // temporary alias — removed in Task 7
   const actionPageId      = entry.action_page_id
 
   // Re-check gates: a lead who booked between scheduling and firing should
@@ -165,14 +164,17 @@ export async function handleFollowupSend(
   let attachmentHint = ''
   if (canAttach) {
     const hintParts: string[] = []
-    if (imageMediaAssetId) {
+    if (imageMediaAssetIds.length === 1) {
       const { data: asset } = await admin
         .from('media_assets')
         .select('name')
-        .eq('id', imageMediaAssetId)
+        .eq('id', imageMediaAssetIds[0])
         .eq('user_id', schedule.user_id)
         .maybeSingle<{ name: string }>()
       if (asset?.name) hintParts.push(`a photo (${asset.name})`)
+      else              hintParts.push('a photo')
+    } else if (imageMediaAssetIds.length > 1) {
+      hintParts.push(`${imageMediaAssetIds.length} photos`)
     }
     if (actionPageId) {
       const { data: pageRow } = await admin

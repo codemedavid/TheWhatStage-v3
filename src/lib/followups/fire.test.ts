@@ -542,6 +542,30 @@ describe('handleFollowupSend — multi-image attachments', () => {
     expect((upd[upd.length - 1].values as Record<string, unknown>).status).toBe('done')
     warn.mockRestore()
   })
+
+  it('passes "3 photos" attachmentHint to generator inside window when 3 ids set', async () => {
+    const seed = multiSeed({
+      ids: [
+        '11111111-1111-4111-9111-111111111111',
+        '22222222-2222-4222-9222-222222222222',
+        '33333333-3333-4333-9333-333333333333',
+      ],
+    })
+    const { admin } = makeAdmin(seed)
+    await handleFollowupSend(admin as never, { scheduleId: 's1' })
+    expect(generateMock).toHaveBeenCalledWith(expect.objectContaining({
+      attachmentHint: expect.stringContaining('3 photos'),
+    }))
+  })
+
+  it('passes singular "a photo" attachmentHint when exactly 1 id set', async () => {
+    const seed = multiSeed({ ids: ['11111111-1111-4111-9111-111111111111'] })
+    const { admin } = makeAdmin(seed)
+    await handleFollowupSend(admin as never, { scheduleId: 's1' })
+    expect(generateMock).toHaveBeenCalledWith(expect.objectContaining({
+      attachmentHint: expect.stringContaining('a photo'),
+    }))
+  })
 })
 
 describe('handleFollowupSend — legacy snapshot shape (image_media_asset_id)', () => {
