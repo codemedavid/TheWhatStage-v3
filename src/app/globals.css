@@ -3011,3 +3011,21 @@ body {
   0%   { transform: translateX(-100%); }
   100% { transform: translateX(300%); }
 }
+
+/* MediaPickerModal — multi-select badge + footer */
+.mpm-tile { position: relative; }
+.mpm-tile.is-selected { outline: 2px solid var(--accent, #2563eb); outline-offset: -2px; border-radius: 6px; }
+.mpm-tile-badge {
+  position: absolute; top: 4px; left: 4px;
+  min-width: 1.4rem; height: 1.4rem; padding: 0 0.35rem;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--accent, #2563eb); color: white;
+  border-radius: 999px; font-size: 0.75rem; font-weight: 600;
+}
+.mpm-foot {
+  display: flex; justify-content: flex-end; gap: 0.5rem;
+  padding: 0.75rem; border-top: 1px solid var(--border, #e5e7eb);
+}
+.mpm-btn { padding: 0.4rem 0.9rem; border-radius: 6px; border: 1px solid var(--border, #e5e7eb); background: white; cursor: pointer; }
+.mpm-btn-primary { background: var(--accent, #2563eb); color: white; border-color: var(--accent, #2563eb); }
+.mpm-cap-hint { padding: 0.25rem 0.75rem; color: var(--muted, #6b7280); font-size: 0.85rem; }
