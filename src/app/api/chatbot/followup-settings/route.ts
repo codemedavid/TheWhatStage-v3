@@ -42,9 +42,7 @@ export async function PUT(req: Request) {
     )
   }
 
-  const allAssetIds = parsed.data.touchpoints
-    .map((t) => t.image_media_asset_id)
-    .filter((v): v is string => !!v)
+  const allAssetIds = parsed.data.touchpoints.flatMap((t) => t.image_media_asset_ids)
   const allPageIds = parsed.data.touchpoints
     .map((t) => t.action_page_id)
     .filter((v): v is string => !!v)

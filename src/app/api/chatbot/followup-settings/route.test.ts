@@ -156,14 +156,14 @@ describe('PUT /api/chatbot/followup-settings', () => {
     expect(res.status).toBe(400)
   })
 
-  it('returns 400 when image_media_asset_id belongs to another user', async () => {
+  it('returns 400 when image id inside the array belongs to another user', async () => {
     getUserMock.mockResolvedValue({ data: { user: { id: 'u1' } } })
 
     const settingsWithImage = {
       enabled: true,
       touchpoints: DEFAULT_FOLLOWUP_SETTINGS.touchpoints.map((t, i) => ({
         ...t,
-        image_media_asset_id: i === 0 ? '11111111-1111-4111-9111-111111111111' : null,
+        image_media_asset_ids: i === 0 ? ['11111111-1111-4111-9111-111111111111'] : [],
         action_page_id: null,
       })),
     }
@@ -194,7 +194,7 @@ describe('PUT /api/chatbot/followup-settings', () => {
       enabled: true,
       touchpoints: DEFAULT_FOLLOWUP_SETTINGS.touchpoints.map((t, i) => ({
         ...t,
-        image_media_asset_id: null,
+        image_media_asset_ids: [],
         action_page_id: i === 0 ? '22222222-2222-4222-9222-222222222222' : null,
       })),
     }
@@ -225,7 +225,7 @@ describe('PUT /api/chatbot/followup-settings', () => {
       enabled: true,
       touchpoints: DEFAULT_FOLLOWUP_SETTINGS.touchpoints.map((t, i) => ({
         ...t,
-        image_media_asset_id: i === 0 ? '11111111-1111-4111-9111-111111111111' : null,
+        image_media_asset_ids: i === 0 ? ['11111111-1111-4111-9111-111111111111'] : [],
         action_page_id:        i === 0 ? '22222222-2222-4222-9222-222222222222' : null,
       })),
     }
@@ -256,6 +256,79 @@ describe('PUT /api/chatbot/followup-settings', () => {
         }
       }
       return { select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: null, error: null }) }) }) }
+    })
+
+    const res = await PUT(makeReq({ settings }))
+    expect(res.status).toBe(200)
+    expect(upserted).toBe(true)
+  })
+
+  it('returns 400 when array contains > 3 ids', async () => {
+    getUserMock.mockResolvedValue({ data: { user: { id: 'u1' } } })
+    const bad = {
+      enabled: true,
+      touchpoints: DEFAULT_FOLLOWUP_SETTINGS.touchpoints.map((t, i) => ({
+        ...t,
+        image_media_asset_ids: i === 0 ? [
+          '11111111-1111-4111-9111-111111111111',
+          '22222222-2222-4222-9222-222222222222',
+          '33333333-3333-4333-9333-333333333333',
+          '44444444-4444-4444-9444-444444444444',
+        ] : [],
+        action_page_id: null,
+      })),
+    }
+    const res = await PUT(makeReq({ settings: bad }))
+    expect(res.status).toBe(400)
+  })
+
+  it('returns 400 when array contains a non-UUID', async () => {
+    getUserMock.mockResolvedValue({ data: { user: { id: 'u1' } } })
+    const bad = {
+      enabled: true,
+      touchpoints: DEFAULT_FOLLOWUP_SETTINGS.touchpoints.map((t, i) => ({
+        ...t,
+        image_media_asset_ids: i === 0 ? ['not-a-uuid'] : [],
+        action_page_id: null,
+      })),
+    }
+    const res = await PUT(makeReq({ settings: bad }))
+    expect(res.status).toBe(400)
+  })
+
+  it('persists with mixed-size arrays across rows when all owned', async () => {
+    getUserMock.mockResolvedValue({ data: { user: { id: 'u1' } } })
+    const a = '11111111-1111-4111-9111-111111111111'
+    const b = '22222222-2222-4222-9222-222222222222'
+    const c = '33333333-3333-4333-9333-333333333333'
+    const settings = {
+      enabled: true,
+      touchpoints: DEFAULT_FOLLOWUP_SETTINGS.touchpoints.map((t, i) => ({
+        ...t,
+        image_media_asset_ids:
+          i === 0 ? [] :
+          i === 1 ? [a, b, c] :
+          i === 2 ? [a] : [],
+        action_page_id: null,
+      })),
+    }
+    let upserted = false
+    supabaseFromMock.mockImplementation((table: string) => {
+      if (table === 'media_assets') {
+        return {
+          select: () => ({
+            in: () => ({
+              eq: async () => ({ data: [{ id: a }, { id: b }, { id: c }], error: null }),
+            }),
+          }),
+        }
+      }
+      return {
+        upsert: async () => {
+          upserted = true
+          return { error: null }
+        },
+      }
     })
 
     const res = await PUT(makeReq({ settings }))
