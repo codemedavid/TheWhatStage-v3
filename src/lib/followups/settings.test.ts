@@ -12,7 +12,7 @@ function validSettings(overrides: Partial<FollowupSettings> = {}): FollowupSetti
     enabled: true,
     touchpoints: DEFAULT_FOLLOWUP_SETTINGS.touchpoints.map((t) => ({
       ...t,
-      image_media_asset_id: null,
+      image_media_asset_ids: [],
       action_page_id: null,
     })),
     ...overrides,
@@ -31,25 +31,25 @@ describe('FOLLOWUP_SETTINGS_SCHEMA', () => {
 
   it('rejects offset_ms below 1 minute', () => {
     const bad = validSettings()
-    bad.touchpoints[0] = { enabled: true, offset_ms: 30_000, instruction: '', image_media_asset_id: null, action_page_id: null } // 30s
+    bad.touchpoints[0] = { enabled: true, offset_ms: 30_000, instruction: '', image_media_asset_ids: [], action_page_id: null } // 30s
     expect(FOLLOWUP_SETTINGS_SCHEMA.safeParse(bad).success).toBe(false)
   })
 
   it('rejects offset_ms above 7 days', () => {
     const bad = validSettings()
-    bad.touchpoints[6] = { enabled: true, offset_ms: 8 * 24 * 3_600_000, instruction: '', image_media_asset_id: null, action_page_id: null } // 8 days
+    bad.touchpoints[6] = { enabled: true, offset_ms: 8 * 24 * 3_600_000, instruction: '', image_media_asset_ids: [], action_page_id: null } // 8 days
     expect(FOLLOWUP_SETTINGS_SCHEMA.safeParse(bad).success).toBe(false)
   })
 
   it('rejects non-strictly-increasing enabled rows', () => {
     const bad = validSettings()
-    bad.touchpoints[1] = { enabled: true, offset_ms: 60_000, instruction: '', image_media_asset_id: null, action_page_id: null } // 1m, less than slot 0's 5m
+    bad.touchpoints[1] = { enabled: true, offset_ms: 60_000, instruction: '', image_media_asset_ids: [], action_page_id: null } // 1m, less than slot 0's 5m
     expect(FOLLOWUP_SETTINGS_SCHEMA.safeParse(bad).success).toBe(false)
   })
 
   it('ignores ordering of disabled rows', () => {
     const ok = validSettings()
-    ok.touchpoints[1] = { enabled: false, offset_ms: 60_000, instruction: '', image_media_asset_id: null, action_page_id: null } // disabled, ignore
+    ok.touchpoints[1] = { enabled: false, offset_ms: 60_000, instruction: '', image_media_asset_ids: [], action_page_id: null } // disabled, ignore
     expect(FOLLOWUP_SETTINGS_SCHEMA.safeParse(ok).success).toBe(true)
   })
 
@@ -96,19 +96,19 @@ describe('FOLLOWUP_SETTINGS_SCHEMA', () => {
     if (parsed.success) expect(parsed.data.touchpoints[0].instruction).toBe('hello')
   })
 
-  it('accepts touchpoints with image_media_asset_id and action_page_id set', () => {
+  it('accepts touchpoints with image_media_asset_ids and action_page_id set', () => {
     const ok = validSettings()
     ok.touchpoints[0] = {
       enabled: true,
       offset_ms: 5 * 60_000,
       instruction: '',
-      image_media_asset_id: '11111111-1111-4111-9111-111111111111',
+      image_media_asset_ids: ['11111111-1111-4111-9111-111111111111'],
       action_page_id:        '22222222-2222-4222-9222-222222222222',
     }
     expect(FOLLOWUP_SETTINGS_SCHEMA.safeParse(ok).success).toBe(true)
   })
 
-  it('defaults missing attachment fields to null', () => {
+  it('defaults missing attachment fields to empty/null', () => {
     const minimal = {
       enabled: true,
       touchpoints: DEFAULT_FOLLOWUP_SETTINGS.touchpoints.map((t) => ({
@@ -120,18 +120,18 @@ describe('FOLLOWUP_SETTINGS_SCHEMA', () => {
     const parsed = FOLLOWUP_SETTINGS_SCHEMA.safeParse(minimal)
     expect(parsed.success).toBe(true)
     if (parsed.success) {
-      expect(parsed.data.touchpoints[0].image_media_asset_id).toBeNull()
+      expect(parsed.data.touchpoints[0].image_media_asset_ids).toEqual([])
       expect(parsed.data.touchpoints[0].action_page_id).toBeNull()
     }
   })
 
-  it('rejects non-UUID image_media_asset_id', () => {
+  it('rejects non-UUID inside image_media_asset_ids array', () => {
     const bad = validSettings()
     bad.touchpoints[0] = {
       enabled: true,
       offset_ms: 5 * 60_000,
       instruction: '',
-      image_media_asset_id: 'not-a-uuid',
+      image_media_asset_ids: ['not-a-uuid'],
       action_page_id: null,
     }
     expect(FOLLOWUP_SETTINGS_SCHEMA.safeParse(bad).success).toBe(false)
@@ -143,10 +143,61 @@ describe('FOLLOWUP_SETTINGS_SCHEMA', () => {
       enabled: true,
       offset_ms: 5 * 60_000,
       instruction: '',
-      image_media_asset_id: null,
+      image_media_asset_ids: [],
       action_page_id: 'nope',
     }
     expect(FOLLOWUP_SETTINGS_SCHEMA.safeParse(bad).success).toBe(false)
+  })
+
+  it('rejects more than 3 images on a touchpoint', () => {
+    const bad = validSettings()
+    bad.touchpoints[0] = {
+      enabled: true,
+      offset_ms: 5 * 60_000,
+      instruction: '',
+      image_media_asset_ids: [
+        '11111111-1111-4111-9111-111111111111',
+        '22222222-2222-4222-9222-222222222222',
+        '33333333-3333-4333-9333-333333333333',
+        '44444444-4444-4444-9444-444444444444',
+      ],
+      action_page_id: null,
+    }
+    expect(FOLLOWUP_SETTINGS_SCHEMA.safeParse(bad).success).toBe(false)
+  })
+
+  it('accepts exactly 3 images on a touchpoint', () => {
+    const ok = validSettings()
+    ok.touchpoints[0] = {
+      enabled: true,
+      offset_ms: 5 * 60_000,
+      instruction: '',
+      image_media_asset_ids: [
+        '11111111-1111-4111-9111-111111111111',
+        '22222222-2222-4222-9222-222222222222',
+        '33333333-3333-4333-9333-333333333333',
+      ],
+      action_page_id: null,
+    }
+    expect(FOLLOWUP_SETTINGS_SCHEMA.safeParse(ok).success).toBe(true)
+  })
+
+  it('preserves image_media_asset_ids order through parse', () => {
+    const ids = [
+      '11111111-1111-4111-9111-111111111111',
+      '22222222-2222-4222-9222-222222222222',
+    ]
+    const ok = validSettings()
+    ok.touchpoints[0] = {
+      enabled: true,
+      offset_ms: 5 * 60_000,
+      instruction: '',
+      image_media_asset_ids: ids,
+      action_page_id: null,
+    }
+    const parsed = FOLLOWUP_SETTINGS_SCHEMA.safeParse(ok)
+    expect(parsed.success).toBe(true)
+    if (parsed.success) expect(parsed.data.touchpoints[0].image_media_asset_ids).toEqual(ids)
   })
 })
 
@@ -181,8 +232,8 @@ describe('resolveEnabledOffsets', () => {
 
   it('sorts ascending by offset_ms even if user reordered', () => {
     const s = validSettings()
-    s.touchpoints[5] = { enabled: true, offset_ms: 86_400_000, instruction: '' } // 24h in slot 5
-    s.touchpoints[6] = { enabled: true, offset_ms: 64_800_000, instruction: '' } // 18h in slot 6
+    s.touchpoints[5] = { enabled: true, offset_ms: 86_400_000, instruction: '', image_media_asset_ids: [], action_page_id: null } // 24h in slot 5
+    s.touchpoints[6] = { enabled: true, offset_ms: 64_800_000, instruction: '', image_media_asset_ids: [], action_page_id: null } // 18h in slot 6
     const snap = resolveEnabledOffsets(s)
     // resolver sorts by offset_ms ascending so 18h (slot 6) comes before 24h (slot 5)
     expect(snap.map((e) => e.offset_ms)).toEqual([
