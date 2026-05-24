@@ -95,6 +95,11 @@ export function resolveEnabledOffsets(settings: FollowupSettings): SnapshotEntry
   return entries
 }
 
+// Back-compat: rows in chatbot_configs.followup_settings written before the
+// multi-image change carry `image_media_asset_id: string|null` instead of
+// `image_media_asset_ids: string[]`. Remove this function (and its call in
+// loadFollowupSettings) once the expand SQL migration has been live long enough
+// that no rows carry only the legacy key.
 function normalizeStoredSettings(raw: unknown): unknown {
   if (!raw || typeof raw !== 'object') return raw
   const obj = raw as Record<string, unknown>
