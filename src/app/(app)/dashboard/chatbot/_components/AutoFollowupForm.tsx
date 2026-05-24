@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   DEFAULT_FOLLOWUP_SETTINGS,
   type FollowupSettings,
@@ -139,6 +139,45 @@ export function AutoFollowupForm({
   const [toast, setToast] = useState<string | null>(null)
   const [topError, setTopError] = useState<string | null>(null)
   const [pickerRowIdx, setPickerRowIdx] = useState<number | null>(null)
+
+  useEffect(() => {
+    const unhydrated = Array.from(new Set(
+      state.rows.flatMap((r) => r.images.filter((i) => !i.thumbUrl).map((i) => i.id)),
+    ))
+    if (unhydrated.length === 0) return
+    let cancelled = false
+    const ctrl = new AbortController()
+    fetch(`/api/media/assets?ids=${encodeURIComponent(unhydrated.join(','))}`, { signal: ctrl.signal })
+      .then(async (r) => (r.ok ? r.json() : Promise.reject(new Error(await r.text()))))
+      .then((j: { assets: Array<{ id: string; name: string; thumbUrl: string | null }> }) => {
+        if (cancelled) return
+        const map = new Map(j.assets.map((a) => [a.id, a]))
+        setState((s) => ({
+          ...s,
+          rows: s.rows.map((r) => ({
+            ...r,
+            images: r.images.map((img) =>
+              img.thumbUrl ? img : (
+                map.has(img.id)
+                  ? { id: img.id, thumbUrl: map.get(img.id)!.thumbUrl, name: map.get(img.id)!.name }
+                  : img
+              ),
+            ),
+          })),
+        }))
+      })
+      .catch((e) => {
+        if ((e as Error).name === 'AbortError') return
+        // Non-fatal: keep the 📷 placeholder; user can still re-pick.
+        console.warn('[AutoFollowupForm] asset hydrate failed', e)
+      })
+    return () => {
+      cancelled = true
+      ctrl.abort()
+    }
+    // We deliberately only run when baseline changes (i.e. server-side settings refresh).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [baseline])
 
   const { rowErrors, formError } = useMemo(() => validate(state), [state])
   const dirty = useMemo(
