@@ -5,18 +5,22 @@ import {
   DEFAULT_FOLLOWUP_SETTINGS,
   type FollowupSettings,
 } from '@/lib/followups/settings'
-import { MediaPickerModal, type PickedAsset } from './MediaPickerModal'
+import { MediaPickerModal } from './MediaPickerModal'
 
 type Unit = 'minutes' | 'hours' | 'days'
+
+interface RowImage {
+  id: string
+  thumbUrl: string | null
+  name: string | null
+}
 
 interface RowDraft {
   enabled: boolean
   value: number
   unit: Unit
   instruction: string
-  imageMediaAssetId: string | null
-  imageThumbUrl: string | null
-  imageName: string | null
+  images: RowImage[] // 0–3, ordered
   actionPageId: string | null
 }
 
@@ -54,9 +58,7 @@ function settingsToState(s: FollowupSettings): FormState {
         value,
         unit,
         instruction: t.instruction,
-        imageMediaAssetId: t.image_media_asset_id,
-        imageThumbUrl: null,
-        imageName: null,
+        images: t.image_media_asset_ids.map((id) => ({ id, thumbUrl: null, name: null })),
         actionPageId: t.action_page_id,
       }
     }),
@@ -70,7 +72,7 @@ function stateToSettings(s: FormState): FollowupSettings {
       enabled: r.enabled,
       offset_ms: draftToMs(r),
       instruction: r.instruction,
-      image_media_asset_id: r.imageMediaAssetId,
+      image_media_asset_ids: r.images.map((i) => i.id),
       action_page_id: r.actionPageId,
     })),
   }
@@ -272,30 +274,39 @@ export function AutoFollowupForm({
 
               <div className="afu-row-attach">
                 <div className="afu-attach-item">
-                  <span className="afu-attach-label">Image</span>
-                  {row.imageMediaAssetId ? (
-                    <div className="afu-attach-set">
-                      {row.imageThumbUrl ? (
-                        <img className="afu-attach-thumb" src={row.imageThumbUrl} alt={row.imageName ?? ''} />
-                      ) : (
-                        <span className="afu-attach-thumb afu-attach-thumb--placeholder" aria-hidden>📷</span>
-                      )}
-                      <span className="afu-attach-name">{row.imageName ?? 'Selected image'}</span>
-                      <button type="button" className="afu-link-btn" onClick={() => setPickerRowIdx(idx)} disabled={!row.enabled}>Change</button>
+                  <span className="afu-attach-label">Images</span>
+                  <div className="afu-attach-thumbs">
+                    {row.images.map((img, imgIdx) => (
+                      <div key={img.id} className="afu-attach-thumb-wrap">
+                        {img.thumbUrl ? (
+                          <img className="afu-attach-thumb" src={img.thumbUrl} alt={img.name ?? ''} />
+                        ) : (
+                          <span className="afu-attach-thumb afu-attach-thumb--placeholder" aria-hidden>📷</span>
+                        )}
+                        <button
+                          type="button"
+                          className="afu-attach-thumb-x"
+                          aria-label={`Remove image ${imgIdx + 1}`}
+                          disabled={!row.enabled}
+                          onClick={() =>
+                            setRow(idx, {
+                              images: row.images.filter((_, j) => j !== imgIdx),
+                            })
+                          }
+                        >×</button>
+                      </div>
+                    ))}
+                    {row.images.length < 3 && (
                       <button
                         type="button"
-                        className="afu-link-btn"
-                        onClick={() => setRow(idx, { imageMediaAssetId: null, imageThumbUrl: null, imageName: null })}
+                        className="afu-attach-add"
+                        onClick={() => setPickerRowIdx(idx)}
                         disabled={!row.enabled}
                       >
-                        Remove
+                        + Add
                       </button>
-                    </div>
-                  ) : (
-                    <button type="button" className="afu-attach-add" onClick={() => setPickerRowIdx(idx)} disabled={!row.enabled}>
-                      + Add image
-                    </button>
-                  )}
+                    )}
+                  </div>
                 </div>
 
                 <div className="afu-attach-item">
@@ -314,7 +325,7 @@ export function AutoFollowupForm({
                   </select>
                 </div>
 
-                {(row.imageMediaAssetId || row.actionPageId) && (
+                {(row.images.length > 0 || row.actionPageId) && (
                   <p className="afu-row-attach-note">
                     Attachments are skipped on nudges that fire after 24 hours.
                   </p>
@@ -328,12 +339,14 @@ export function AutoFollowupForm({
       <MediaPickerModal
         open={pickerRowIdx !== null}
         onClose={() => setPickerRowIdx(null)}
-        onSelect={(picked: PickedAsset) => {
+        maxSelect={3}
+        initialSelectedIds={
+          pickerRowIdx !== null ? state.rows[pickerRowIdx].images.map((i) => i.id) : []
+        }
+        onSelect={(picked) => {
           if (pickerRowIdx === null) return
           setRow(pickerRowIdx, {
-            imageMediaAssetId: picked.id,
-            imageThumbUrl: picked.thumbUrl,
-            imageName: picked.name,
+            images: picked.map((p) => ({ id: p.id, thumbUrl: p.thumbUrl, name: p.name })),
           })
         }}
       />
