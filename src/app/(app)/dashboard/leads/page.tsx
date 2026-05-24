@@ -12,6 +12,7 @@ import { KanbanBoard } from './_components/KanbanBoard'
 import { LeadsTable } from './_components/LeadsTable'
 import { ContactList } from './_components/ContactList'
 import { StageRulesTip } from './_components/StageRulesTip'
+import { LeadsContentArea } from './_components/LeadsContentArea'
 
 export default async function LeadsPage({
   searchParams,
@@ -74,7 +75,7 @@ async function LeadsBody({ params }: { params: ReturnType<typeof LeadsQuery.pars
         />
       )}
 
-      <div className="mt-5">
+      <LeadsContentArea>
         {params.view === 'kanban' ? (
           <KanbanBoard userId={user.id} stages={stages} fieldDefs={fieldDefs} campaigns={campaigns} params={params} />
         ) : params.view === 'contact' ? (
@@ -82,7 +83,7 @@ async function LeadsBody({ params }: { params: ReturnType<typeof LeadsQuery.pars
         ) : (
           <LeadsTable userId={user.id} stages={stages} fieldDefs={fieldDefs} campaigns={campaigns} params={params} />
         )}
-      </div>
+      </LeadsContentArea>
     </>
   )
 }

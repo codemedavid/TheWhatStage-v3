@@ -123,6 +123,28 @@ body {
   box-shadow: 0 0 0 2px var(--lead-page), 0 0 0 4px var(--lead-accent-ring);
 }
 
+/* Indeterminate progress bar shown during in-page navigation (filter / sort / etc.) */
+@keyframes lead-progress-slide {
+  0%   { transform: translateX(-100%); }
+  60%  { transform: translateX(180%); }
+  100% { transform: translateX(180%); }
+}
+[data-leads-root] .lead-progress-track {
+  position: relative;
+  height: 2px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--lead-surface-2);
+}
+[data-leads-root] .lead-progress-bar {
+  position: absolute;
+  inset-block: 0;
+  width: 40%;
+  background: var(--lead-accent);
+  border-radius: 999px;
+  animation: lead-progress-slide 1.1s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
 /* =========================================================================
    Knowledge document editor — Google Docs vibe.
    Paper canvas, comfortable typography, ProseMirror styles.

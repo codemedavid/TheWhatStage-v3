@@ -1,12 +1,37 @@
 'use client'
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useTransition,
+  type ReactNode,
+} from 'react'
 import { useRouter, useSearchParams, usePathname } from 'next/navigation'
-import { useTransition, useCallback } from 'react'
+
+type NavCtxValue = { isPending: boolean; start: (cb: () => void) => void } | null
+const NavContext = createContext<NavCtxValue>(null)
+
+export function LeadsNavProvider({ children }: { children: ReactNode }) {
+  const [isPending, start] = useTransition()
+  return (
+    <NavContext.Provider value={{ isPending, start }}>
+      {children}
+    </NavContext.Provider>
+  )
+}
+
+export function useNavPending(): boolean {
+  return useContext(NavContext)?.isPending ?? false
+}
 
 export function useUrlState() {
   const router = useRouter()
   const pathname = usePathname()
   const sp = useSearchParams()
-  const [, start] = useTransition()
+  const ctx = useContext(NavContext)
+  const [localPending, localStart] = useTransition()
+  const isPending = ctx?.isPending ?? localPending
+  const start = ctx?.start ?? localStart
 
   const set = useCallback(
     (patch: Record<string, string | undefined>) => {
@@ -18,8 +43,8 @@ export function useUrlState() {
       next.delete('page')
       start(() => router.replace(`${pathname}?${next.toString()}`))
     },
-    [router, pathname, sp],
+    [router, pathname, sp, start],
   )
 
-  return { sp, set }
+  return { sp, set, isPending }
 }

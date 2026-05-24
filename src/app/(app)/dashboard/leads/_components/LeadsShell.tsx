@@ -1,5 +1,6 @@
 'use client'
 import { createContext, useContext, useCallback, useSyncExternalStore, type ReactNode } from 'react'
+import { LeadsNavProvider } from './_useUrlState'
 
 type Theme = 'light' | 'dark'
 
@@ -50,7 +51,7 @@ export function LeadsShell({ children }: { children: ReactNode }) {
       className="min-h-[calc(100vh-3rem)] -mx-8 -my-6 px-8 py-6"
     >
       <ThemeContext.Provider value={{ theme, setTheme }}>
-        {children}
+        <LeadsNavProvider>{children}</LeadsNavProvider>
       </ThemeContext.Provider>
     </div>
   )

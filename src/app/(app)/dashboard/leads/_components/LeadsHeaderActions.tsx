@@ -27,7 +27,7 @@ export function LeadsHeaderActions({
       <button
         type="button"
         onClick={() => setOpenAdd(true)}
-        className="lead-focus inline-flex h-8 items-center gap-1.5 rounded-full px-3.5 text-[13px] font-medium transition-colors"
+        className="lead-focus inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-full px-3.5 text-[13px] font-medium transition-colors"
         style={{
           background: 'var(--lead-accent)',
           color: '#fff',
@@ -79,7 +79,7 @@ function ViewSwitch({ view }: { view: 'kanban' | 'table' | 'contact' }) {
             type="button"
             onClick={() => set({ view: v })}
             aria-pressed={active}
-            className="lead-focus inline-flex h-7 items-center gap-1.5 rounded-full px-3 text-[12.5px] font-medium transition-all"
+            className="lead-focus inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-full px-3 text-[12.5px] font-medium transition-all"
             style={{
               background: active ? 'var(--lead-surface)' : 'transparent',
               color: active ? 'var(--lead-ink)' : 'var(--lead-muted)',
@@ -119,7 +119,7 @@ function OverflowMenu() {
         type="button"
         aria-label="Configuration"
         onClick={() => setOpen((v) => !v)}
-        className="lead-focus inline-flex h-8 w-8 items-center justify-center rounded-full transition-colors"
+        className="lead-focus inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full transition-colors"
         style={{ color: 'var(--lead-muted)' }}
         onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--lead-surface-2)')}
         onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}

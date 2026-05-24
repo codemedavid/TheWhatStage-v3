@@ -4,7 +4,7 @@ import { useUrlState } from './_useUrlState'
 import type { LeadsQuery } from '../_lib/schemas'
 
 export function Toolbar({ params }: { params: LeadsQuery }) {
-  const { set } = useUrlState()
+  const { set, isPending } = useUrlState()
   const [q, setQ] = useState(params.q ?? '')
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -28,7 +28,14 @@ export function Toolbar({ params }: { params: LeadsQuery }) {
   const hasFilters = !!(params.q || params.from || params.to)
 
   return (
-    <div className="mt-4 flex flex-wrap items-center gap-2">
+    <div
+      className="mt-4 flex flex-wrap items-center gap-2"
+      style={{
+        opacity: isPending ? 0.7 : 1,
+        transition: 'opacity 120ms',
+      }}
+      aria-busy={isPending}
+    >
       <div
         className="group relative flex h-8 flex-1 min-w-[260px] max-w-md items-center gap-2 rounded-full px-3 transition-colors"
         style={{
@@ -52,7 +59,7 @@ export function Toolbar({ params }: { params: LeadsQuery }) {
           <button
             type="button"
             onClick={() => setQ('')}
-            className="lead-focus inline-flex h-5 w-5 items-center justify-center rounded-full"
+            className="lead-focus inline-flex h-5 w-5 cursor-pointer items-center justify-center rounded-full"
             style={{ color: 'var(--lead-muted)', background: 'var(--lead-surface-2)' }}
             aria-label="Clear search"
           >
@@ -105,7 +112,7 @@ export function Toolbar({ params }: { params: LeadsQuery }) {
                   key={f}
                   type="button"
                   onClick={() => set({ contact_filter: f, page: undefined })}
-                  className="lead-focus h-7 rounded-full px-3 text-[12px] transition-colors"
+                  className="lead-focus h-7 cursor-pointer rounded-full px-3 text-[12px] transition-colors"
                   style={{
                     background: active ? 'var(--lead-accent)' : 'transparent',
                     color: active ? '#fff' : 'var(--lead-ink)',
@@ -118,7 +125,7 @@ export function Toolbar({ params }: { params: LeadsQuery }) {
           </div>
 
           <label
-            className="relative inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-[12.5px] font-medium transition-colors"
+            className="relative inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-full px-3 text-[12.5px] font-medium transition-colors"
             style={{
               color: 'var(--lead-body)',
               background: 'var(--lead-surface)',
@@ -131,7 +138,7 @@ export function Toolbar({ params }: { params: LeadsQuery }) {
             <select
               value={params.contact_sort}
               onChange={(e) => set({ contact_sort: e.target.value, page: undefined })}
-              className="bg-transparent pr-1 outline-none lead-focus"
+              className="lead-focus cursor-pointer bg-transparent pr-1 outline-none"
               style={{ color: 'inherit' }}
             >
               <option value="recent_contact">Most recent contact</option>
@@ -146,7 +153,7 @@ export function Toolbar({ params }: { params: LeadsQuery }) {
         <button
           type="button"
           onClick={() => set({ q: undefined, from: undefined, to: undefined })}
-          className="lead-focus h-8 rounded-full px-3 text-[12.5px] font-medium transition-colors"
+          className="lead-focus h-8 cursor-pointer rounded-full px-3 text-[12.5px] font-medium transition-colors"
           style={{ color: 'var(--lead-accent)' }}
           onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--lead-accent-tint)')}
           onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
@@ -162,7 +169,7 @@ function DateChip({ label, value, onChange }: { label: string; value: string; on
   const has = !!value
   return (
     <label
-      className="inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-[12.5px] transition-colors"
+      className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-full px-3 text-[12.5px] transition-colors"
       style={{
         color: has ? 'var(--lead-ink)' : 'var(--lead-muted)',
         background: has ? 'var(--lead-accent-tint)' : 'var(--lead-surface)',
@@ -174,7 +181,7 @@ function DateChip({ label, value, onChange }: { label: string; value: string; on
         type="date"
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="bg-transparent outline-none lead-focus"
+        className="lead-focus cursor-pointer bg-transparent outline-none"
         style={{ color: 'inherit', colorScheme: 'inherit' }}
       />
     </label>
@@ -184,7 +191,7 @@ function DateChip({ label, value, onChange }: { label: string; value: string; on
 function SortPicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   return (
     <label
-      className="relative inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-[12.5px] font-medium transition-colors"
+      className="relative inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-full px-3 text-[12.5px] font-medium transition-colors"
       style={{
         color: 'var(--lead-body)',
         background: 'var(--lead-surface)',
@@ -197,7 +204,7 @@ function SortPicker({ value, onChange }: { value: string; onChange: (v: string) 
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="bg-transparent pr-1 outline-none lead-focus"
+        className="lead-focus cursor-pointer bg-transparent pr-1 outline-none"
         style={{ color: 'inherit' }}
       >
         <option value="recent">Most recent</option>

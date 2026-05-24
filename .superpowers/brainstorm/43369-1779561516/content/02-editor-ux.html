@@ -1,0 +1,61 @@
+<h2>Echo editor — which layout?</h2>
+<p class="subtitle">How variables get discovered and how the preview is shown</p>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Sidecar — picker beside textarea, preview below</h3>
+      <p>Variables list on the right (collapsed groups by namespace). Click inserts at cursor. Live preview renders under the textarea using sample data. Validation: unknown <code>{{tokens}}</code> get underlined.</p>
+    </div>
+  </div>
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Inline @-mention autocomplete + collapsed preview</h3>
+      <p>Typing <code>{{</code> opens a dropdown of variables (like Notion/Slack). Preview is a collapsed <code>&lt;details&gt;</code> under the textarea, expand to see. Picker is hidden until you ask for it.</p>
+    </div>
+  </div>
+  <div class="option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>Split — editor left, live preview right (Messenger bubble)</h3>
+      <p>Two-column section. Left: textarea + variable chips above it (click to insert). Right: a Messenger-style bubble that re-renders on every keystroke with sample data. Preview always visible.</p>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top:24px">
+  <h3>Mockup of Option A (the recommendation)</h3>
+</div>
+
+<div class="mockup">
+  <div class="mockup-header">Action page editor → Messenger echo section</div>
+  <div class="mockup-body" style="padding:20px">
+    <div style="display:grid;grid-template-columns:1fr 220px;gap:16px">
+      <div>
+        <div style="font-size:11px;font-weight:600;text-transform:uppercase;color:#6B7280;letter-spacing:.04em;margin-bottom:6px">Messenger echo</div>
+        <textarea readonly style="width:100%;height:130px;border:1px solid #E5E7EB;border-radius:6px;padding:10px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;line-height:1.55;color:#111827">Hi {{fb.name || customer.name}}, you're booked for {{booking.date}} at {{booking.time}}. We'll follow up shortly. — Reply STOP to opt out.</textarea>
+        <div style="margin-top:14px">
+          <div style="font-size:11px;font-weight:600;text-transform:uppercase;color:#6B7280;letter-spacing:.04em;margin-bottom:6px">Preview (sample data)</div>
+          <div style="background:#F0F2F5;border-radius:18px;padding:10px 14px;display:inline-block;max-width:90%;font-size:14px;line-height:1.45;color:#050505">Hi Maria Santos, you're booked for May 28 at 2:30 PM. We'll follow up shortly. — Reply STOP to opt out.</div>
+        </div>
+      </div>
+      <div style="border:1px solid #E5E7EB;border-radius:8px;background:#FAFAFA;padding:10px;font-size:12px">
+        <div style="font-weight:600;color:#111827;margin-bottom:8px">Variables</div>
+        <div style="color:#6B7280;text-transform:uppercase;font-size:10px;letter-spacing:.06em;margin-top:6px">Lead</div>
+        <div style="padding:4px 0"><code>{{fb.name}}</code></div>
+        <div style="padding:4px 0"><code>{{lead.name}}</code></div>
+        <div style="padding:4px 0"><code>{{lead.phone}}</code></div>
+        <div style="color:#6B7280;text-transform:uppercase;font-size:10px;letter-spacing:.06em;margin-top:10px">Customer (this submission)</div>
+        <div style="padding:4px 0"><code>{{customer.name}}</code></div>
+        <div style="padding:4px 0"><code>{{customer.phone}}</code></div>
+        <div style="padding:4px 0"><code>{{customer.email}}</code></div>
+        <div style="color:#6B7280;text-transform:uppercase;font-size:10px;letter-spacing:.06em;margin-top:10px">Booking</div>
+        <div style="padding:4px 0"><code>{{booking.date}}</code></div>
+        <div style="padding:4px 0"><code>{{booking.time}}</code></div>
+        <div style="padding:4px 0"><code>{{booking.duration}}</code></div>
+      </div>
+    </div>
+  </div>
+</div>

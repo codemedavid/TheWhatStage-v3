@@ -1,0 +1,59 @@
+<h2>Echo system — what exists today</h2>
+<p class="subtitle">Where confirmation messages come from on submission, and where templates would slot in</p>
+
+<div class="mockup">
+  <div class="mockup-header">Echo resolution chain (today)</div>
+  <div class="mockup-body" style="padding:24px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;line-height:1.7">
+    <div>1. <b>outcomeAction.messenger_text</b> &nbsp;(qualification per-outcome card)</div>
+    <div style="color:#9ca3af;padding-left:18px">↳ first non-empty wins</div>
+    <div>2. <b>pipeline_rules[outcome].notify_text</b> &nbsp;(per-outcome editor)</div>
+    <div style="color:#9ca3af;padding-left:18px">↳ first non-empty wins</div>
+    <div>3. <b>page.notification_template.text</b> &nbsp;(global page echo)</div>
+    <div style="margin-top:14px;color:#374151">→ for <b>catalog</b>: <code>buildOrderEcho()</code> auto-prepends order summary + customer block, then appends the resolved text.</div>
+    <div style="margin-top:14px;color:#374151">→ send as <code>{ kind: 'text' }</code> via <code>sendOutbound</code></div>
+  </div>
+</div>
+
+<div class="section" style="margin-top:24px">
+  <h3>What each page kind has on submission</h3>
+</div>
+
+<div class="cards">
+  <div class="card">
+    <div class="card-body">
+      <h3>Booking</h3>
+      <p><b>Data:</b> slot_iso, fields (full_name, phone, +custom)<br>
+      <b>Echo today:</b> plain text from <code>notification_template.text</code><br>
+      <b>Outcomes:</b> booked / invalid</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-body">
+      <h3>Catalog (products)</h3>
+      <p><b>Data:</b> items[], customer{}, payment_method_id, payment_proof_url<br>
+      <b>Echo today:</b> auto order-summary block + appended notify text<br>
+      <b>Outcomes:</b> checked_out</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-body">
+      <h3>Sales</h3>
+      <p><b>Data:</b> customer{}, optional payment_method_id, payment_proof_url<br>
+      <b>Echo today:</b> plain text from <code>notification_template.text</code><br>
+      <b>Outcomes:</b> submitted / payment_submitted</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-body">
+      <h3>Property (realestate)</h3>
+      <p><b>Data:</b> raw payload — currently passes through untyped<br>
+      <b>Echo today:</b> plain text from <code>notification_template.text</code><br>
+      <b>Outcomes:</b> inquiry_submitted / viewing_booked</p>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top:24px">
+  <h3>What you're asking for</h3>
+  <p>Replace the plain-text echo with a <b>templated echo</b> using <code>{{var}}</code> placeholders + fallback chains (<code>{{fb.name || customer.name}}</code>), per page kind. Plus re-echo the payment screenshot on catalog/sales.</p>
+</div>
