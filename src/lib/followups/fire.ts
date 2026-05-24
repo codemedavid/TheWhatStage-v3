@@ -239,20 +239,24 @@ export async function handleFollowupSend(
     })
 
   if (canAttach) {
-    if (imageMediaAssetId) {
-      const imageUrl = await mintMediaAssetUrl(admin, imageMediaAssetId, schedule.user_id)
-      if (imageUrl) {
-        try {
-          await sendOutbound({
-            admin,
-            thread: { id: thread.id, psid: thread.psid, last_inbound_at: thread.last_inbound_at },
-            pageToken,
-            payload: { kind: 'image', imageUrl },
-            kind: 'bot',
-          })
-        } catch (e) {
-          console.warn('[followups.fire] image send failed', schedule.id, e instanceof Error ? e.message : String(e))
-        }
+    for (const assetId of imageMediaAssetIds) {
+      const imageUrl = await mintMediaAssetUrl(admin, assetId, schedule.user_id)
+      if (!imageUrl) continue
+      try {
+        await sendOutbound({
+          admin,
+          thread: { id: thread.id, psid: thread.psid, last_inbound_at: thread.last_inbound_at },
+          pageToken,
+          payload: { kind: 'image', imageUrl },
+          kind: 'bot',
+        })
+      } catch (e) {
+        console.warn(
+          '[followups.fire] image send failed',
+          schedule.id,
+          assetId,
+          e instanceof Error ? e.message : String(e),
+        )
       }
     }
     if (actionPageId) {
@@ -274,11 +278,11 @@ export async function handleFollowupSend(
         }
       }
     }
-  } else if (imageMediaAssetId || actionPageId) {
+  } else if (imageMediaAssetIds.length > 0 || actionPageId) {
     console.warn('[followups.fire] attachments skipped — outside 24h window', {
       scheduleId: schedule.id,
       slot: entry.slot,
-      dropped_image: !!imageMediaAssetId,
+      dropped_image_count: imageMediaAssetIds.length,
       dropped_action_page: !!actionPageId,
     })
   }

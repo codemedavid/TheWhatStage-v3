@@ -370,7 +370,7 @@ describe('handleFollowupSend — attachments', () => {
     expect(mintDeeplinkMock).not.toHaveBeenCalled()
     expect(warn).toHaveBeenCalledWith(
       '[followups.fire] attachments skipped — outside 24h window',
-      expect.objectContaining({ dropped_image: true, dropped_action_page: true }),
+      expect.objectContaining({ dropped_image_count: 1, dropped_action_page: true }),
     )
     warn.mockRestore()
   })
@@ -421,6 +421,126 @@ describe('handleFollowupSend — attachments', () => {
     expect(generateMock).toHaveBeenCalledWith(expect.objectContaining({
       attachmentHint: '',
     }))
+  })
+})
+
+describe('handleFollowupSend — multi-image attachments', () => {
+  function multiSeed(opts: { ids: string[]; pageId?: string | null }) {
+    return {
+      schedule: {
+        id: 's1', user_id: 'u1', lead_id: 'l1', thread_id: 't1', page_id: 'p1',
+        started_at: new Date(Date.now() - 5 * 60_000).toISOString(),
+        next_offset_idx: 0,
+        conversation_kind: 'real' as const,
+        status: 'pending',
+        offsets_snapshot: [{
+          slot: 0,
+          offset_ms: 5 * 60_000,
+          instruction: 'hello',
+          image_media_asset_ids: opts.ids,
+          action_page_id: opts.pageId ?? null,
+        }],
+      },
+      thread:  { id: 't1', psid: 'PSID', last_inbound_at: new Date(Date.now() - 60_000).toISOString(), full_name: 'Maria' },
+      page:    { id: 'p1', page_access_token: 'enc-token' },
+      lead:    { name: 'Maria' },
+      chatbot: { persona: null, instructions: null },
+      history: [],
+    }
+  }
+
+  it('sends text → 3 images → button in pick order when policy is RESPONSE', async () => {
+    mintAssetMock.mockImplementation(async (_admin: unknown, id: string) =>
+      `https://signed/${id}.jpg`,
+    )
+    const seed = multiSeed({
+      ids: [
+        '11111111-1111-4111-9111-111111111111',
+        '22222222-2222-4222-9222-222222222222',
+        '33333333-3333-4333-9333-333333333333',
+      ],
+      pageId: '44444444-4444-4444-9444-444444444444',
+    })
+    const { admin } = makeAdmin(seed)
+    await handleFollowupSend(admin as never, { scheduleId: 's1' })
+
+    expect(sendOutboundMock).toHaveBeenCalledTimes(5)
+    const kinds = sendOutboundMock.mock.calls.map(
+      (c: [{ payload: { kind: string } }]) => c[0].payload.kind,
+    )
+    expect(kinds).toEqual(['text', 'image', 'image', 'image', 'button'])
+    const urls = sendOutboundMock.mock.calls
+      .filter((c: [{ payload: { kind: string; imageUrl?: string } }]) => c[0].payload.kind === 'image')
+      .map((c: [{ payload: { imageUrl: string } }]) => c[0].payload.imageUrl)
+    expect(urls).toEqual([
+      'https://signed/11111111-1111-4111-9111-111111111111.jpg',
+      'https://signed/22222222-2222-4222-9222-222222222222.jpg',
+      'https://signed/33333333-3333-4333-9333-333333333333.jpg',
+    ])
+  })
+
+  it('sends text → 2 images when 2 ids and no page', async () => {
+    const seed = multiSeed({
+      ids: [
+        '11111111-1111-4111-9111-111111111111',
+        '22222222-2222-4222-9222-222222222222',
+      ],
+    })
+    const { admin } = makeAdmin(seed)
+    await handleFollowupSend(admin as never, { scheduleId: 's1' })
+    const kinds = sendOutboundMock.mock.calls.map(
+      (c: [{ payload: { kind: string } }]) => c[0].payload.kind,
+    )
+    expect(kinds).toEqual(['text', 'image', 'image'])
+  })
+
+  it('skips image #2 silently when mintMediaAssetUrl returns null for it', async () => {
+    mintAssetMock.mockImplementation(async (_admin: unknown, id: string) =>
+      id === '22222222-2222-4222-9222-222222222222' ? null : `https://signed/${id}.jpg`,
+    )
+    const seed = multiSeed({
+      ids: [
+        '11111111-1111-4111-9111-111111111111',
+        '22222222-2222-4222-9222-222222222222',
+        '33333333-3333-4333-9333-333333333333',
+      ],
+    })
+    const { admin } = makeAdmin(seed)
+    await handleFollowupSend(admin as never, { scheduleId: 's1' })
+    const kinds = sendOutboundMock.mock.calls.map(
+      (c: [{ payload: { kind: string } }]) => c[0].payload.kind,
+    )
+    expect(kinds).toEqual(['text', 'image', 'image'])
+  })
+
+  it('continues sending images after one send throws, then advances', async () => {
+    const seed = multiSeed({
+      ids: [
+        '11111111-1111-4111-9111-111111111111',
+        '22222222-2222-4222-9222-222222222222',
+        '33333333-3333-4333-9333-333333333333',
+      ],
+    })
+    let imageCallCount = 0
+    sendOutboundMock.mockImplementation(async (args: { payload: { kind: string } }) => {
+      if (args.payload.kind === 'image') {
+        imageCallCount += 1
+        if (imageCallCount === 2) throw new Error('boom')
+      }
+      return { sent: true, messageId: `fb${imageCallCount}` }
+    })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const { admin, updates } = makeAdmin(seed)
+    await expect(handleFollowupSend(admin as never, { scheduleId: 's1' })).resolves.toBeUndefined()
+    // All three image sends were attempted.
+    const imageCalls = sendOutboundMock.mock.calls.filter(
+      (c: [{ payload: { kind: string } }]) => c[0].payload.kind === 'image',
+    )
+    expect(imageCalls).toHaveLength(3)
+    // Schedule still advanced.
+    const upd = updates.filter((u) => u.table === 'lead_followup_schedules')
+    expect((upd[upd.length - 1].values as Record<string, unknown>).status).toBe('done')
+    warn.mockRestore()
   })
 })
 
