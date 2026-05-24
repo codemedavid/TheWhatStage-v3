@@ -311,7 +311,7 @@ describe('handleFollowupSend — attachments', () => {
           slot: 0,
           offset_ms: 5 * 60_000,
           instruction: 'hello',
-          image_media_asset_id: null,
+          image_media_asset_ids: [],
           action_page_id: null,
           ...snapshotEntry,
         }],
@@ -326,8 +326,8 @@ describe('handleFollowupSend — attachments', () => {
 
   it('sends text → image → button in order when policy is RESPONSE and both attachments are set', async () => {
     const seed = attachSeed({
-      image_media_asset_id: '11111111-1111-4111-9111-111111111111',
-      action_page_id:        '22222222-2222-4222-9222-222222222222',
+      image_media_asset_ids: ['11111111-1111-4111-9111-111111111111'],
+      action_page_id:         '22222222-2222-4222-9222-222222222222',
     })
     const { admin } = makeAdmin(seed)
     await handleFollowupSend(admin as never, { scheduleId: 's1' })
@@ -357,8 +357,8 @@ describe('handleFollowupSend — attachments', () => {
   it('sends text only when policy is HUMAN_AGENT, even with attachments configured', async () => {
     resolvePolicyMock.mockResolvedValue({ mode: 'HUMAN_AGENT' })
     const seed = attachSeed({
-      image_media_asset_id: '11111111-1111-4111-9111-111111111111',
-      action_page_id:        '22222222-2222-4222-9222-222222222222',
+      image_media_asset_ids: ['11111111-1111-4111-9111-111111111111'],
+      action_page_id:         '22222222-2222-4222-9222-222222222222',
     })
     const { admin } = makeAdmin(seed)
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
@@ -377,7 +377,7 @@ describe('handleFollowupSend — attachments', () => {
 
   it('sends only text + image when action_page_id is null', async () => {
     const seed = attachSeed({
-      image_media_asset_id: '11111111-1111-4111-9111-111111111111',
+      image_media_asset_ids: ['11111111-1111-4111-9111-111111111111'],
       action_page_id: null,
     })
     const { admin } = makeAdmin(seed)
@@ -389,7 +389,7 @@ describe('handleFollowupSend — attachments', () => {
   it('skips the image silently when mintMediaAssetUrl returns null', async () => {
     mintAssetMock.mockResolvedValue(null)
     const seed = attachSeed({
-      image_media_asset_id: '11111111-1111-4111-9111-111111111111',
+      image_media_asset_ids: ['11111111-1111-4111-9111-111111111111'],
       action_page_id: null,
     })
     const { admin } = makeAdmin(seed)
@@ -400,8 +400,8 @@ describe('handleFollowupSend — attachments', () => {
 
   it('passes a non-empty attachmentHint to the generator inside the window', async () => {
     const seed = attachSeed({
-      image_media_asset_id: '11111111-1111-4111-9111-111111111111',
-      action_page_id:        '22222222-2222-4222-9222-222222222222',
+      image_media_asset_ids: ['11111111-1111-4111-9111-111111111111'],
+      action_page_id:         '22222222-2222-4222-9222-222222222222',
     })
     const { admin } = makeAdmin(seed)
     await handleFollowupSend(admin as never, { scheduleId: 's1' })
@@ -413,13 +413,54 @@ describe('handleFollowupSend — attachments', () => {
   it('passes empty attachmentHint when policy is HUMAN_AGENT', async () => {
     resolvePolicyMock.mockResolvedValue({ mode: 'HUMAN_AGENT' })
     const seed = attachSeed({
-      image_media_asset_id: '11111111-1111-4111-9111-111111111111',
-      action_page_id:        '22222222-2222-4222-9222-222222222222',
+      image_media_asset_ids: ['11111111-1111-4111-9111-111111111111'],
+      action_page_id:         '22222222-2222-4222-9222-222222222222',
     })
     const { admin } = makeAdmin(seed)
     await handleFollowupSend(admin as never, { scheduleId: 's1' })
     expect(generateMock).toHaveBeenCalledWith(expect.objectContaining({
       attachmentHint: '',
     }))
+  })
+})
+
+describe('handleFollowupSend — legacy snapshot shape (image_media_asset_id)', () => {
+  function legacySeed(extra: Record<string, unknown> = {}) {
+    return {
+      schedule: {
+        id: 's1', user_id: 'u1', lead_id: 'l1', thread_id: 't1', page_id: 'p1',
+        started_at: new Date(Date.now() - 5 * 60_000).toISOString(),
+        next_offset_idx: 0,
+        conversation_kind: 'real' as const,
+        status: 'pending',
+        offsets_snapshot: [{
+          slot: 0,
+          offset_ms: 5 * 60_000,
+          instruction: 'hello',
+          // Legacy singular field, no array
+          image_media_asset_id: extra.image_media_asset_id ?? null,
+          action_page_id: extra.action_page_id ?? null,
+        }],
+      },
+      thread:  { id: 't1', psid: 'PSID', last_inbound_at: new Date(Date.now() - 60_000).toISOString(), full_name: 'Maria' },
+      page:    { id: 'p1', page_access_token: 'enc-token' },
+      lead:    { name: 'Maria' },
+      chatbot: { persona: null, instructions: null },
+      history: [],
+    }
+  }
+
+  it('sends one image when legacy snapshot has image_media_asset_id set', async () => {
+    const { admin } = makeAdmin(legacySeed({ image_media_asset_id: '11111111-1111-4111-9111-111111111111' }) as never)
+    await handleFollowupSend(admin as never, { scheduleId: 's1' })
+    const kinds = sendOutboundMock.mock.calls.map((c: [{ payload: { kind: string } }]) => c[0].payload.kind)
+    expect(kinds).toEqual(['text', 'image'])
+  })
+
+  it('sends text only when legacy snapshot has image_media_asset_id null and no array', async () => {
+    const { admin } = makeAdmin(legacySeed({ image_media_asset_id: null }) as never)
+    await handleFollowupSend(admin as never, { scheduleId: 's1' })
+    const kinds = sendOutboundMock.mock.calls.map((c: [{ payload: { kind: string } }]) => c[0].payload.kind)
+    expect(kinds).toEqual(['text'])
   })
 })

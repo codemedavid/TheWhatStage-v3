@@ -18,6 +18,20 @@ import { generateFollowupMessage } from './generateMessage'
 import { mintMediaAssetUrl, mintActionPageDeeplink } from './attachments'
 import type { SnapshotEntry } from './settings'
 
+// Back-compat: snapshots captured before the multi-image change carry
+// `image_media_asset_id: string|null` instead of `image_media_asset_ids: string[]`.
+// Remove this helper once all in-flight schedules with the legacy shape have
+// drained — max 7 days after this ships.
+function readImageIds(
+  entry: { image_media_asset_ids?: unknown; image_media_asset_id?: unknown },
+): string[] {
+  if (Array.isArray(entry.image_media_asset_ids)) {
+    return entry.image_media_asset_ids.filter((v): v is string => typeof v === 'string')
+  }
+  if (typeof entry.image_media_asset_id === 'string') return [entry.image_media_asset_id]
+  return []
+}
+
 function insideWindowKind(lastInboundAt: string | null): 'bot' | 'workflow_human_agent' {
   return isInsideWindow(lastInboundAt) ? 'bot' : 'workflow_human_agent'
 }
@@ -72,7 +86,8 @@ export async function handleFollowupSend(
     return
   }
 
-  const imageMediaAssetId = entry.image_media_asset_id
+  const imageMediaAssetIds = readImageIds(entry)
+  const imageMediaAssetId = imageMediaAssetIds[0] ?? null   // temporary alias — removed in Task 7
   const actionPageId      = entry.action_page_id
 
   // Re-check gates: a lead who booked between scheduling and firing should
