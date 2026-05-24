@@ -95,6 +95,23 @@ export function resolveEnabledOffsets(settings: FollowupSettings): SnapshotEntry
   return entries
 }
 
+function normalizeStoredSettings(raw: unknown): unknown {
+  if (!raw || typeof raw !== 'object') return raw
+  const obj = raw as Record<string, unknown>
+  const tps = obj.touchpoints
+  if (!Array.isArray(tps)) return raw
+  return {
+    ...obj,
+    touchpoints: tps.map((t) => {
+      if (!t || typeof t !== 'object') return t
+      const tp = t as Record<string, unknown>
+      if (Array.isArray(tp.image_media_asset_ids)) return tp
+      const legacy = typeof tp.image_media_asset_id === 'string' ? tp.image_media_asset_id : null
+      return { ...tp, image_media_asset_ids: legacy ? [legacy] : [] }
+    }),
+  }
+}
+
 export async function loadFollowupSettings(
   admin: SupabaseClient,
   userId: string,
@@ -112,7 +129,7 @@ export async function loadFollowupSettings(
   if (!data || data.followup_settings == null) {
     return DEFAULT_FOLLOWUP_SETTINGS
   }
-  const parsed = FOLLOWUP_SETTINGS_SCHEMA.safeParse(data.followup_settings)
+  const parsed = FOLLOWUP_SETTINGS_SCHEMA.safeParse(normalizeStoredSettings(data.followup_settings))
   if (!parsed.success) {
     console.warn('[followups.settings] parse failed, using defaults', parsed.error.issues[0])
     return DEFAULT_FOLLOWUP_SETTINGS

@@ -306,4 +306,42 @@ describe('loadFollowupSettings', () => {
     const admin = makeAdmin({ data: { followup_settings: stored }, error: null })
     expect(await loadFollowupSettings(admin, 'u1')).toEqual(stored)
   })
+
+  it('upgrades legacy stored shape (image_media_asset_id) to image_media_asset_ids', async () => {
+    const legacy = {
+      enabled: true,
+      touchpoints: DEFAULT_FOLLOWUP_SETTINGS.touchpoints.map((t, i) => ({
+        enabled: t.enabled,
+        offset_ms: t.offset_ms,
+        instruction: t.instruction,
+        // Legacy singular field, no array
+        image_media_asset_id: i === 0 ? '11111111-1111-4111-9111-111111111111' : null,
+        action_page_id: null,
+      })),
+    }
+    const admin = makeAdmin({ data: { followup_settings: legacy }, error: null })
+    const parsed = await loadFollowupSettings(admin, 'u1')
+    expect(parsed.touchpoints[0].image_media_asset_ids).toEqual([
+      '11111111-1111-4111-9111-111111111111',
+    ])
+    expect(parsed.touchpoints[1].image_media_asset_ids).toEqual([])
+  })
+
+  it('passes through new shape (image_media_asset_ids) unchanged', async () => {
+    const fresh = {
+      enabled: true,
+      touchpoints: DEFAULT_FOLLOWUP_SETTINGS.touchpoints.map((t, i) => ({
+        enabled: t.enabled,
+        offset_ms: t.offset_ms,
+        instruction: t.instruction,
+        image_media_asset_ids: i === 0 ? ['11111111-1111-4111-9111-111111111111'] : [],
+        action_page_id: null,
+      })),
+    }
+    const admin = makeAdmin({ data: { followup_settings: fresh }, error: null })
+    const parsed = await loadFollowupSettings(admin, 'u1')
+    expect(parsed.touchpoints[0].image_media_asset_ids).toEqual([
+      '11111111-1111-4111-9111-111111111111',
+    ])
+  })
 })
