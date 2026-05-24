@@ -73,7 +73,10 @@ export default async function ChatbotPage() {
 
   const followupContent = (
     <>
-      <AutoFollowupForm initial={config.followupSettings} />
+      <AutoFollowupForm
+        initial={config.followupSettings}
+        actionPages={actionPages.map((p) => ({ id: p.id, title: p.title }))}
+      />
       <HumanTakeoverForm />
     </>
   )

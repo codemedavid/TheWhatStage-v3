@@ -31,6 +31,7 @@ export async function POST(req: Request) {
 
   const created: string[] = []
   const queuedAssetIds: string[] = []
+  const insertedAssets: Array<{ id: string; name: string; slug: string; storage_path: string; mime_type: string }> = []
   try {
     for (const file of files) {
       if (!ALLOWED.has(file.type)) {
@@ -76,6 +77,13 @@ export async function POST(req: Request) {
         sourceVersion: inserted.version,
       })
       queuedAssetIds.push(inserted.id)
+      insertedAssets.push({
+        id: inserted.id,
+        name: assetName,
+        slug: assetSlug,
+        storage_path: path,
+        mime_type: file.type,
+      })
     }
     if (queuedAssetIds.length) {
       after(async () => {
@@ -88,7 +96,7 @@ export async function POST(req: Request) {
         }
       })
     }
-    return NextResponse.json({ ok: true })
+    return NextResponse.json({ ok: true, assets: insertedAssets })
   } catch (e) {
     for (const path of created) await supabase.storage.from('media-assets').remove([path])
     return NextResponse.json({ error: e instanceof Error ? e.message : 'Upload failed' }, { status: 500 })

@@ -25,6 +25,7 @@ export interface GenerateArgs {
   personalityBlock: string
   recentMessages: Array<{ role: 'user' | 'assistant'; content: string }>
   instruction: string
+  attachmentHint?: string
 }
 
 const FALLBACK_POOL: Record<ConversationKind, string[]> = {
@@ -79,11 +80,18 @@ function buildSystemPrompt(args: GenerateArgs): string {
       `Follow this guide. Keep the personality and language rules.\n\n`
     : ''
 
+  const trimmedHint = (args.attachmentHint ?? '').trim()
+  const attachmentBlock = trimmedHint
+    ? `This message will be followed by: ${trimmedHint}.\n` +
+      `Reference it naturally if it fits; do not paste a URL.\n\n`
+    : ''
+
   if (args.kind === 'generic') {
     return (
       prefix +
       `${personality}` +
       `${guide}` +
+      `${attachmentBlock}` +
       `You are writing follow-up message #${args.slot + 1} of 7 to a Messenger lead who replied earlier ` +
       `but has gone quiet. The previous exchange had less than 4 messages from the lead, so DO NOT pretend ` +
       `to remember specifics. Write a warm, light check-in that nudges them to reply. ` +
@@ -94,6 +102,7 @@ function buildSystemPrompt(args: GenerateArgs): string {
     prefix +
     `${personality}` +
     `${guide}` +
+    `${attachmentBlock}` +
     `You are writing follow-up message #${args.slot + 1} of 7 to a Messenger lead who has gone quiet ` +
     `after a real back-and-forth. Reference what was already discussed naturally and propose a concrete ` +
     `next step or ask one focused question. ${fnHint}${rules}`
@@ -117,6 +126,8 @@ async function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
     new Promise<T>((_, reject) => setTimeout(() => reject(new Error('llm_timeout')), ms)),
   ])
 }
+
+export { buildSystemPrompt as buildSystemPromptForTest }
 
 export async function generateFollowupMessage(args: GenerateArgs): Promise<string> {
   const hasInstruction = (args.instruction ?? '').trim().length > 0

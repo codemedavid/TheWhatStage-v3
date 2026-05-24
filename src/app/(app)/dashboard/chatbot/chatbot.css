@@ -1293,3 +1293,87 @@
   color: #9CA3AF;
   cursor: not-allowed;
 }
+
+/* ============================================================
+   AutoFollowupForm — attachment controls
+   ============================================================ */
+.afu-row-attach {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 8px;
+  align-items: center;
+}
+.afu-attach-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.afu-attach-label {
+  font-size: 12px;
+  color: #6B6960;
+  min-width: 44px;
+}
+.afu-attach-add {
+  font-size: 12px;
+  padding: 4px 10px;
+  border: 1px dashed #C5C2BA;
+  border-radius: 6px;
+  background: transparent;
+  color: #3F3D36;
+  cursor: pointer;
+}
+.afu-attach-add:disabled { opacity: 0.5; cursor: default; }
+.afu-attach-set { display: flex; align-items: center; gap: 6px; }
+.afu-attach-thumb { width: 32px; height: 32px; object-fit: cover; border-radius: 4px; border: 1px solid #E8E6DE; }
+.afu-attach-thumb--placeholder { display: inline-flex; align-items: center; justify-content: center; background: #F6F5F1; font-size: 14px; }
+.afu-attach-name { font-size: 12px; color: #3F3D36; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.afu-attach-select {
+  font-size: 12px;
+  padding: 4px 8px;
+  border: 1px solid #E8E6DE;
+  border-radius: 6px;
+  background: #FFFFFF;
+  color: #1A1915;
+  max-width: 220px;
+}
+.afu-row-attach-note {
+  flex-basis: 100%;
+  margin: 4px 0 0;
+  font-size: 11px;
+  color: #9C9A90;
+  font-style: italic;
+}
+
+/* ============================================================
+   MediaPickerModal
+   ============================================================ */
+.mpm-backdrop {
+  position: fixed; inset: 0;
+  background: rgba(26,25,21,0.45);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 1000;
+}
+.mpm-panel {
+  background: #FFFFFF;
+  border-radius: 12px;
+  width: min(720px, 92vw);
+  max-height: 84vh;
+  display: flex; flex-direction: column;
+  border: 1px solid #E8E6DE;
+  padding: 16px;
+}
+.mpm-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.mpm-head h3 { margin: 0; font-size: 16px; color: #1A1915; }
+.mpm-head button { background: transparent; border: none; font-size: 20px; cursor: pointer; color: #6B6960; }
+.mpm-tools { display: flex; gap: 8px; margin-bottom: 12px; align-items: center; }
+.mpm-search { flex: 1; padding: 6px 10px; border: 1px solid #E8E6DE; border-radius: 6px; font-size: 13px; }
+.mpm-upload-btn { padding: 6px 12px; border: 1px solid #1F7A4D; background: #F2F8F4; color: #0F4A30; border-radius: 6px; font-size: 13px; cursor: pointer; }
+.mpm-upload-btn:disabled { opacity: 0.5; cursor: default; }
+.mpm-error { color: #B91C1C; font-size: 12px; margin: 0 0 8px; }
+.mpm-empty { color: #9C9A90; font-size: 13px; text-align: center; margin: 20px 0; }
+.mpm-grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; overflow-y: auto; }
+.mpm-tile { display: flex; flex-direction: column; align-items: stretch; gap: 4px; padding: 4px; border: 1px solid #E8E6DE; background: #FFFFFF; border-radius: 8px; cursor: pointer; width: 100%; }
+.mpm-tile img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 4px; }
+.mpm-tile-placeholder { width: 100%; aspect-ratio: 1; display: flex; align-items: center; justify-content: center; background: #F6F5F1; border-radius: 4px; font-size: 28px; color: #9C9A90; }
+.mpm-tile-name { font-size: 11px; color: #3F3D36; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

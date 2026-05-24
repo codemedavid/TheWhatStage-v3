@@ -10,7 +10,11 @@ import {
 function validSettings(overrides: Partial<FollowupSettings> = {}): FollowupSettings {
   return {
     enabled: true,
-    touchpoints: DEFAULT_FOLLOWUP_SETTINGS.touchpoints.map((t) => ({ ...t })),
+    touchpoints: DEFAULT_FOLLOWUP_SETTINGS.touchpoints.map((t) => ({
+      ...t,
+      image_media_asset_id: null,
+      action_page_id: null,
+    })),
     ...overrides,
   }
 }
@@ -27,25 +31,25 @@ describe('FOLLOWUP_SETTINGS_SCHEMA', () => {
 
   it('rejects offset_ms below 1 minute', () => {
     const bad = validSettings()
-    bad.touchpoints[0] = { enabled: true, offset_ms: 30_000, instruction: '' } // 30s
+    bad.touchpoints[0] = { enabled: true, offset_ms: 30_000, instruction: '', image_media_asset_id: null, action_page_id: null } // 30s
     expect(FOLLOWUP_SETTINGS_SCHEMA.safeParse(bad).success).toBe(false)
   })
 
   it('rejects offset_ms above 7 days', () => {
     const bad = validSettings()
-    bad.touchpoints[6] = { enabled: true, offset_ms: 8 * 24 * 3_600_000, instruction: '' } // 8 days
+    bad.touchpoints[6] = { enabled: true, offset_ms: 8 * 24 * 3_600_000, instruction: '', image_media_asset_id: null, action_page_id: null } // 8 days
     expect(FOLLOWUP_SETTINGS_SCHEMA.safeParse(bad).success).toBe(false)
   })
 
   it('rejects non-strictly-increasing enabled rows', () => {
     const bad = validSettings()
-    bad.touchpoints[1] = { enabled: true, offset_ms: 60_000, instruction: '' } // 1m, less than slot 0's 5m
+    bad.touchpoints[1] = { enabled: true, offset_ms: 60_000, instruction: '', image_media_asset_id: null, action_page_id: null } // 1m, less than slot 0's 5m
     expect(FOLLOWUP_SETTINGS_SCHEMA.safeParse(bad).success).toBe(false)
   })
 
   it('ignores ordering of disabled rows', () => {
     const ok = validSettings()
-    ok.touchpoints[1] = { enabled: false, offset_ms: 60_000, instruction: '' } // disabled, ignore
+    ok.touchpoints[1] = { enabled: false, offset_ms: 60_000, instruction: '', image_media_asset_id: null, action_page_id: null } // disabled, ignore
     expect(FOLLOWUP_SETTINGS_SCHEMA.safeParse(ok).success).toBe(true)
   })
 
@@ -90,6 +94,59 @@ describe('FOLLOWUP_SETTINGS_SCHEMA', () => {
     const parsed = FOLLOWUP_SETTINGS_SCHEMA.safeParse(ok)
     expect(parsed.success).toBe(true)
     if (parsed.success) expect(parsed.data.touchpoints[0].instruction).toBe('hello')
+  })
+
+  it('accepts touchpoints with image_media_asset_id and action_page_id set', () => {
+    const ok = validSettings()
+    ok.touchpoints[0] = {
+      enabled: true,
+      offset_ms: 5 * 60_000,
+      instruction: '',
+      image_media_asset_id: '11111111-1111-4111-9111-111111111111',
+      action_page_id:        '22222222-2222-4222-9222-222222222222',
+    }
+    expect(FOLLOWUP_SETTINGS_SCHEMA.safeParse(ok).success).toBe(true)
+  })
+
+  it('defaults missing attachment fields to null', () => {
+    const minimal = {
+      enabled: true,
+      touchpoints: DEFAULT_FOLLOWUP_SETTINGS.touchpoints.map((t) => ({
+        enabled: t.enabled,
+        offset_ms: t.offset_ms,
+        instruction: t.instruction,
+      })),
+    }
+    const parsed = FOLLOWUP_SETTINGS_SCHEMA.safeParse(minimal)
+    expect(parsed.success).toBe(true)
+    if (parsed.success) {
+      expect(parsed.data.touchpoints[0].image_media_asset_id).toBeNull()
+      expect(parsed.data.touchpoints[0].action_page_id).toBeNull()
+    }
+  })
+
+  it('rejects non-UUID image_media_asset_id', () => {
+    const bad = validSettings()
+    bad.touchpoints[0] = {
+      enabled: true,
+      offset_ms: 5 * 60_000,
+      instruction: '',
+      image_media_asset_id: 'not-a-uuid',
+      action_page_id: null,
+    }
+    expect(FOLLOWUP_SETTINGS_SCHEMA.safeParse(bad).success).toBe(false)
+  })
+
+  it('rejects non-UUID action_page_id', () => {
+    const bad = validSettings()
+    bad.touchpoints[0] = {
+      enabled: true,
+      offset_ms: 5 * 60_000,
+      instruction: '',
+      image_media_asset_id: null,
+      action_page_id: 'nope',
+    }
+    expect(FOLLOWUP_SETTINGS_SCHEMA.safeParse(bad).success).toBe(false)
   })
 })
 

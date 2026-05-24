@@ -5,6 +5,7 @@ import {
   DEFAULT_FOLLOWUP_SETTINGS,
   type FollowupSettings,
 } from '@/lib/followups/settings'
+import { MediaPickerModal, type PickedAsset } from './MediaPickerModal'
 
 type Unit = 'minutes' | 'hours' | 'days'
 
@@ -13,7 +14,13 @@ interface RowDraft {
   value: number
   unit: Unit
   instruction: string
+  imageMediaAssetId: string | null
+  imageThumbUrl: string | null
+  imageName: string | null
+  actionPageId: string | null
 }
+
+interface ActionPageOption { id: string; title: string }
 
 interface FormState {
   enabled: boolean
@@ -42,7 +49,16 @@ function settingsToState(s: FollowupSettings): FormState {
     enabled: s.enabled,
     rows: s.touchpoints.map((t) => {
       const { value, unit } = msToDraft(t.offset_ms)
-      return { enabled: t.enabled, value, unit, instruction: t.instruction }
+      return {
+        enabled: t.enabled,
+        value,
+        unit,
+        instruction: t.instruction,
+        imageMediaAssetId: t.image_media_asset_id,
+        imageThumbUrl: null,
+        imageName: null,
+        actionPageId: t.action_page_id,
+      }
     }),
   }
 }
@@ -54,6 +70,8 @@ function stateToSettings(s: FormState): FollowupSettings {
       enabled: r.enabled,
       offset_ms: draftToMs(r),
       instruction: r.instruction,
+      image_media_asset_id: r.imageMediaAssetId,
+      action_page_id: r.actionPageId,
     })),
   }
 }
@@ -106,12 +124,19 @@ function validate(state: FormState): ValidationResult {
   return { rowErrors, formError }
 }
 
-export function AutoFollowupForm({ initial }: { initial: FollowupSettings }) {
+export function AutoFollowupForm({
+  initial,
+  actionPages,
+}: {
+  initial: FollowupSettings
+  actionPages: ActionPageOption[]
+}) {
   const [baseline, setBaseline] = useState<FollowupSettings>(initial)
   const [state, setState] = useState<FormState>(() => settingsToState(initial))
   const [saving, setSaving] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
   const [topError, setTopError] = useState<string | null>(null)
+  const [pickerRowIdx, setPickerRowIdx] = useState<number | null>(null)
 
   const { rowErrors, formError } = useMemo(() => validate(state), [state])
   const dirty = useMemo(
@@ -244,10 +269,74 @@ export function AutoFollowupForm({ initial }: { initial: FollowupSettings }) {
                   {row.instruction.length}/200
                 </span>
               </div>
+
+              <div className="afu-row-attach">
+                <div className="afu-attach-item">
+                  <span className="afu-attach-label">Image</span>
+                  {row.imageMediaAssetId ? (
+                    <div className="afu-attach-set">
+                      {row.imageThumbUrl ? (
+                        <img className="afu-attach-thumb" src={row.imageThumbUrl} alt={row.imageName ?? ''} />
+                      ) : (
+                        <span className="afu-attach-thumb afu-attach-thumb--placeholder" aria-hidden>📷</span>
+                      )}
+                      <span className="afu-attach-name">{row.imageName ?? 'Selected image'}</span>
+                      <button type="button" className="afu-link-btn" onClick={() => setPickerRowIdx(idx)} disabled={!row.enabled}>Change</button>
+                      <button
+                        type="button"
+                        className="afu-link-btn"
+                        onClick={() => setRow(idx, { imageMediaAssetId: null, imageThumbUrl: null, imageName: null })}
+                        disabled={!row.enabled}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ) : (
+                    <button type="button" className="afu-attach-add" onClick={() => setPickerRowIdx(idx)} disabled={!row.enabled}>
+                      + Add image
+                    </button>
+                  )}
+                </div>
+
+                <div className="afu-attach-item">
+                  <span className="afu-attach-label">Page</span>
+                  <select
+                    className="afu-attach-select"
+                    value={row.actionPageId ?? ''}
+                    onChange={(e) => setRow(idx, { actionPageId: e.target.value || null })}
+                    disabled={!row.enabled}
+                    aria-label={`Touchpoint ${idx + 1} action page`}
+                  >
+                    <option value="">— none —</option>
+                    {actionPages.map((p) => (
+                      <option key={p.id} value={p.id}>{p.title}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {(row.imageMediaAssetId || row.actionPageId) && (
+                  <p className="afu-row-attach-note">
+                    Attachments are skipped on nudges that fire after 24 hours.
+                  </p>
+                )}
+              </div>
             </li>
           )
         })}
       </ol>
+
+      <MediaPickerModal
+        open={pickerRowIdx !== null}
+        onClose={() => setPickerRowIdx(null)}
+        onSelect={(picked: PickedAsset) => {
+          if (pickerRowIdx === null) return
+          setRow(pickerRowIdx, {
+            imageMediaAssetId: picked.id,
+            imageThumbUrl: picked.thumbUrl,
+            imageName: picked.name,
+          })
+        }}
+      />
 
       {formError && <div className="afu-form-error" role="alert">{formError}</div>}
       {topError && <div className="afu-form-error" role="alert">{topError}</div>}
