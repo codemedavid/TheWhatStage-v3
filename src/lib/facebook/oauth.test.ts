@@ -82,6 +82,55 @@ describe('facebook/oauth', () => {
     ])
   })
 
+  it('follows paging.next to fetch all pages across multiple responses', async () => {
+    const responses: Array<{ body: unknown }> = [
+      {
+        body: {
+          data: [
+            { id: 'p1', name: 'Page 1', access_token: 'pt1' },
+            { id: 'p2', name: 'Page 2', access_token: 'pt2' },
+          ],
+          paging: {
+            next: 'https://graph.facebook.com/v24.0/me/accounts?after=cursor-1',
+          },
+        },
+      },
+      {
+        body: {
+          data: [
+            { id: 'p3', name: 'Page 3', access_token: 'pt3' },
+            { id: 'p4', name: 'Page 4', access_token: 'pt4' },
+          ],
+          paging: {
+            next: 'https://graph.facebook.com/v24.0/me/accounts?after=cursor-2',
+          },
+        },
+      },
+      {
+        body: {
+          data: [{ id: 'p5', name: 'Page 5', access_token: 'pt5' }],
+        },
+      },
+    ]
+    const calls: string[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        calls.push(typeof input === 'string' ? input : input.toString())
+        const next = responses.shift()
+        if (!next) throw new Error('unexpected extra fetch call')
+        return new Response(JSON.stringify(next.body), { status: 200 })
+      }) as unknown as typeof fetch,
+    )
+    const { fetchUserPages } = await import('./oauth')
+    const pages = await fetchUserPages('long-1')
+    expect(pages.map((p) => p.id)).toEqual(['p1', 'p2', 'p3', 'p4', 'p5'])
+    expect(calls).toHaveLength(3)
+    expect(calls[0]).toContain('limit=100')
+    expect(calls[1]).toBe('https://graph.facebook.com/v24.0/me/accounts?after=cursor-1')
+    expect(calls[2]).toBe('https://graph.facebook.com/v24.0/me/accounts?after=cursor-2')
+  })
+
   it('throws on non-2xx Graph response', async () => {
     vi.stubGlobal('fetch', vi.fn(async () =>
       new Response(JSON.stringify({ error: { message: 'bad code' } }), { status: 400 }),

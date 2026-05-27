@@ -78,23 +78,35 @@ export async function fetchMe(longLivedToken: string): Promise<string> {
 }
 
 export async function fetchUserPages(longLivedToken: string): Promise<FacebookPage[]> {
-  const u = new URL(`${GRAPH}/me/accounts`)
-  u.searchParams.set('fields', 'id,name,category,access_token,picture{url}')
-  u.searchParams.set('access_token', longLivedToken)
-  const data = await getJson<{
-    data: Array<{
-      id: string
-      name: string
-      category?: string | null
-      access_token: string
-      picture?: { data?: { url?: string } }
-    }>
-  }>(u.toString())
-  return data.data.map((p) => ({
-    id: p.id,
-    name: p.name,
-    category: p.category ?? null,
-    accessToken: p.access_token,
-    pictureUrl: p.picture?.data?.url ?? null,
-  }))
+  const first = new URL(`${GRAPH}/me/accounts`)
+  first.searchParams.set('fields', 'id,name,category,access_token,picture{url}')
+  first.searchParams.set('limit', '100')
+  first.searchParams.set('access_token', longLivedToken)
+
+  type PageRow = {
+    id: string
+    name: string
+    category?: string | null
+    access_token: string
+    picture?: { data?: { url?: string } }
+  }
+  type Resp = { data: PageRow[]; paging?: { next?: string } }
+
+  const out: FacebookPage[] = []
+  let next: string | undefined = first.toString()
+  // Cap iterations: 20 × limit=100 covers up to 2000 pages — well past any real account.
+  for (let i = 0; next && i < 20; i++) {
+    const page: Resp = await getJson<Resp>(next)
+    for (const p of page.data) {
+      out.push({
+        id: p.id,
+        name: p.name,
+        category: p.category ?? null,
+        accessToken: p.access_token,
+        pictureUrl: p.picture?.data?.url ?? null,
+      })
+    }
+    next = page.paging?.next
+  }
+  return out
 }
