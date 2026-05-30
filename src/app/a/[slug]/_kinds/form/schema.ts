@@ -50,10 +50,42 @@ export const blockSchema = z.union([
   fieldBlockSchema,
 ])
 
+/**
+ * Accepts hex (`#rgb`/`#rrggbb`/`#rrggbbaa`) and simple `rgb()/rgba()` colors
+ * and rejects anything carrying CSS-breakout payloads (`;`, `{`, `}`, `/*`,
+ * `url(`, etc.). These values are interpolated into inline styles / color-mix(),
+ * so an unsafe value must never reach the renderer.
+ */
+export function isSafeCssColor(value: string): boolean {
+  if (/[;{}()]/.test(value)) {
+    // Parens are only allowed in the explicit rgb()/rgba() forms checked below.
+    if (!/^rgba?\([^;{}]*\)$/i.test(value)) return false
+  }
+  if (value.includes('/*') || value.includes('*/') || /url\(/i.test(value)) {
+    return false
+  }
+  if (/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(value)) {
+    return true
+  }
+  if (
+    /^rgba?\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*(?:,\s*(?:0|1|0?\.\d+)\s*)?\)$/i.test(
+      value,
+    )
+  ) {
+    return true
+  }
+  return false
+}
+
+// Permissive field that silently falls back to the default when an invalid or
+// unsafe color is encountered, so the rest of the config still renders.
+const safeColor = (def: string) =>
+  z.string().refine(isSafeCssColor).catch(def).default(def)
+
 export const themeSchema = z.object({
-  background_color: z.string().default('#ffffff'),
-  accent_color: z.string().default('#059669'),
-  button_text_color: z.string().default('#ffffff'),
+  background_color: safeColor('#ffffff'),
+  accent_color: safeColor('#059669'),
+  button_text_color: safeColor('#ffffff'),
 })
 
 export const brandingSchema = z.object({

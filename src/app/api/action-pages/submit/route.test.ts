@@ -607,7 +607,7 @@ describe('POST /api/action-pages/submit', () => {
       makeJsonRequest({
         slug: 'shop',
         data: {
-          payment_proof_url: 'https://cdn.test/proof.jpg',
+          payment_proof_url: 'https://ik.imagekit.io/demo/proof.jpg',
           items: [{ id: ITEM_ID, quantity: 1 }],
           customer_name: 'Ana',
         },
@@ -624,7 +624,7 @@ describe('POST /api/action-pages/submit', () => {
     )
     expect(imageCalls.length).toBe(1)
     expect((imageCalls[0][0] as { payload: { imageUrl: string } }).payload.imageUrl).toBe(
-      'https://cdn.test/proof.jpg',
+      'https://ik.imagekit.io/demo/proof.jpg',
     )
   })
 
@@ -702,7 +702,7 @@ describe('POST /api/action-pages/submit', () => {
       makeJsonRequest({
         slug: 'shop',
         data: {
-          payment_proof_url: 'https://cdn.test/proof.jpg',
+          payment_proof_url: 'https://ik.imagekit.io/demo/proof.jpg',
           items: [{ id: ITEM_ID, quantity: 1 }],
           customer_name: 'Ana',
         },
@@ -737,7 +737,7 @@ describe('POST /api/action-pages/submit', () => {
     await POST(
       makeJsonRequest({
         slug: 'welcome-form',
-        data: { payment_proof_url: 'https://cdn.test/proof.jpg' },
+        data: { payment_proof_url: 'https://ik.imagekit.io/demo/proof.jpg' },
         p: params.get('p'),
         g: params.get('g'),
         e: params.get('e'),

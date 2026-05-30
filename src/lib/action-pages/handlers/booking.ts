@@ -29,6 +29,16 @@ registerHandler('booking', (payload, rawConfig) => {
     return { outcome: 'invalid', data: { reason: 'missing_slot', payload } }
   }
 
+  // Reject past-dated slots. Mirror the /slots endpoint's notion of "now",
+  // allowing a 1 minute grace to tolerate client/server clock skew.
+  const PAST_GRACE_MS = 60_000
+  if (Date.parse(slotIso) < Date.now() - PAST_GRACE_MS) {
+    return {
+      outcome: 'invalid',
+      data: { reason: 'slot_in_past', slot_iso: slotIso },
+    }
+  }
+
   if (!slotMatchesAvailability(slotIso, config)) {
     return {
       outcome: 'invalid',

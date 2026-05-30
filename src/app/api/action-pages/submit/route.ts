@@ -487,6 +487,37 @@ export async function POST(req: NextRequest) {
     .select('id')
     .single<{ id: string }>()
   if (subErr || !subInsert) {
+    // Idempotency race: a concurrent identical submission won the unique index
+    // on ((meta->>'idempotency_key')). Treat the unique violation as a
+    // successful dedup — re-fetch the winning row and return the dedup response,
+    // mirroring the pre-insert short-circuit above.
+    if ((subErr as { code?: string } | null)?.code === '23505' && idempotencyKey) {
+      const { data: existing } = await admin
+        .from('action_page_submissions')
+        .select('id, meta')
+        .eq('action_page_id', page.id)
+        .filter('meta->>idempotency_key', 'eq', idempotencyKey)
+        .maybeSingle<{ id: string; meta: Record<string, unknown> | null }>()
+      if (existing?.id) {
+        const accept = req.headers.get('accept') ?? ''
+        const businessOrderIdExisting =
+          existing.meta && typeof existing.meta.business_order_id === 'string'
+            ? (existing.meta.business_order_id as string)
+            : businessOrderId
+        if (ct.includes('application/json') || accept.includes('application/json')) {
+          return NextResponse.json({
+            ok: true,
+            submission_id: existing.id,
+            business_order_id: businessOrderIdExisting,
+            deduplicated: true,
+          })
+        }
+        const dedupUrl = new URL(`/a/${slug}`, req.url)
+        dedupUrl.searchParams.set('submitted', '1')
+        dedupUrl.searchParams.set('submission', existing.id)
+        return NextResponse.redirect(dedupUrl.toString(), { status: 303 })
+      }
+    }
     if (businessOrderId) {
       console.warn('[action-pages.submit] submission insert failed after order capture', {
         businessOrderId,
@@ -534,16 +565,22 @@ export async function POST(req: NextRequest) {
       ? parsed.data.payment_method_id
       : null
   if (subInsert?.id && paymentMethodId) {
-    const proofUrl =
+    const rawProofUrl =
       typeof parsed.data.payment_proof_url === 'string'
         ? parsed.data.payment_proof_url
         : null
-    if (!proofUrl) {
+    // A payment method was selected but no proof was provided at all — still a
+    // hard requirement, keep the 400.
+    if (!rawProofUrl) {
       return NextResponse.json(
         { error: 'payment_proof_required' },
         { status: 400 },
       )
     }
+    // Proof was provided but isn't from our image host — drop it silently
+    // (record '' since proof_url is NOT NULL) rather than failing the whole
+    // submission or echoing an attacker-controlled URL to Messenger.
+    const proofUrl = isAllowedProofUrl(rawProofUrl) ? rawProofUrl : null
 
     const cfgPayment =
       (page.config as Record<string, unknown>).payment as
@@ -577,7 +614,7 @@ export async function POST(req: NextRequest) {
         action_page_id: page.id,
         payment_method_id: pm.id,
         ...snapshotMethod(pm),
-        proof_url: proofUrl,
+        proof_url: proofUrl ?? '',
         proof_file_id:
           typeof parsed.data.payment_proof_file_id === 'string'
             ? parsed.data.payment_proof_file_id
@@ -1219,8 +1256,33 @@ async function advanceLeadFunnelForActionPage(args: {
     .eq('user_id', userId)
 }
 
+// Payment-proof URLs are echoed to Messenger as images. Restrict them to our
+// own image host (ImageKit) so a forged submission can't make us fetch/echo an
+// arbitrary URL (SSRF / abuse). Accept a URL only when its origin matches the
+// configured IMAGEKIT_URL_ENDPOINT, or — if that env can't be parsed — when it
+// is https with a hostname under imagekit.io.
+function isAllowedProofUrl(url: string): boolean {
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    return false
+  }
+  if (parsed.protocol !== 'https:') return false
+
+  const endpoint = process.env.IMAGEKIT_URL_ENDPOINT
+  if (endpoint) {
+    try {
+      if (parsed.origin === new URL(endpoint).origin) return true
+    } catch {
+      // fall through to the imagekit.io hostname check below
+    }
+  }
+  return parsed.hostname === 'imagekit.io' || parsed.hostname.endsWith('.imagekit.io')
+}
+
 function pickProofUrl(data: Record<string, unknown>): string | null {
   const url = data.payment_proof_url
-  if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) return null
+  if (typeof url !== 'string' || !isAllowedProofUrl(url)) return null
   return url
 }
