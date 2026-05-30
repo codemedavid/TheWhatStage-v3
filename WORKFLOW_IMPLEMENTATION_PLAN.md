@@ -12,17 +12,7 @@ This plan layers a workflow/automation engine on top of the existing **leads →
 2. Branch on **whether the customer replied**, **current stage**, **submission outcome**, and **AI classification**.
 3. Send messages safely under **Meta's post-April-2026 messaging rules** (no dead tags).
 4. Coordinate with the existing chatbot so they never fight over the same thread.
-5. Provide a visual builder, dry-run/test mode, and per-step audit logs.
-
----
-
-## 2. Audit findings — flaws to fix BEFORE the engine ships
-
-### Action pages
-- **A1.** Bookings don't persist `event_at` to a structured table — only inside `submissions.data` JSON. Booking-offset triggers (3d / 2h / 10m) need a real column.
-- **A2.** No timezone normalization. Reminders fire at the wrong wall-clock time.
-- **A3.** No marketing/notification opt-in capture on submit. Outside-24h sends will have no consent record.
-- **A4.** Anonymous submissions (no PSID) never get merged to existing leads via email/phone — orphans accumulate.
+5. Provide a visual builder, dry-run/test mode, and per-step audit logs./ting leads via email/phone — orphans accumulate.
 - **A5.** When `outcome` matches no `pipeline_rule`, the code silently does nothing. No audit row.
 - **A6.** Two concurrent submissions can read the same `max(position)` and produce duplicate stage positions.
 
@@ -37,7 +27,7 @@ This plan layers a workflow/automation engine on top of the existing **leads →
 - **M2.** Outbound sends are scattered across at least three files (`process/route.ts`, `submit/route.ts`, `comments.ts`). No central gate, no shared rate-limit, no shared logging.
 - **M3.** All sends assume `messaging_type=RESPONSE`. No support for `MESSAGE_TAG` (HUMAN_AGENT only — see §3), Marketing Messages, OTN, or Utility Messages.
 - **M4.** `auto_reply_enabled` is per-thread only — no per-lead, per-campaign, or per-run override. Workflows have no way to claim a thread.
-- **M5.** No opt-in / OTN-token / utility-template registries.
+- **M5.** No opt-in / OTN-token / utility-template registries.ok
 
 These are **prerequisite work**, not nice-to-haves. The engine inherits them.
 

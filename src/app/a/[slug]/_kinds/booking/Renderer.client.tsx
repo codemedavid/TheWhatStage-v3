@@ -97,6 +97,12 @@ export default function BookingPicker({ slug, config, hidden, sourceContext }: P
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [, startTransition] = useTransition()
   const formRef = useRef<HTMLFormElement>(null)
+  const inFlightRef = useRef(false)
+  const idempotencyKeyRef = useRef<string>(
+    typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+  )
 
   const dateRange = config.date_range
 
@@ -212,16 +218,22 @@ export default function BookingPicker({ slug, config, hidden, sourceContext }: P
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
     if (!pickedSlotIso) return
+    if (inFlightRef.current || submitting) return
+    inFlightRef.current = true
     const form = e.currentTarget
     const fd = new FormData(form)
+    if (!fd.has('idempotency_key')) {
+      fd.append('idempotency_key', idempotencyKeyRef.current)
+    }
     setSubmitting(true)
     setSubmitError(null)
     try {
       const res = await fetch('/api/action-pages/submit', {
         method: 'POST',
         body: fd,
+        headers: { Accept: 'application/json' },
       })
-      if (!res.ok && res.type !== 'opaqueredirect') {
+      if (!res.ok) {
         const text = await res.text().catch(() => '')
         throw new Error(text || `submit_failed_${res.status}`)
       }
@@ -230,6 +242,7 @@ export default function BookingPicker({ slug, config, hidden, sourceContext }: P
       setSubmitError(err instanceof Error ? err.message : 'submit_failed')
     } finally {
       setSubmitting(false)
+      inFlightRef.current = false
     }
   }
 

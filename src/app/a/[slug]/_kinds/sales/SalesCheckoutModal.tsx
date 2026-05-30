@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { PublicPaymentMethod } from '@/lib/payment-methods/public'
 import type { SalesFallbackField } from './schema'
 
@@ -104,6 +104,12 @@ export function SalesCheckoutModal({
   const [copiedField, setCopiedField] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const inFlightRef = useRef(false)
+  const idempotencyKeyRef = useRef<string>(
+    typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+  )
 
   const selectedMethod = useMemo(
     () => paymentMethods.find((m) => m.id === methodId) ?? null,
@@ -213,11 +219,14 @@ export function SalesCheckoutModal({
   }
 
   async function submitAll(): Promise<void> {
+    if (inFlightRef.current || submitting) return
+    inFlightRef.current = true
     setSubmitting(true)
     setError(null)
     try {
       const fd = new FormData()
       fd.append('slug', slug)
+      fd.append('idempotency_key', idempotencyKeyRef.current)
       if (claims) {
         fd.append('p', claims.psid)
         fd.append('g', claims.pageId)
@@ -240,9 +249,9 @@ export function SalesCheckoutModal({
       const res = await fetch('/api/action-pages/submit', {
         method: 'POST',
         body: fd,
-        redirect: 'manual',
+        headers: { Accept: 'application/json' },
       })
-      if (res.type === 'opaqueredirect' || res.ok) {
+      if (res.ok) {
         setStep('done')
       } else {
         const body = await res.json().catch(() => null)
@@ -252,6 +261,7 @@ export function SalesCheckoutModal({
       setError(err instanceof Error ? err.message : 'submit_failed')
     } finally {
       setSubmitting(false)
+      inFlightRef.current = false
     }
   }
 
