@@ -21,7 +21,7 @@ export default function AppLayout({
         <Suspense fallback={<TopbarFallback />}>
           <TopbarWithSession />
         </Suspense>
-        <main className="flex-1 px-8 py-6 min-w-0">{children}</main>
+        <main className="ws-main flex-1 px-8 py-6 min-w-0">{children}</main>
       </div>
       <SuggestionsToast />
     </div>
@@ -70,7 +70,7 @@ async function TopbarWithSession() {
 
 function TopbarFallback() {
   return (
-    <header className="flex items-center justify-between border-b border-[#E8E6DE] bg-[var(--ws-bg)] px-6 py-3">
+    <header className="ws-topbar flex items-center justify-between border-b border-[#E8E6DE] bg-[var(--ws-bg)] px-6 py-3">
       <div className="text-[14px] text-[#6B6960]">Welcome back</div>
       <div className="flex items-center gap-4">
         <span className="h-4 w-24 rounded bg-[#EFEEE8] animate-pulse" />

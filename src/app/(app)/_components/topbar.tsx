@@ -1,6 +1,6 @@
 export function Topbar({ fullName }: { fullName: string }) {
   return (
-    <header className="flex items-center justify-between border-b border-[#E8E6DE] bg-[var(--ws-bg)] px-6 py-3">
+    <header className="ws-topbar flex items-center justify-between border-b border-[#E8E6DE] bg-[var(--ws-bg)] px-6 py-3">
       <div className="text-[13px] text-[#6B6960]">Welcome back</div>
       <div className="flex items-center gap-4">
         <span className="text-[13.5px] font-medium text-[#1A1915]">

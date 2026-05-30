@@ -14,6 +14,9 @@ import { KindEditor } from './KindEditor'
 import { PipelineRulesEditor } from './PipelineRulesEditor'
 import { CatalogShell } from '../_kinds/catalog/CatalogShell'
 import { RealestateShell } from '../_kinds/realestate/RealestateShell'
+import { BookingStudioShell } from './BookingStudioShell'
+import { FormStudioShell } from './FormStudioShell'
+import { SalesStudioShell } from './SalesStudioShell'
 import { TriggerGuard } from './TriggerGuard'
 import { TriggerField } from './TriggerField'
 import { DraftSaveModal } from './DraftSaveModal'
@@ -82,6 +85,54 @@ export function EditActionPageShell({
         embedSnippet={embedSnippet}
         saved={saved}
         errorBanner={errorBanner}
+      />
+    )
+  }
+
+  if (page.kind === 'sales') {
+    return (
+      <SalesStudioShell
+        page={page}
+        stages={stages}
+        actionPages={actionPages}
+        publicUrl={publicUrl}
+        embedUrl={embedUrl}
+        embedSnippet={embedSnippet}
+        saved={saved}
+        errorBanner={errorBanner}
+        paymentMethods={paymentMethods}
+      />
+    )
+  }
+
+  if (page.kind === 'form') {
+    return (
+      <FormStudioShell
+        page={page}
+        stages={stages}
+        actionPages={actionPages}
+        publicUrl={publicUrl}
+        embedUrl={embedUrl}
+        embedSnippet={embedSnippet}
+        saved={saved}
+        errorBanner={errorBanner}
+        paymentMethods={paymentMethods}
+      />
+    )
+  }
+
+  if (page.kind === 'booking') {
+    return (
+      <BookingStudioShell
+        page={page}
+        stages={stages}
+        actionPages={actionPages}
+        publicUrl={publicUrl}
+        embedUrl={embedUrl}
+        embedSnippet={embedSnippet}
+        saved={saved}
+        errorBanner={errorBanner}
+        paymentMethods={paymentMethods}
       />
     )
   }

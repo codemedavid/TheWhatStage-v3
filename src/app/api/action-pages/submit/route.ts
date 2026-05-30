@@ -112,6 +112,7 @@ export async function POST(req: NextRequest) {
   let slug = ''
   let payload: Record<string, unknown> = {}
   let signed: { p?: string; g?: string; e?: string; t?: string } = {}
+  let idempotencyKey: string | null = null
   let sourcePropertyActionPageId: string | null = null
   let sourcePropertyTitle: string | null = null
   let sourcePropertyUnitId: string | null = null
@@ -154,6 +155,13 @@ export async function POST(req: NextRequest) {
       typeof body.source_sales_page_title === 'string'
         ? body.source_sales_page_title
         : null
+    const ik =
+      typeof body.idempotency_key === 'string'
+        ? body.idempotency_key
+        : typeof (payload as Record<string, unknown>).idempotency_key === 'string'
+          ? ((payload as Record<string, unknown>).idempotency_key as string)
+          : ''
+    if (ik && ik.length >= 8 && ik.length <= 128) idempotencyKey = ik
   } else {
     const fd = await req.formData()
     slug = String(fd.get('slug') ?? '')
@@ -176,6 +184,14 @@ export async function POST(req: NextRequest) {
     if (typeof ss === 'string' && ss) sourceSalesPageId = ss
     const sst = fd.get('source_sales_page_title')
     if (typeof sst === 'string' && sst) sourceSalesPageTitle = sst
+    const ikRaw = fd.get('idempotency_key')
+    const ik =
+      typeof ikRaw === 'string' && ikRaw
+        ? ikRaw
+        : typeof (payload as Record<string, unknown>).idempotency_key === 'string'
+          ? ((payload as Record<string, unknown>).idempotency_key as string)
+          : ''
+    if (ik && ik.length >= 8 && ik.length <= 128) idempotencyKey = ik
   }
 
   if (!slug) return NextResponse.json({ error: 'missing_slug' }, { status: 400 })
@@ -199,6 +215,50 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'bad_kind' }, { status: 500 })
   }
   const page = pageRow as unknown as ActionPageRecord
+
+  // Strip idempotency_key from the validated data payload — it is metadata.
+  if (payload && typeof payload === 'object' && 'idempotency_key' in payload) {
+    delete (payload as Record<string, unknown>).idempotency_key
+  }
+  if (
+    payload &&
+    typeof (payload as Record<string, unknown>).data === 'object' &&
+    (payload as Record<string, unknown>).data !== null &&
+    'idempotency_key' in ((payload as Record<string, unknown>).data as Record<string, unknown>)
+  ) {
+    delete ((payload as Record<string, unknown>).data as Record<string, unknown>).idempotency_key
+  }
+
+  // Idempotency short-circuit: if a submission with this key already exists for
+  // this action page, return it without re-processing. Prevents duplicate
+  // bookings/orders when the client retries (e.g. network errors).
+  if (idempotencyKey) {
+    const { data: existing } = await admin
+      .from('action_page_submissions')
+      .select('id, meta')
+      .eq('action_page_id', page.id)
+      .filter('meta->>idempotency_key', 'eq', idempotencyKey)
+      .maybeSingle<{ id: string; meta: Record<string, unknown> | null }>()
+    if (existing?.id) {
+      const accept = req.headers.get('accept') ?? ''
+      const businessOrderIdExisting =
+        existing.meta && typeof existing.meta.business_order_id === 'string'
+          ? (existing.meta.business_order_id as string)
+          : null
+      if (ct.includes('application/json') || accept.includes('application/json')) {
+        return NextResponse.json({
+          ok: true,
+          submission_id: existing.id,
+          business_order_id: businessOrderIdExisting,
+          deduplicated: true,
+        })
+      }
+      const dedupUrl = new URL(`/a/${slug}`, req.url)
+      dedupUrl.searchParams.set('submitted', '1')
+      dedupUrl.searchParams.set('submission', existing.id)
+      return NextResponse.redirect(dedupUrl.toString(), { status: 303 })
+    }
+  }
 
   // Verify deeplink (PSID + page id) when present.
   let psid: string | null = null
@@ -387,6 +447,7 @@ export async function POST(req: NextRequest) {
   }
 
   const submissionMeta: Record<string, unknown> = {}
+  if (idempotencyKey) submissionMeta.idempotency_key = idempotencyKey
   if (businessOrderId) submissionMeta.business_order_id = businessOrderId
   if (validatedSourceProperty) {
     submissionMeta.source_property_action_page_id = validatedSourceProperty.id
@@ -878,15 +939,15 @@ export async function POST(req: NextRequest) {
   }
 
   // Form posts redirect to a thank-you screen; JSON callers get JSON.
-  if (ct.includes('application/json')) {
+  const accept = req.headers.get('accept') ?? ''
+  if (ct.includes('application/json') || accept.includes('application/json')) {
     return NextResponse.json({
       ok: true,
       submission_id: subInsert?.id ?? null,
       business_order_id: businessOrderId,
     })
   }
-  const base = (process.env.NEXT_PUBLIC_APP_URL ?? '').replace(/\/+$/, '')
-  const redirectUrl = new URL(`${base}/a/${slug}`)
+  const redirectUrl = new URL(`/a/${slug}`, req.url)
   redirectUrl.searchParams.set('submitted', '1')
   if (subInsert?.id) redirectUrl.searchParams.set('submission', subInsert.id)
   return NextResponse.redirect(redirectUrl.toString(), { status: 303 })

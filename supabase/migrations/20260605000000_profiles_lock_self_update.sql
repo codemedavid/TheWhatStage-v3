@@ -21,7 +21,7 @@ on public.profiles
 for update
 to authenticated
 using ( id = auth.uid() )
-with check (
+with check (  
   id = auth.uid()
   and id     = (select id     from public.profiles where id = auth.uid())
   and email  = (select email  from public.profiles where id = auth.uid())
