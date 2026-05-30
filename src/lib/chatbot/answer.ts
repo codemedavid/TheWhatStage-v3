@@ -10,6 +10,12 @@ import { loadPrimaryGoalInstruction } from './primary-goal'
 import { selectMediaForReply, type SelectedMediaAsset } from '@/lib/media/selector'
 import { buildMediaContextBlock } from '@/lib/media/prompt'
 import { paymentEnumBlock as buildPaymentEnumBlock } from '@/lib/chatbot/payment-enum'
+import { guardReply } from '@/lib/chatbot/reply-guard'
+import { redactForLlm } from '@/lib/chatbot/pii-redact'
+import { classifyIntentHeuristic } from '@/lib/chatbot/intent'
+import { selectReplyModel } from '@/lib/chatbot/model-router'
+
+export { findUngroundedContacts } from './reply-guard'
 
 export type AnswerHistory = { role: 'user' | 'assistant'; content: string }[]
 
@@ -98,7 +104,9 @@ export async function answer(
 
   const embedder = createEmbedder()
   const paymentBlock = await buildPaymentEnumBlock(supabase, userId, null, null).catch(() => '')
-  const llm = new HfRouterLlm()
+  const intent = classifyIntentHeuristic(message)
+  const modelOverride = selectReplyModel({ intent, hasStages: false, hasActionPages: false })
+  const llm = new HfRouterLlm(modelOverride ? { model: modelOverride } : undefined)
 
   const ctx = await retrieve(
     {
@@ -155,12 +163,15 @@ export async function answer(
     .filter(Boolean)
     .join('\n\n')
 
+  const redactedHistory = history.map((h) => ({ ...h, content: redactForLlm(h.content) }))
+  const redactedUser = redactForLlm(built.user)
+
   const t0 = Date.now()
   const completion = await llm.completeWithUsage(
     [
       { role: 'system', content: system },
-      ...history,
-      { role: 'user', content: built.user },
+      ...redactedHistory,
+      { role: 'user', content: redactedUser },
     ],
     { temperature: config.temperature, maxTokens: 400 },
   )
@@ -187,77 +198,18 @@ export async function answer(
   // Anti-hallucination guard: if the model invented a phone number, URL, or
   // email that is NOT present in the retrieved context or system prompt,
   // discard the reply and fall back. Prompt rules alone don't reliably stop
-  // the model from fabricating plausible-looking contact details.
-  let text = sanitizeReply(completion.text)
+  // the model from fabricating plausible-looking contact details. Grounding
+  // must stay RAW (not PII-redacted) so customer-typed contacts are allowed.
   const grounding = [system, ...built.contextChunks.map((c) => c.content), message].join('\n')
-  const ungrounded = findUngroundedContacts(text, grounding)
-  if (ungrounded.length > 0) {
+  const guarded = guardReply({ text: completion.text, grounding, fallbackMessage: config.fallbackMessage })
+  let text = guarded.text
+  if (guarded.dropped) {
     console.warn('[chatbot.answer] dropping reply with ungrounded contact details', {
-      ungrounded,
-      original: text,
+      ungrounded: guarded.ungrounded,
     })
-    text = config.fallbackMessage
   }
 
   return { text, sourceTitles, media, attachImages: media.length > 0 }
-}
-
-/**
- * Find phone numbers, URLs, and email addresses in `reply` that do not appear
- * in `grounding`. Returns the offending strings so they can be logged.
- * Normalises phone formatting (strips spaces, dashes, parens) before
- * comparing so "0917-123-4567" matches "09171234567" in the knowledge base.
- */
-export function findUngroundedContacts(reply: string, grounding: string): string[] {
-  const normDigits = grounding.replace(/\D/g, '')
-  const groundingLower = grounding.toLowerCase()
-  const out: string[] = []
-
-  // Phone numbers: 7+ digits, optional + and common separators.
-  const phoneRe = /(?:\+?\d[\d\s\-().]{6,}\d)/g
-  for (const m of reply.match(phoneRe) ?? []) {
-    const digits = m.replace(/\D/g, '')
-    if (digits.length >= 7 && !normDigits.includes(digits)) {
-      out.push(m.trim())
-    }
-  }
-
-  // URLs / bare domains. Skip obvious non-claims like "e.g." by requiring
-  // a known TLD-ish tail and at least one dot.
-  const urlRe = /\b(?:https?:\/\/)?(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,24}(?:\/[^\s),.;!?]*)?/gi
-  for (const m of reply.match(urlRe) ?? []) {
-    const host = m
-      .replace(/^https?:\/\//i, '')
-      .split('/')[0]
-      .toLowerCase()
-    // Ignore filename-looking matches (e.g. "file.json") with no real TLD.
-    const tld = host.split('.').pop() ?? ''
-    if (tld.length < 2) continue
-    if (!groundingLower.includes(host)) {
-      out.push(m)
-    }
-  }
-
-  // Emails.
-  const emailRe = /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,24}/gi
-  for (const m of reply.match(emailRe) ?? []) {
-    if (!groundingLower.includes(m.toLowerCase())) {
-      out.push(m)
-    }
-  }
-
-  return out
-}
-
-/**
- * Strip dashes the model leans on as a tell. " — " becomes ", ", a bare em/en
- * dash becomes a comma. Keeps regular ASCII hyphens untouched.
- */
-function sanitizeReply(raw: string): string {
-  return raw
-    .replace(/\s*[—–]\s*/g, ', ')
-    .replace(/,\s*,/g, ',')
-    .trim()
 }
 
 /**
@@ -265,6 +217,14 @@ function sanitizeReply(raw: string): string {
  * history exceeds the LLM window (so we'd otherwise be dropping older turns)
  * AND we've crossed the next interval boundary. Extracted so we can unit-test
  * without the supabase + LLM scaffolding around it.
+ *
+ * IMPORTANT: the first argument (`historyLength`) MUST be the thread's TOTAL
+ * message count (monotonically increasing across the whole thread), NOT a
+ * capped or loaded history length. If the caller passes a history array that
+ * is truncated at a load cap, this value plateaus once the thread exceeds that
+ * cap, `overflow` stops advancing past the cap, and the interval-boundary
+ * trigger silently stops firing — summaries quietly stop rolling. Always pass
+ * the true running total.
  */
 export function shouldRollSummary(
   historyLength: number,
