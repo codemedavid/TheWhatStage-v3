@@ -140,6 +140,335 @@ describe('scoreQualification', () => {
     }
     expect(scoreQualification(cfg, { q1: 'lots of text' }).score).toBe(0)
   })
+
+  it('exposes raw as an alias of score', () => {
+    const cfg: QualificationConfig = {
+      ...baseConfig,
+      questions: [
+        {
+          id: 'q1',
+          prompt: 'A?',
+          kind: 'single_choice',
+          required: false,
+          weight: 2,
+          options: [{ label: 'Yes', value: 'yes', score: 3 }],
+        },
+      ],
+    }
+    const r = scoreQualification(cfg, { q1: 'yes' })
+    expect(r.score).toBe(6)
+    expect(r.raw).toBe(r.score)
+  })
+})
+
+describe('scoreQualification normalization', () => {
+  it('normalizes to 100 when raw equals max', () => {
+    const cfg: QualificationConfig = {
+      ...baseConfig,
+      questions: [
+        {
+          id: 'q1',
+          prompt: 'A?',
+          kind: 'single_choice',
+          required: false,
+          weight: 1,
+          options: [
+            { label: 'Yes', value: 'yes', score: 5 },
+            { label: 'No', value: 'no', score: 0 },
+          ],
+        },
+      ],
+    }
+    const r = scoreQualification(cfg, { q1: 'yes' })
+    expect(r.raw).toBe(5)
+    expect(r.max).toBe(5)
+    expect(r.normalized).toBe(100)
+  })
+
+  it('produces a proportional integer normalized value', () => {
+    const cfg: QualificationConfig = {
+      ...baseConfig,
+      questions: [
+        {
+          id: 'q1',
+          prompt: 'A?',
+          kind: 'single_choice',
+          required: false,
+          weight: 1,
+          options: [
+            { label: 'Lo', value: 'lo', score: 2 },
+            { label: 'Hi', value: 'hi', score: 6 },
+          ],
+        },
+      ],
+    }
+    // max = 6, raw = 2 -> round(100 * 2 / 6) = 33
+    const r = scoreQualification(cfg, { q1: 'lo' })
+    expect(r.max).toBe(6)
+    expect(r.raw).toBe(2)
+    expect(r.normalized).toBe(33)
+    expect(Number.isInteger(r.normalized)).toBe(true)
+  })
+
+  it('returns normalized 0 (no division) when max is 0', () => {
+    const cfg: QualificationConfig = {
+      ...baseConfig,
+      questions: [
+        {
+          id: 'q1',
+          prompt: 'Tell us',
+          kind: 'short_text',
+          required: false,
+          weight: 5,
+        },
+      ],
+    }
+    const r = scoreQualification(cfg, { q1: 'hello' })
+    expect(r.max).toBe(0)
+    expect(r.normalized).toBe(0)
+  })
+
+  it('handles empty questions config', () => {
+    const r = scoreQualification(baseConfig, {})
+    expect(r).toEqual({
+      score: 0,
+      raw: 0,
+      max: 0,
+      normalized: 0,
+      missing_required: [],
+    })
+  })
+
+  it('computes max independent of answers (all missing -> normalized 0)', () => {
+    const cfg: QualificationConfig = {
+      ...baseConfig,
+      questions: [
+        {
+          id: 'q1',
+          prompt: 'A?',
+          kind: 'single_choice',
+          required: false,
+          weight: 1,
+          options: [{ label: 'Yes', value: 'yes', score: 10 }],
+        },
+      ],
+    }
+    const r = scoreQualification(cfg, {})
+    expect(r.max).toBe(10)
+    expect(r.raw).toBe(0)
+    expect(r.normalized).toBe(0)
+  })
+
+  it('clamps negative raw to normalized 0', () => {
+    const cfg: QualificationConfig = {
+      ...baseConfig,
+      questions: [
+        {
+          id: 'q1',
+          prompt: 'A?',
+          kind: 'single_choice',
+          required: false,
+          weight: 1,
+          options: [
+            { label: 'Bad', value: 'bad', score: -5 },
+            { label: 'Good', value: 'good', score: 4 },
+          ],
+        },
+      ],
+    }
+    // max uses only the positive option (4); raw = -5 -> clamp to 0
+    const r = scoreQualification(cfg, { q1: 'bad' })
+    expect(r.max).toBe(4)
+    expect(r.raw).toBe(-5)
+    expect(r.normalized).toBe(0)
+  })
+
+  it('uses rating_max for the ceiling', () => {
+    const cfg: QualificationConfig = {
+      ...baseConfig,
+      questions: [
+        {
+          id: 'q1',
+          prompt: 'Rate',
+          kind: 'rating',
+          required: false,
+          weight: 2,
+          rating_max: 10,
+        },
+      ],
+    }
+    const r = scoreQualification(cfg, { q1: 5 })
+    expect(r.max).toBe(20)
+    expect(r.raw).toBe(10)
+    expect(r.normalized).toBe(50)
+  })
+
+  it('defaults rating ceiling to 5 when rating_max is absent', () => {
+    const cfg: QualificationConfig = {
+      ...baseConfig,
+      questions: [
+        {
+          id: 'q1',
+          prompt: 'Rate',
+          kind: 'rating',
+          required: false,
+          weight: 1,
+        },
+      ],
+    }
+    const r = scoreQualification(cfg, { q1: 5 })
+    expect(r.max).toBe(5)
+    expect(r.normalized).toBe(100)
+  })
+
+  it('weight 0 contributes nothing to raw or max', () => {
+    const cfg: QualificationConfig = {
+      ...baseConfig,
+      questions: [
+        {
+          id: 'q1',
+          prompt: 'A?',
+          kind: 'single_choice',
+          required: false,
+          weight: 0,
+          options: [{ label: 'Yes', value: 'yes', score: 100 }],
+        },
+      ],
+    }
+    const r = scoreQualification(cfg, { q1: 'yes' })
+    expect(r.raw).toBe(0)
+    expect(r.max).toBe(0)
+    expect(r.normalized).toBe(0)
+  })
+
+  it('guards NaN weight as 1', () => {
+    const cfg: QualificationConfig = {
+      ...baseConfig,
+      questions: [
+        {
+          id: 'q1',
+          prompt: 'A?',
+          kind: 'single_choice',
+          required: false,
+          weight: Number.NaN,
+          options: [{ label: 'Yes', value: 'yes', score: 7 }],
+        },
+      ],
+    }
+    const r = scoreQualification(cfg, { q1: 'yes' })
+    expect(r.raw).toBe(7)
+    expect(r.max).toBe(7)
+    expect(r.normalized).toBe(100)
+  })
+})
+
+describe('scoreQualification multi_choice cap', () => {
+  it('caps duplicate selections at the positive-option ceiling', () => {
+    const cfg: QualificationConfig = {
+      ...baseConfig,
+      questions: [
+        {
+          id: 'q1',
+          prompt: 'Pick',
+          kind: 'multi_choice',
+          required: false,
+          weight: 1,
+          options: [
+            { label: 'A', value: 'a', score: 2 },
+            { label: 'B', value: 'b', score: 3 },
+          ],
+        },
+      ],
+    }
+    // ceiling = 2 + 3 = 5; duplicates must not inflate beyond 5
+    const r = scoreQualification(cfg, { q1: ['a', 'a', 'a', 'b', 'b'] })
+    expect(r.raw).toBe(5)
+    expect(r.max).toBe(5)
+    expect(r.normalized).toBe(100)
+  })
+
+  it('keeps normal (non-duplicate) multi_choice sums unchanged', () => {
+    const cfg: QualificationConfig = {
+      ...baseConfig,
+      questions: [
+        {
+          id: 'q1',
+          prompt: 'Pick',
+          kind: 'multi_choice',
+          required: false,
+          weight: 1,
+          options: [
+            { label: 'A', value: 'a', score: 2 },
+            { label: 'B', value: 'b', score: 3 },
+            { label: 'C', value: 'c', score: 5 },
+          ],
+        },
+      ],
+    }
+    expect(scoreQualification(cfg, { q1: ['a', 'b'] }).raw).toBe(5)
+    expect(scoreQualification(cfg, { q1: ['a', 'b', 'c'] }).raw).toBe(10)
+  })
+
+  it('ignores negative options in the max ceiling but applies them to raw', () => {
+    const cfg: QualificationConfig = {
+      ...baseConfig,
+      questions: [
+        {
+          id: 'q1',
+          prompt: 'Pick',
+          kind: 'multi_choice',
+          required: false,
+          weight: 1,
+          options: [
+            { label: 'Plus', value: 'plus', score: 4 },
+            { label: 'Minus', value: 'minus', score: -2 },
+          ],
+        },
+      ],
+    }
+    // ceiling = 4 (only positive). selecting both: min(4 + -2, 4) = 2
+    const r = scoreQualification(cfg, { q1: ['plus', 'minus'] })
+    expect(r.max).toBe(4)
+    expect(r.raw).toBe(2)
+    expect(r.normalized).toBe(50)
+  })
+
+  it('one heavy question cannot dominate the normalized score', () => {
+    const cfg: QualificationConfig = {
+      ...baseConfig,
+      questions: [
+        {
+          id: 'big',
+          prompt: 'Many',
+          kind: 'multi_choice',
+          required: false,
+          weight: 3,
+          options: [
+            { label: '1', value: '1', score: 5 },
+            { label: '2', value: '2', score: 5 },
+            { label: '3', value: '3', score: 5 },
+            { label: '4', value: '4', score: 5 },
+          ],
+        },
+        {
+          id: 'small',
+          prompt: 'A?',
+          kind: 'single_choice',
+          required: false,
+          weight: 1,
+          options: [{ label: 'Yes', value: 'yes', score: 5 }],
+        },
+      ],
+    }
+    // big max = (5*4)*3 = 60, small max = 5 -> total 65
+    const r = scoreQualification(cfg, {
+      big: ['1', '2', '3', '4'],
+      small: 'yes',
+    })
+    expect(r.max).toBe(65)
+    expect(r.raw).toBe(65)
+    expect(r.normalized).toBe(100)
+  })
 })
 
 describe('qualification handler', () => {
