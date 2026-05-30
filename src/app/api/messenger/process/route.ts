@@ -702,7 +702,8 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
       // SUMMARY_INTERVAL_TURNS turns once history exceeds the LLM window.
       // This keeps long threads coherent without paying for a 40-turn prompt
       // every reply. Fire-and-forget — never blocks the bot response.
-      if (shouldRollSummary(history.length, LLM_HISTORY_TURNS, SUMMARY_INTERVAL_TURNS)) {
+      const totalThreadMessages = await countThreadMessages(admin, thread.id)
+      if (shouldRollSummary(totalThreadMessages, LLM_HISTORY_TURNS, SUMMARY_INTERVAL_TURNS)) {
         summarizeConversation(history, message, reply, conversationSummary)
           .then((summary) => {
             if (summary) {
@@ -1607,6 +1608,11 @@ async function loadHistory(
   return data
     .reverse()
     .filter((m) => (m.body as string)?.trim())
+    .filter((m) => {
+      if (m.direction === 'inbound') return true
+      // outbound: keep only bot-sent rows that aren't image placeholders
+      return m.sender === 'bot' && !(m.body as string).startsWith('[image]')
+    })
     .map((m) => ({
       role: m.direction === 'outbound' ? ('assistant' as const) : ('user' as const),
       content: m.body as string,
@@ -1624,6 +1630,21 @@ async function countInboundMessages(
     .eq('direction', 'inbound')
   if (error) {
     console.warn('[messenger.worker] countInboundMessages failed', error.message)
+    return 0
+  }
+  return count ?? 0
+}
+
+async function countThreadMessages(
+  admin: AdminClient,
+  threadId: string,
+): Promise<number> {
+  const { count, error } = await admin
+    .from('messenger_messages')
+    .select('id', { head: true, count: 'exact' })
+    .eq('thread_id', threadId)
+  if (error) {
+    console.warn('[messenger.worker] countThreadMessages failed', error.message)
     return 0
   }
   return count ?? 0
