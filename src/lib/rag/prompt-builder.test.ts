@@ -78,15 +78,22 @@ describe('buildPrompt', () => {
   });
 
   describe('current time injection', () => {
-    it('includes a "Current time" line at the top of the system prompt', () => {
+    it('includes a "Current time" line at the END of the system prompt (cache-friendly: volatile timestamp out of the stable prefix)', () => {
       const { system } = buildPrompt({
         userQuery: 'hello',
         buckets: { useful: [], ambiguous: [], reject: [] },
         config: {},
         maxContext: 5,
       });
-      expect(system.startsWith('Current time:')).toBe(true);
+      // H1: the per-minute timestamp must NOT be the prefix (it would bust the
+      // provider prompt cache). It now lives at the tail, after the KB context.
+      expect(system.startsWith('Current time:')).toBe(false);
       expect(system).toContain('Asia/Manila');
+      const idxTime = system.indexOf('Current time:');
+      const idxKb = system.indexOf('# Knowledge base context');
+      expect(idxTime).toBeGreaterThan(idxKb);
+      // The stable safety prefix should lead instead.
+      expect(system.indexOf('# Ground rules')).toBeLessThan(idxTime);
     });
   });
 

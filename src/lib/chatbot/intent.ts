@@ -5,11 +5,30 @@ export type ReplyIntent = 'smalltalk' | 'faq' | 'sales' | 'support' | 'other'
  * Pure, synchronous, no LLM calls, never throws, safe on empty or very long input.
  * Handles English and Tagalog/Taglish.
  *
- * Precedence when multiple categories match: sales > support > faq > smalltalk > other
+ * Precedence when multiple categories match: support > sales > faq > smalltalk > other.
+ * Support is checked before sales so an existing-order issue ("order ko po status?")
+ * is not mislabelled as buying intent by the bare "order" keyword. This ordering is
+ * routing-neutral (both sales and support keep the strong model) but keeps the label honest.
  */
 export function classifyIntentHeuristic(message: string): ReplyIntent {
   // Normalize once: lowercase and trim
   const msg = message.toLowerCase().trim()
+
+  // --- SUPPORT (existing order / issue) ---
+  // English: status, refund, cancel, complaint
+  // Tagalog/Taglish: order ko, booking ko, reklamo, hindi dumating, saan na
+  const supportPatterns = [
+    /order ko/,
+    /booking ko/,
+    /\bstatus\b/,
+    /\brefund\b/,
+    /\bcancel\b/,
+    /\breklamo\b/,
+    /hindi dumating/,
+    /saan na/,
+    /\bcomplaint\b/,
+  ]
+  if (supportPatterns.some((p) => p.test(msg))) return 'support'
 
   // --- SALES (buying intent) ---
   // English: book, order, buy, avail, reserve, interested, sign up
@@ -30,22 +49,6 @@ export function classifyIntentHeuristic(message: string): ReplyIntent {
     /kunin ko/,
   ]
   if (salesPatterns.some((p) => p.test(msg))) return 'sales'
-
-  // --- SUPPORT (existing order / issue) ---
-  // English: status, refund, cancel, complaint
-  // Tagalog/Taglish: order ko, booking ko, reklamo, hindi dumating, saan na
-  const supportPatterns = [
-    /order ko/,
-    /booking ko/,
-    /\bstatus\b/,
-    /\brefund\b/,
-    /\bcancel\b/,
-    /\breklamo\b/,
-    /hindi dumating/,
-    /saan na/,
-    /\bcomplaint\b/,
-  ]
-  if (supportPatterns.some((p) => p.test(msg))) return 'support'
 
   // --- FAQ (informational question) ---
   // English: how, what, where, when, price, hours, location

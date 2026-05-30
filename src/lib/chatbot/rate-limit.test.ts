@@ -7,8 +7,8 @@ describe('checkRateLimit', () => {
     const opts = { limit: 3, windowMs: 1000 }
 
     for (let i = 0; i < 3; i++) {
-      const result = await checkRateLimit(key, opts)
-      expect(result.allowed).toBe(true)
+      const result = checkRateLimit(key, opts)
+      expect(result.ok).toBe(true)
     }
   })
 
@@ -18,12 +18,12 @@ describe('checkRateLimit', () => {
 
     // Exhaust the allowance
     for (let i = 0; i < 3; i++) {
-      await checkRateLimit(key, opts)
+      checkRateLimit(key, opts)
     }
 
     // This one must be blocked
-    const result = await checkRateLimit(key, opts)
-    expect(result.allowed).toBe(false)
+    const result = checkRateLimit(key, opts)
+    expect(result.ok).toBe(false)
     expect(result.retryAfterMs).toBeGreaterThan(0)
   })
 
@@ -33,22 +33,22 @@ describe('checkRateLimit', () => {
     const keyB = `test-rl-keyB-${Date.now()}`
 
     // Exhaust keyA
-    await checkRateLimit(keyA, opts)
-    await checkRateLimit(keyA, opts)
-    const blockedA = await checkRateLimit(keyA, opts)
-    expect(blockedA.allowed).toBe(false)
+    checkRateLimit(keyA, opts)
+    checkRateLimit(keyA, opts)
+    const blockedA = checkRateLimit(keyA, opts)
+    expect(blockedA.ok).toBe(false)
 
     // keyB should still be clean
-    const okB = await checkRateLimit(keyB, opts)
-    expect(okB.allowed).toBe(true)
+    const okB = checkRateLimit(keyB, opts)
+    expect(okB.ok).toBe(true)
   })
 
   it('returns retryAfterMs of 0 or absent when allowed', async () => {
     const key = `test-rl-ok-${Date.now()}`
     const opts = { limit: 5, windowMs: 1000 }
 
-    const result = await checkRateLimit(key, opts)
-    expect(result.allowed).toBe(true)
+    const result = checkRateLimit(key, opts)
+    expect(result.ok).toBe(true)
     // retryAfterMs should be 0, undefined, or absent when the request is allowed
     expect(!result.retryAfterMs || result.retryAfterMs === 0).toBe(true)
   })
