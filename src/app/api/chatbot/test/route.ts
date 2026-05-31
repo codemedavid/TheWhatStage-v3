@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { getChatbotConfig } from '@/lib/chatbot/config'
+import { checkRateLimit } from '@/lib/chatbot/rate-limit'
 import {
   HfRouterLlm,
   buildPrompt,
@@ -35,6 +36,17 @@ export async function POST(req: NextRequest) {
     })
   }
 
+  const rl = checkRateLimit(`chat:test:${userId}`)
+  if (!rl.ok) {
+    return new Response(JSON.stringify({ error: 'rate_limited' }), {
+      status: 429,
+      headers: {
+        'content-type': 'application/json',
+        'retry-after': String(Math.ceil(rl.retryAfterMs / 1000)),
+      },
+    })
+  }
+
   // Kick off config fetch in parallel with body parsing — both depend only on
   // userId / the request stream, neither needs the other.
   const tConfig = Date.now()
@@ -51,6 +63,7 @@ export async function POST(req: NextRequest) {
       history?: unknown
     }
     message = typeof body.message === 'string' ? body.message.trim() : ''
+    if (message.length > 4000) message = message.slice(0, 4000)
     if (Array.isArray(body.history)) {
       history = body.history
         .map((m) => {

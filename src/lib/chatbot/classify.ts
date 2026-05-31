@@ -18,6 +18,8 @@ import { buildMediaContextBlock } from '@/lib/media/prompt'
 import { logChatbotUsage, type AnswerHistory, type AnswerOptions, type AnswerResult } from './answer'
 import { decideForceSend } from '@/lib/action-pages/force-send'
 import { paymentEnumBlock } from '@/lib/chatbot/payment-enum'
+import { guardReply } from '@/lib/chatbot/reply-guard'
+import { redactForLlm } from '@/lib/chatbot/pii-redact'
 
 export interface StageBrief {
   id: string
@@ -225,12 +227,18 @@ export async function answerWithClassification(
     .filter(Boolean)
     .join('\n\n')
 
+  // Redact PII from the LLM payload only. Grounding (below) stays raw so
+  // customer-typed contacts are allowed by guardReply.
+  const redactedHistory = history.map((h) => ({ ...h, content: redactForLlm(h.content) }))
+  const redactedUser = redactForLlm(built.user)
+  const grounding = [system, ...built.contextChunks.map((c) => c.content), message].join('\n')
+
   const t0 = Date.now()
   const completion = await llm.completeWithUsage(
     [
       { role: 'system', content: system },
-      ...history,
-      { role: 'user', content: built.user },
+      ...redactedHistory,
+      { role: 'user', content: redactedUser },
     ],
     // 600 = ~400 tokens of reply + headroom for the JSON envelope and
     // structured fields (stage_change, action_page, recommend_*). The old
@@ -267,7 +275,10 @@ export async function answerWithClassification(
       attach_images?: unknown
     }
     const rawReply = typeof r.reply === 'string' ? r.reply : ''
-    if (rawReply) text = sanitizeReply(rawReply)
+    if (rawReply) {
+      text = sanitizeReply(rawReply)
+      text = guardReply({ text, grounding, fallbackMessage: config.fallbackMessage }).text
+    }
     stageChange = coerceStageChange(r.stage_change, stages, currentStageId)
     actionPage = coerceActionPage(r.action_page, actionPages)
     attachImages = r.attach_images === true
@@ -309,8 +320,8 @@ export async function answerWithClassification(
     const fb = await llm.completeWithUsage(
       [
         { role: 'system', content: fallbackSystem },
-        ...history,
-        { role: 'user', content: built.user },
+        ...redactedHistory,
+        { role: 'user', content: redactedUser },
       ],
       { temperature: config.temperature, maxTokens: 400 },
     )
@@ -326,6 +337,7 @@ export async function answerWithClassification(
       ms: Date.now() - tFb,
     })
     text = sanitizeReply(fb.text)
+    text = guardReply({ text, grounding, fallbackMessage: config.fallbackMessage }).text
     stageChange = null
     actionPage = null
     productRecommendation = null
