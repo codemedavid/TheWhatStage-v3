@@ -98,11 +98,10 @@ export default function BookingPicker({ slug, config, hidden, sourceContext }: P
   const [, startTransition] = useTransition()
   const formRef = useRef<HTMLFormElement>(null)
   const inFlightRef = useRef(false)
-  const idempotencyKeyRef = useRef<string>(
-    typeof crypto !== 'undefined' && 'randomUUID' in crypto
-      ? crypto.randomUUID()
-      : `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-  )
+  // Generated lazily on first submit (an event handler, never during render) so
+  // the impure crypto/Date/random calls stay out of the render path. The ref
+  // persists across renders, so retries of the same booking reuse the key.
+  const idempotencyKeyRef = useRef<string>('')
 
   const dateRange = config.date_range
 
@@ -222,6 +221,12 @@ export default function BookingPicker({ slug, config, hidden, sourceContext }: P
     inFlightRef.current = true
     const form = e.currentTarget
     const fd = new FormData(form)
+    if (!idempotencyKeyRef.current) {
+      idempotencyKeyRef.current =
+        typeof crypto !== 'undefined' && 'randomUUID' in crypto
+          ? crypto.randomUUID()
+          : `${Date.now()}-${Math.random().toString(36).slice(2)}`
+    }
     if (!fd.has('idempotency_key')) {
       fd.append('idempotency_key', idempotencyKeyRef.current)
     }
