@@ -1,18 +1,33 @@
 import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { getImageKit } from '@/lib/imagekit/server'
+import {
+  ALLOWED_IMAGE_TYPES,
+  MAX_UPLOAD_BYTES,
+  checkRateLimit,
+  clientRateKey,
+  extForImageType,
+  sniffImageType,
+} from '@/lib/action-pages/upload-guard'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
-const ALLOWED = new Set(['image/jpeg', 'image/png', 'image/webp'])
-const MAX_BYTES = 5 * 1024 * 1024
+const ALLOWED = ALLOWED_IMAGE_TYPES
+const MAX_BYTES = MAX_UPLOAD_BYTES
 
 export async function POST(
   req: Request,
   ctx: { params: Promise<{ slug: string }> },
 ) {
   const { slug } = await ctx.params
+
+  // Best-effort per-IP rate limit. This route is public + unauthenticated and
+  // hits our ImageKit quota, so cap scripted abuse before doing any work.
+  if (!checkRateLimit(clientRateKey(req.headers, slug))) {
+    return NextResponse.json({ error: 'rate_limited' }, { status: 429 })
+  }
+
   const admin = createAdminClient()
   const { data: page } = await admin
     .from('action_pages')
@@ -40,8 +55,14 @@ export async function POST(
 
   const imagekit = getImageKit()
   const buffer = Buffer.from(await file.arrayBuffer())
-  const ext =
-    file.type === 'image/webp' ? 'webp' : file.type === 'image/png' ? 'png' : 'jpg'
+
+  // Do not trust the client-declared file.type: sniff the magic bytes and
+  // reject anything that is not a real JPEG/PNG/WebP.
+  const sniffed = sniffImageType(buffer)
+  if (!sniffed)
+    return NextResponse.json({ error: 'unsupported image type' }, { status: 400 })
+
+  const ext = extForImageType(sniffed)
   const fileName = `customer-${Date.now()}.${ext}`
 
   const result = await imagekit.upload({

@@ -90,42 +90,51 @@ describe('parseFormSubmission', () => {
     expect((result.data as Record<string, unknown>).meta).toBeUndefined()
   })
 
-  it('records validation_errors when required fields are missing but still returns submitted', () => {
-    const result = parseFormSubmission(
-      { email: 'jane@example.com' },
-      config,
-    )
-    expect(result.outcome).toBe('submitted')
-    const data = result.data as {
-      fields: Record<string, unknown>
-      meta?: { validation_errors: string[] }
-    }
-    expect(data.fields.email).toBe('jane@example.com')
-    expect(data.fields.full_name).toBeUndefined()
-    expect(data.meta?.validation_errors).toContain('full_name')
+  it('throws when a required field is missing (server-side enforcement)', () => {
+    // The handler now rejects rather than recording validation_errors and
+    // returning 'submitted' — required fields are enforced on the server.
+    expect(() =>
+      parseFormSubmission({ email: 'jane@example.com' }, config),
+    ).toThrow(/required/i)
+  })
+
+  it('rejects select/radio values outside the configured options', () => {
+    expect(() =>
+      parseFormSubmission({ full_name: 'Jane', plan: 'enterprise' }, config),
+    ).toThrow(/selection/i)
+    expect(() =>
+      parseFormSubmission({ full_name: 'Jane', channel: 'fax' }, config),
+    ).toThrow(/selection/i)
+  })
+
+  it('rejects malformed email values', () => {
+    expect(() =>
+      parseFormSubmission({ full_name: 'Jane', email: 'not-an-email' }, config),
+    ).toThrow(/email/i)
   })
 
   it('coerces checkbox values to booleans', () => {
-    const truthy = parseFormSubmission({ agreed: 'on' }, config)
+    // full_name is required, so include it to isolate checkbox behavior.
+    const truthy = parseFormSubmission({ full_name: 'Jane', agreed: 'on' }, config)
     expect(
       (truthy.data as { fields: Record<string, unknown> }).fields.agreed,
     ).toBe(true)
 
-    const falsy = parseFormSubmission({ agreed: 'false' }, config)
+    const falsy = parseFormSubmission({ full_name: 'Jane', agreed: 'false' }, config)
     expect(
       (falsy.data as { fields: Record<string, unknown> }).fields.agreed,
     ).toBe(false)
 
     // Missing checkbox value defaults to false (HTML form behavior).
-    const missing = parseFormSubmission({}, config)
+    const missing = parseFormSubmission({ full_name: 'Jane' }, config)
     expect(
       (missing.data as { fields: Record<string, unknown> }).fields.agreed,
     ).toBe(false)
   })
 
-  it('passes select and radio values through unchanged', () => {
+  it('passes valid select and radio values through unchanged', () => {
     const result = parseFormSubmission(
-      { plan: 'free', channel: 'phone' },
+      { full_name: 'Jane', plan: 'free', channel: 'phone' },
       config,
     )
     const fields = (result.data as { fields: Record<string, unknown> }).fields

@@ -13,7 +13,34 @@ import {
 import { slugifyTitle } from '../_lib/slug'
 import { parseRealestateConfig } from '@/app/a/[slug]/_kinds/realestate/schema'
 import { parseSalesConfig } from '@/app/a/[slug]/_kinds/sales/schema'
+import { parseFormConfig } from '@/app/a/[slug]/_kinds/form/schema'
+import { parseBookingConfig } from '@/app/a/[slug]/_kinds/booking/schema'
+import { parseQualificationConfig } from '@/app/a/[slug]/_kinds/qualification/schema'
 import { syncRealestateToBusinessItems, syncSalesToBusinessItems } from '@/lib/action-pages/rag/sync'
+
+/**
+ * Normalize a kind-specific config blob through that kind's tolerant
+ * `parse*Config` helper before persisting. These parsers fill defaults and
+ * strip unknown/oversized junk via `safeParse`, so we always store a clean,
+ * schema-conforming config — never a hard failure that would lock the user out
+ * of saving. Kinds without a dedicated parser (catalog) pass through unchanged.
+ */
+function normalizeConfigForKind(kind: string, config: unknown): unknown {
+  switch (kind) {
+    case 'form':
+      return parseFormConfig(config)
+    case 'booking':
+      return parseBookingConfig(config)
+    case 'qualification':
+      return parseQualificationConfig(config)
+    case 'sales':
+      return parseSalesConfig(config)
+    case 'realestate':
+      return parseRealestateConfig(config)
+    default:
+      return config
+  }
+}
 
 async function requireUser() {
   const supabase = await createClient()
@@ -176,7 +203,14 @@ export async function updateActionPage(formData: FormData): Promise<void> {
     cta_label: parsed.data.cta_label ?? null,
     bot_send_instructions: parsed.data.bot_send_instructions ?? null,
   }
-  if (parsed.data.config !== undefined) update.config = parsed.data.config
+  // Validate/normalize the config per-kind before writing, so we never persist
+  // an unvalidated opaque blob. Uses the kind's tolerant parser (defaults +
+  // junk-stripping) keyed off the page's own kind — never cross-wired.
+  if (parsed.data.config !== undefined) {
+    update.config = existing
+      ? normalizeConfigForKind(existing.kind, parsed.data.config)
+      : parsed.data.config
+  }
 
   const { error } = await supabase
     .from('action_pages')
