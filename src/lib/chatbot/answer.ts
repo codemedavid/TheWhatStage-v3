@@ -178,6 +178,7 @@ export async function answer(
   logChatbotUsage('chatbot.answer', {
     model: completion.model,
     promptTokens: completion.usage?.promptTokens ?? null,
+    cachedPromptTokens: completion.usage?.cachedPromptTokens ?? null,
     completionTokens: completion.usage?.completionTokens ?? null,
     finishReason: completion.finishReason,
     kbChunks: built.contextChunks.length,
@@ -202,7 +203,7 @@ export async function answer(
   // must stay RAW (not PII-redacted) so customer-typed contacts are allowed.
   const grounding = [system, ...built.contextChunks.map((c) => c.content), message].join('\n')
   const guarded = guardReply({ text: completion.text, grounding, fallbackMessage: config.fallbackMessage })
-  let text = guarded.text
+  const text = guarded.text
   if (guarded.dropped) {
     console.warn('[chatbot.answer] dropping reply with ungrounded contact details', {
       ungrounded: guarded.ungrounded,
@@ -244,6 +245,14 @@ export type ChatbotUsageScope =
 export interface ChatbotUsageFields {
   model: string
   promptTokens: number | null
+  /**
+   * Prompt tokens served from the provider's automatic prefix cache this turn
+   * (DeepSeek KV cache via OpenRouter), or null when the route does not report
+   * a cache-hit count (UNKNOWN, not "no cache"). Log aggregation computes
+   * hit-rate = cachedPromptTokens / promptTokens across turns to prove the
+   * contiguous-prefix fix is landing cache hits.
+   */
+  cachedPromptTokens?: number | null
   completionTokens: number | null
   finishReason: string | null
   kbChunks: number

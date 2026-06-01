@@ -75,6 +75,25 @@ export interface BuiltPrompt {
   user: string;
   contextChunkIds: string[];
   contextChunks: RetrievedChunk[];
+  /**
+   * The contiguous, byte-identical-per-persona STATIC leading prefix
+   * (Ground rules -> Identity -> Reply length -> Punctuation -> Conversation
+   * discipline -> Rules DO -> Rules DON'T -> Grounding -> Fallback). Populated
+   * ONLY on the structured/default-persona path in `cache_friendly` layout, so
+   * `classify.ts` can interleave the stage-instruction static prose between
+   * this prefix and `volatileTail` to form one contiguous cacheable prefix.
+   * Undefined on the freeform `persona` override path and in `legacy` layout —
+   * callers must then fall back to the single `system` string.
+   */
+  staticPrefix?: string;
+  /**
+   * The per-turn / per-conversation VOLATILE tail (goal -> instructions ->
+   * summary -> payment -> KB context). Pairs with {@link staticPrefix}; same
+   * population rules. Note: no time block here — in `cache_friendly` the
+   * timestamp is appended once at the very end of the assembled system content
+   * by `classify.ts`.
+   */
+  volatileTail?: string;
 }
 
 function numbered(items: string[]): string {
@@ -98,7 +117,16 @@ function buildContextBlock(chunks: Array<RetrievedChunk & { score: number }>): s
     .join('\n\n---\n\n');
 }
 
-function assembleSystemPrompt(p: ChatbotPersona, contextBlock: string, conversationSummary?: string, paymentEnumBlock?: string): string {
+interface AssembledSystemPrompt {
+  /** Back-compat single string. Always populated. */
+  system: string;
+  /** Contiguous static prefix — only set in cache_friendly layout. */
+  staticPrefix?: string;
+  /** Volatile per-turn tail — only set in cache_friendly layout. */
+  volatileTail?: string;
+}
+
+function assembleSystemPrompt(p: ChatbotPersona, contextBlock: string, conversationSummary?: string, paymentEnumBlock?: string): AssembledSystemPrompt {
   const goalSection = p.funnelInstruction?.trim()
     ? [
         `# PRIMARY GOAL (Follow this above all else)`,
@@ -191,8 +219,10 @@ function assembleSystemPrompt(p: ChatbotPersona, contextBlock: string, conversat
   if (ragConfig.promptLayout === 'legacy') {
     // Pre-2026-05 order: goal + instructions FIRST, then stable rules,
     // then summary, then KB context. Pinned via RAG_PROMPT_LAYOUT=legacy
-    // as a one-release safety toggle.
-    return [
+    // as a one-release safety toggle. MINUTE-resolution time stays at the end,
+    // byte-identical to pre-change main. staticPrefix/volatileTail are left
+    // undefined so classify falls back to the single `system` string.
+    const system = [
       ...goalSection,
       ...instructionsSection,
       ...stable,
@@ -202,11 +232,18 @@ function assembleSystemPrompt(p: ChatbotPersona, contextBlock: string, conversat
       '',
       manilaNowBlock(),
     ].join('\n');
+    return { system };
   }
 
   // cache_friendly: stable prefix first so providers can cache it, then
-  // every volatile per-turn section.
-  return [
+  // every volatile per-turn section. The `system` field keeps its existing
+  // array-join shape for back-compat callers (answer(), the test/stream
+  // route) but now uses DATE-resolution time at the tail so the timestamp
+  // rotates once/day instead of every minute. classify.ts does NOT consume
+  // `system` in this layout — it reassembles from the split parts below and
+  // appends the single time block at the very tail, so there is no
+  // double-emit.
+  const system = [
     ...stable,
     ...goalSection,
     ...instructionsSection,
@@ -214,8 +251,27 @@ function assembleSystemPrompt(p: ChatbotPersona, contextBlock: string, conversat
     ...paymentSection,
     ...kb,
     '',
-    manilaNowBlock(),
+    manilaNowBlock(undefined, { resolution: 'date' }),
   ].join('\n');
+
+  // Split for classify.ts: the contiguous static prefix (the `stable` block,
+  // sans its trailing blank element) and the volatile per-turn tail
+  // (goal -> instructions -> summary -> payment -> KB). No time block in the
+  // tail — classify owns the single date-resolution time append at the very
+  // end of the assembled system content. Both are clean blocks meant to be
+  // re-joined with '\n\n', matching classify's `.filter(Boolean).join('\n\n')`.
+  const staticPrefix = stable.filter((l, i) => !(l === '' && i === stable.length - 1)).join('\n');
+  const volatileTail = [
+    ...goalSection,
+    ...instructionsSection,
+    ...summarySection,
+    ...paymentSection,
+    ...kb,
+  ]
+    .join('\n')
+    .replace(/\n+$/, '');
+
+  return { system, staticPrefix, volatileTail };
 }
 
 export function buildPrompt(args: BuildPromptArgs): BuiltPrompt {
@@ -225,9 +281,13 @@ export function buildPrompt(args: BuildPromptArgs): BuiltPrompt {
     .slice(0, max);
   const contextBlock = buildContextBlock(ranked);
 
-  const contextChunks = ranked.map(({ score: _score, ...c }) => c);
+  // Strip the transient `score` field so contextChunks are plain RetrievedChunk.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const contextChunks = ranked.map(({ score, ...c }) => c);
 
-  // Legacy escape hatch: full freeform persona block.
+  // Legacy escape hatch: full freeform persona block. staticPrefix/volatileTail
+  // are intentionally left undefined so classify falls back to the single
+  // `system` string (byte-identical to today).
   if (args.persona) {
     const system = `${args.persona}\n\n# Knowledge base context\n${contextBlock}\n\n${manilaNowBlock()}`;
     return { system, user: args.userQuery, contextChunkIds: ranked.map((c) => c.id), contextChunks };
@@ -238,8 +298,12 @@ export function buildPrompt(args: BuildPromptArgs): BuiltPrompt {
     ...(args.config ?? {}),
   };
 
+  const assembled = assembleSystemPrompt(merged, contextBlock, args.conversationSummary, args.paymentEnumBlock);
+
   return {
-    system: assembleSystemPrompt(merged, contextBlock, args.conversationSummary, args.paymentEnumBlock),
+    system: assembled.system,
+    staticPrefix: assembled.staticPrefix,
+    volatileTail: assembled.volatileTail,
     user: args.userQuery,
     contextChunkIds: ranked.map((c) => c.id),
     contextChunks,

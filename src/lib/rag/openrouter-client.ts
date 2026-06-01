@@ -1,5 +1,6 @@
 import OpenAI from 'openai';
 import { ragConfig } from './config';
+import { EmbedCache } from './embed-cache';
 import type { Embedder, RerankItem, RerankResult, Reranker } from './hf-client';
 import { pMapLimit, withRetry } from './retry';
 
@@ -13,6 +14,10 @@ function buildHeaders(): Record<string, string> {
 export class OpenRouterEmbedder implements Embedder {
   private client: OpenAI;
   private model: string;
+  // Instance-local LRU. The factory singleton (see factory.ts) keeps one
+  // embedder per process, so this cache persists across retrieve() calls and
+  // returns byte-identical vectors on a repeated query.
+  private cache = new EmbedCache(500);
 
   constructor(opts?: { apiKey?: string; baseUrl?: string; model?: string }) {
     const apiKey = opts?.apiKey ?? ragConfig.openrouterApiKey;
@@ -26,7 +31,10 @@ export class OpenRouterEmbedder implements Embedder {
   }
 
   async embed(text: string): Promise<number[]> {
-    return withRetry(async () => {
+    const key = EmbedCache.keyFor(this.model, text);
+    const hit = this.cache.get(key);
+    if (hit !== undefined) return hit;
+    const vec = await withRetry(async () => {
       const res = await this.client.embeddings.create({
         model: this.model,
         input: text,
@@ -34,16 +42,39 @@ export class OpenRouterEmbedder implements Embedder {
       });
       return res.data[0].embedding as number[];
     });
+    this.cache.set(key, vec);
+    return vec;
   }
 
   async embedBatch(texts: string[]): Promise<number[][]> {
     if (texts.length === 0) return [];
+
+    // Resolve cache hits up front; only the misses are sent to the API. We
+    // record each miss's original position so the merged result preserves
+    // input order exactly.
+    const out: number[][] = new Array(texts.length);
+    const missTexts: string[] = [];
+    const missPositions: number[] = [];
+    const missKeys: string[] = [];
+    for (let i = 0; i < texts.length; i++) {
+      const key = EmbedCache.keyFor(this.model, texts[i]);
+      const hit = this.cache.get(key);
+      if (hit !== undefined) {
+        out[i] = hit;
+      } else {
+        missTexts.push(texts[i]);
+        missPositions.push(i);
+        missKeys.push(key);
+      }
+    }
+    if (missTexts.length === 0) return out;
+
     const batchSize = ragConfig.embedBatchSize;
     const batches: string[][] = [];
-    for (let i = 0; i < texts.length; i += batchSize) {
-      batches.push(texts.slice(i, i + batchSize));
+    for (let i = 0; i < missTexts.length; i += batchSize) {
+      batches.push(missTexts.slice(i, i + batchSize));
     }
-    const out = await pMapLimit(batches, ragConfig.embedConcurrency, async (batch) =>
+    const fetched = await pMapLimit(batches, ragConfig.embedConcurrency, async (batch) =>
       withRetry(async () => {
         const res = await this.client.embeddings.create({
           model: this.model,
@@ -59,7 +90,16 @@ export class OpenRouterEmbedder implements Embedder {
           .map((d) => d.embedding as number[]);
       }),
     );
-    return out.flat();
+
+    // Scatter the fetched vectors back into their original positions and cache
+    // each one keyed by its text.
+    const fetchedFlat = fetched.flat();
+    for (let m = 0; m < fetchedFlat.length; m++) {
+      const pos = missPositions[m];
+      out[pos] = fetchedFlat[m];
+      this.cache.set(missKeys[m], fetchedFlat[m]);
+    }
+    return out;
   }
 }
 

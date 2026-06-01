@@ -45,8 +45,26 @@ export function manilaNow(d: Date = new Date()): ManilaNow {
   }
 }
 
-export function manilaNowBlock(d: Date = new Date()): string {
+export function manilaNowBlock(
+  d: Date = new Date(),
+  opts: { resolution?: 'minute' | 'date' } = {},
+): string {
   const n = manilaNow(d)
+  if (opts.resolution === 'date') {
+    return `Current date: ${n.dateLong} (Asia/Manila, UTC+08:00).`
+  }
   const time = n.iso.slice(11) // "14:32"
   return `Current time: ${n.dateLong}, ${time} (Asia/Manila, UTC+08:00).`
+}
+
+/**
+ * Cache-stable, DATE-resolution variant of {@link manilaNowBlock}. Drops the
+ * HH:MM minute granularity so the string only rotates once per Manila day,
+ * which keeps it out of (or only cheaply busting) a provider prompt cache.
+ * The `cache_friendly` prompt layout appends this at the VOLATILE TAIL of the
+ * system content. Weekday + date are retained for scheduling / "open today?"
+ * style questions; only the minute-of-day is dropped.
+ */
+export function manilaDateBlock(d: Date = new Date()): string {
+  return manilaNowBlock(d, { resolution: 'date' })
 }

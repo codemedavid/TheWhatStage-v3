@@ -88,6 +88,33 @@ describe('retrieve', () => {
     expect(r.buckets.useful.map((x) => x.id)).toEqual(['2']);
   });
 
+  it('degrades gracefully (no throw, empty buckets) when the query embed fails', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const failingEmbedder = {
+      embed: vi.fn().mockRejectedValue(new Error('openrouter HTTP 429: rate limited')),
+      embedBatch: vi.fn().mockResolvedValue([]),
+    };
+    const rpc = vi.fn();
+    const client = { from: () => ({}), rpc };
+    const reranker = { rank: vi.fn() };
+
+    const r = await retrieve(
+      { client, embedder: failingEmbedder, reranker } as unknown as RetrieverDeps,
+      { userId: 'u', query: 'paano mag-order' },
+    );
+
+    // No throw; safe empty result so the chatbot can still answer from persona.
+    expect(r.buckets.useful).toEqual([]);
+    expect(r.buckets.ambiguous).toEqual([]);
+    expect(r.buckets.reject).toEqual([]);
+    expect(r.rewrote).toBe(false);
+    // Embed failure short-circuits before the RPC and reranker.
+    expect(rpc).not.toHaveBeenCalled();
+    expect(reranker.rank).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
   it('does NOT rewrite when first pass returned candidates but low scores', async () => {
     // 4 candidates > floorK so the reranker actually runs and rejects them.
     const candidates1 = [

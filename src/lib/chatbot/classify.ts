@@ -20,6 +20,7 @@ import { decideForceSend } from '@/lib/action-pages/force-send'
 import { paymentEnumBlock } from '@/lib/chatbot/payment-enum'
 import { guardReply } from '@/lib/chatbot/reply-guard'
 import { redactForLlm } from '@/lib/chatbot/pii-redact'
+import { manilaDateBlock } from '@/lib/time/manilaNow'
 
 export interface StageBrief {
   id: string
@@ -187,13 +188,17 @@ export async function answerWithClassification(
     config,
     options.activeRealestatePageId,
   )
-  const stageSystem = stageInstruction(
+  const stageParts = stageInstructionParts(
     stages,
     currentStageId,
     actionPages,
     recommendRules,
     recommendPropertyRules,
   )
+  // Back-compat concatenation (static prose + '\n\n' + volatile tail) used by
+  // the legacy layout, the freeform-persona fallback, and the JSON-parse-fail
+  // fallback path below.
+  const stageSystem = stageParts.staticPrefix + '\n\n' + stageParts.volatileTail
   const firstName = options.leadName?.split(' ')[0]?.trim()
   const leadNameBlock = firstName
     ? `# Lead\nThe customer's first name is ${firstName}. Address them by their first name when greeting or when it feels natural.`
@@ -223,9 +228,46 @@ export async function answerWithClassification(
     return [] as SelectedMediaAsset[]
   })
   const mediaBlock = buildMediaContextBlock(media)
-  const system = [built.system, stageSystem, leadNameBlock, leadContext, mediaBlock]
-    .filter(Boolean)
-    .join('\n\n')
+  // System-prompt assembly.
+  //
+  // cache_friendly (default): build ONE contiguous, byte-identical-per-persona
+  // static prefix so DeepSeek's automatic KV/prefix cache (served via
+  // OpenRouter) hits on the bulk of the prompt every turn. The prefix is
+  //   [A] built.staticPrefix  (persona + ground rules + grounding + fallback)
+  //   [B] stageParts.staticPrefix (## STAGE CLASSIFICATION prose, schema shape,
+  //       hierarchy/calibration/examples, attach-images + action-page preamble,
+  //       recommend instructions)
+  // and EVERY volatile piece trails after it:
+  //   [C] built.volatileTail  (goal -> instructions -> summary -> payment -> KB)
+  //   [D] stageParts.volatileTail (current-stage banner + stage list + page list)
+  //   [E] leadNameBlock  [F] leadContext  [G] mediaBlock
+  //   [H] manilaNowTail  (DATE-resolution time — rotates once/day, never busts
+  //       the static prefix; appended ONCE here, not in built.system).
+  //
+  // legacy (rollback) OR when the split fields are absent (freeform-persona
+  // override): reproduce the EXACT pre-change expression so output is
+  // byte-identical to current main — built.system already carries its own
+  // minute-resolution time at its tail in that path.
+  const useCachePrefix =
+    ragConfig.promptLayout !== 'legacy' &&
+    built.staticPrefix !== undefined &&
+    built.volatileTail !== undefined
+  const system = useCachePrefix
+    ? [
+        built.staticPrefix, // [A]
+        stageParts.staticPrefix, // [B]
+        built.volatileTail, // [C]
+        stageParts.volatileTail, // [D]
+        leadNameBlock, // [E]
+        leadContext, // [F]
+        mediaBlock, // [G]
+        manilaDateBlock(), // [H]
+      ]
+        .filter(Boolean)
+        .join('\n\n')
+    : [built.system, stageSystem, leadNameBlock, leadContext, mediaBlock]
+        .filter(Boolean)
+        .join('\n\n')
 
   // Redact PII from the LLM payload only. Grounding (below) stays raw so
   // customer-typed contacts are allowed by guardReply.
@@ -249,6 +291,7 @@ export async function answerWithClassification(
   logChatbotUsage('chatbot.classify', {
     model: completion.model,
     promptTokens: completion.usage?.promptTokens ?? null,
+    cachedPromptTokens: completion.usage?.cachedPromptTokens ?? null,
     completionTokens: completion.usage?.completionTokens ?? null,
     finishReason: completion.finishReason,
     kbChunks: built.contextChunks.length,
@@ -328,6 +371,7 @@ export async function answerWithClassification(
     logChatbotUsage('chatbot.answer.fallback', {
       model: fb.model,
       promptTokens: fb.usage?.promptTokens ?? null,
+      cachedPromptTokens: fb.usage?.cachedPromptTokens ?? null,
       completionTokens: fb.usage?.completionTokens ?? null,
       finishReason: fb.finishReason,
       kbChunks: built.contextChunks.length,
@@ -556,13 +600,27 @@ export async function applyStageChange(
   }
 }
 
-export function stageInstruction(
+export interface StageInstructionParts {
+  /** Static prose — byte-identical across turns for a given page config. */
+  staticPrefix: string
+  /** Volatile per-turn tail (current-stage banner + stage list + page list). */
+  volatileTail: string
+}
+
+/**
+ * Split the stage-classification instruction into its STATIC prose prefix and
+ * its VOLATILE per-turn tail. `cache_friendly` assembly (classify) interleaves
+ * `staticPrefix` into the contiguous leading cache prefix and pushes
+ * `volatileTail` after all other volatile data. {@link stageInstruction}
+ * re-joins them for legacy/back-compat callers.
+ */
+export function stageInstructionParts(
   stages: StageBrief[],
   currentStageId: string | null,
   actionPages: ActionPageBrief[],
   recommendRules: ActionPageRecommendationRules | null,
   recommendPropertyRules: ActionPageRecommendationRules | null,
-): string {
+): StageInstructionParts {
   const hasActionPages = actionPages.length > 0
   const hasRecommend = !!recommendRules
   const hasRecommendProperty = !!recommendPropertyRules
@@ -687,7 +745,13 @@ export function stageInstruction(
   // (stageList interpolates currentStageId; actionPageList interpolates the
   // page set) sit at the tail so provider prompt caches hit on the long
   // stable prefix in cache_friendly mode.
-  return (
+  //
+  // STATIC prefix: header + schema-shape line + forbidden-token line +
+  // hierarchy/calibration/examples + attach-images + action-page preamble +
+  // recommend instructions. recommendSection/recommendPropertySection derive
+  // from per-page config which is stable across a conversation's turns, so they
+  // stay in the static part (do not move them — preserves content order).
+  const staticPrefix =
     '## STAGE CLASSIFICATION — PRIMARY TASK\n' +
     'You are responsible for classifying the lead\'s pipeline stage on every turn. This is the most important structured output in your response. Your job is to keep the lead moving forward through the funnel — when in doubt between moving forward and staying, MOVE FORWARD with lower confidence rather than return null.\n\n' +
     'Output a single JSON object with this exact shape and NOTHING ELSE:\n' +
@@ -704,12 +768,40 @@ export function stageInstruction(
     attachImagesBlock +
     apPreamble +
     recommendSection +
-    recommendPropertySection +
-    '\n\n' +
-    currentStageBanner(stages, currentStageId) +
-    stageList(stages, currentStageId) +
-    apListSection
+    recommendPropertySection
+
+  // VOLATILE tail: current-stage banner (interpolates currentStageId) +
+  // stage list (flags [CURRENT], interpolates the stage set) + action-page
+  // list (interpolates the page set). Changes per turn / per conversation.
+  const volatileTail =
+    currentStageBanner(stages, currentStageId) + stageList(stages, currentStageId) + apListSection
+
+  return { staticPrefix, volatileTail }
+}
+
+/**
+ * Back-compat wrapper: the single concatenated stage-instruction string, in the
+ * exact order it has always been emitted (static prose, then a '\n\n'
+ * separator, then the volatile banner/stageList/apList). Used by the `legacy`
+ * prompt layout and the freeform-persona path, and by existing tests that read
+ * the whole string. `cache_friendly` uses {@link stageInstructionParts} so the
+ * static prose can be interleaved into the contiguous cacheable prefix.
+ */
+export function stageInstruction(
+  stages: StageBrief[],
+  currentStageId: string | null,
+  actionPages: ActionPageBrief[],
+  recommendRules: ActionPageRecommendationRules | null,
+  recommendPropertyRules: ActionPageRecommendationRules | null,
+): string {
+  const { staticPrefix, volatileTail } = stageInstructionParts(
+    stages,
+    currentStageId,
+    actionPages,
+    recommendRules,
+    recommendPropertyRules,
   )
+  return staticPrefix + '\n\n' + volatileTail
 }
 
 function currentStageBanner(stages: StageBrief[], currentStageId: string | null): string {

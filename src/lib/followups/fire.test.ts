@@ -333,7 +333,7 @@ describe('handleFollowupSend — attachments', () => {
     await handleFollowupSend(admin as never, { scheduleId: 's1' })
 
     expect(sendOutboundMock).toHaveBeenCalledTimes(3)
-    const kinds = sendOutboundMock.mock.calls.map((c: [{ payload: { kind: string } }]) => c[0].payload.kind)
+    const kinds = sendOutboundMock.mock.calls.map((c: { payload: { kind: string } }[]) => c[0].payload.kind)
     expect(kinds).toEqual(['text', 'image', 'button'])
     expect(sendOutboundMock.mock.calls[1][0].payload).toMatchObject({
       kind: 'image', imageUrl: 'https://signed/img.jpg',
@@ -382,7 +382,7 @@ describe('handleFollowupSend — attachments', () => {
     })
     const { admin } = makeAdmin(seed)
     await handleFollowupSend(admin as never, { scheduleId: 's1' })
-    const kinds = sendOutboundMock.mock.calls.map((c: [{ payload: { kind: string } }]) => c[0].payload.kind)
+    const kinds = sendOutboundMock.mock.calls.map((c: { payload: { kind: string } }[]) => c[0].payload.kind)
     expect(kinds).toEqual(['text', 'image'])
   })
 
@@ -394,7 +394,7 @@ describe('handleFollowupSend — attachments', () => {
     })
     const { admin } = makeAdmin(seed)
     await handleFollowupSend(admin as never, { scheduleId: 's1' })
-    const kinds = sendOutboundMock.mock.calls.map((c: [{ payload: { kind: string } }]) => c[0].payload.kind)
+    const kinds = sendOutboundMock.mock.calls.map((c: { payload: { kind: string } }[]) => c[0].payload.kind)
     expect(kinds).toEqual(['text'])
   })
 
@@ -466,12 +466,12 @@ describe('handleFollowupSend — multi-image attachments', () => {
 
     expect(sendOutboundMock).toHaveBeenCalledTimes(5)
     const kinds = sendOutboundMock.mock.calls.map(
-      (c: [{ payload: { kind: string } }]) => c[0].payload.kind,
+      (c: { payload: { kind: string } }[]) => c[0].payload.kind,
     )
     expect(kinds).toEqual(['text', 'image', 'image', 'image', 'button'])
     const urls = sendOutboundMock.mock.calls
-      .filter((c: [{ payload: { kind: string; imageUrl?: string } }]) => c[0].payload.kind === 'image')
-      .map((c: [{ payload: { imageUrl: string } }]) => c[0].payload.imageUrl)
+      .filter((c: { payload: { kind: string; imageUrl?: string } }[]) => c[0].payload.kind === 'image')
+      .map((c: { payload: { imageUrl: string } }[]) => c[0].payload.imageUrl)
     expect(urls).toEqual([
       'https://signed/11111111-1111-4111-9111-111111111111.jpg',
       'https://signed/22222222-2222-4222-9222-222222222222.jpg',
@@ -489,7 +489,7 @@ describe('handleFollowupSend — multi-image attachments', () => {
     const { admin } = makeAdmin(seed)
     await handleFollowupSend(admin as never, { scheduleId: 's1' })
     const kinds = sendOutboundMock.mock.calls.map(
-      (c: [{ payload: { kind: string } }]) => c[0].payload.kind,
+      (c: { payload: { kind: string } }[]) => c[0].payload.kind,
     )
     expect(kinds).toEqual(['text', 'image', 'image'])
   })
@@ -508,7 +508,7 @@ describe('handleFollowupSend — multi-image attachments', () => {
     const { admin } = makeAdmin(seed)
     await handleFollowupSend(admin as never, { scheduleId: 's1' })
     const kinds = sendOutboundMock.mock.calls.map(
-      (c: [{ payload: { kind: string } }]) => c[0].payload.kind,
+      (c: { payload: { kind: string } }[]) => c[0].payload.kind,
     )
     expect(kinds).toEqual(['text', 'image', 'image'])
   })
@@ -534,7 +534,7 @@ describe('handleFollowupSend — multi-image attachments', () => {
     await expect(handleFollowupSend(admin as never, { scheduleId: 's1' })).resolves.toBeUndefined()
     // All three image sends were attempted.
     const imageCalls = sendOutboundMock.mock.calls.filter(
-      (c: [{ payload: { kind: string } }]) => c[0].payload.kind === 'image',
+      (c: { payload: { kind: string } }[]) => c[0].payload.kind === 'image',
     )
     expect(imageCalls).toHaveLength(3)
     // Schedule still advanced.
@@ -597,14 +597,14 @@ describe('handleFollowupSend — legacy snapshot shape (image_media_asset_id)', 
   it('sends one image when legacy snapshot has image_media_asset_id set', async () => {
     const { admin } = makeAdmin(legacySeed({ image_media_asset_id: '11111111-1111-4111-9111-111111111111' }) as never)
     await handleFollowupSend(admin as never, { scheduleId: 's1' })
-    const kinds = sendOutboundMock.mock.calls.map((c: [{ payload: { kind: string } }]) => c[0].payload.kind)
+    const kinds = sendOutboundMock.mock.calls.map((c: { payload: { kind: string } }[]) => c[0].payload.kind)
     expect(kinds).toEqual(['text', 'image'])
   })
 
   it('sends text only when legacy snapshot has image_media_asset_id null and no array', async () => {
     const { admin } = makeAdmin(legacySeed({ image_media_asset_id: null }) as never)
     await handleFollowupSend(admin as never, { scheduleId: 's1' })
-    const kinds = sendOutboundMock.mock.calls.map((c: [{ payload: { kind: string } }]) => c[0].payload.kind)
+    const kinds = sendOutboundMock.mock.calls.map((c: { payload: { kind: string } }[]) => c[0].payload.kind)
     expect(kinds).toEqual(['text'])
   })
 })

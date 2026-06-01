@@ -78,22 +78,115 @@ describe('buildPrompt', () => {
   });
 
   describe('current time injection', () => {
-    it('includes a "Current time" line at the END of the system prompt (cache-friendly: volatile timestamp out of the stable prefix)', () => {
-      const { system } = buildPrompt({
-        userQuery: 'hello',
-        buckets: { useful: [], ambiguous: [], reject: [] },
-        config: {},
-        maxContext: 5,
-      });
-      // H1: the per-minute timestamp must NOT be the prefix (it would bust the
-      // provider prompt cache). It now lives at the tail, after the KB context.
-      expect(system.startsWith('Current time:')).toBe(false);
-      expect(system).toContain('Asia/Manila');
-      const idxTime = system.indexOf('Current time:');
-      const idxKb = system.indexOf('# Knowledge base context');
-      expect(idxTime).toBeGreaterThan(idxKb);
-      // The stable safety prefix should lead instead.
-      expect(system.indexOf('# Ground rules')).toBeLessThan(idxTime);
+    it('cache_friendly: a DATE-resolution time block trails after the KB context (no minute time in the prefix)', () => {
+      const original = ragConfig.promptLayout;
+      ragConfig.promptLayout = 'cache_friendly';
+      try {
+        const { system } = buildPrompt({
+          userQuery: 'hello',
+          buckets: { useful: [], ambiguous: [], reject: [] },
+          config: {},
+          maxContext: 5,
+        });
+        // The timestamp must NOT be the prefix (it would bust the provider
+        // prompt cache). It lives at the tail, after the KB context, and at
+        // DATE resolution (no HH:MM) so it rotates only once per day.
+        expect(system.startsWith('Current date:')).toBe(false);
+        expect(system).toContain('Asia/Manila');
+        const idxDate = system.indexOf('Current date:');
+        const idxKb = system.indexOf('# Knowledge base context');
+        expect(idxDate).toBeGreaterThan(idxKb);
+        // No minute-resolution time anywhere in cache_friendly built.system.
+        expect(system).not.toContain('Current time:');
+        // The stable safety prefix should lead instead.
+        expect(system.indexOf('# Ground rules')).toBeLessThan(idxDate);
+      } finally {
+        ragConfig.promptLayout = original;
+      }
+    });
+
+    it('legacy: keeps the MINUTE-resolution "Current time: ... HH:MM" line at the END (regression pin)', () => {
+      const original = ragConfig.promptLayout;
+      ragConfig.promptLayout = 'legacy';
+      try {
+        const { system } = buildPrompt({
+          userQuery: 'hello',
+          buckets: buckets([chunk('a', 'KB-CHUNK', 0.9)]),
+          config: {},
+          maxContext: 5,
+        });
+        expect(system).toContain('Asia/Manila');
+        const idxTime = system.indexOf('Current time:');
+        const idxKb = system.indexOf('# Knowledge base context');
+        expect(idxTime).toBeGreaterThan(idxKb);
+        // Minute resolution preserved: "Current time: <date>, HH:MM (...)".
+        expect(system).toMatch(/Current time:[^\n]*\d{1,2}:\d{2}/);
+      } finally {
+        ragConfig.promptLayout = original;
+      }
+    });
+  });
+
+  describe('staticPrefix / volatileTail split (cache_friendly default-persona path)', () => {
+    it('exposes staticPrefix and volatileTail with the static rules in the prefix and volatile data in the tail', () => {
+      const original = ragConfig.promptLayout;
+      ragConfig.promptLayout = 'cache_friendly';
+      try {
+        const r = buildPrompt({
+          userQuery: 'q',
+          buckets: buckets([chunk('a', 'KB-CHUNK', 0.9)]),
+          config: { funnelInstruction: 'GOAL-TEXT', instructions: 'INSTR-TEXT' },
+          conversationSummary: 'SUMMARY-TEXT',
+          paymentEnumBlock: 'Available Payment Methods:\n- GCash: 0917',
+        });
+        expect(r.staticPrefix).toBeDefined();
+        expect(r.volatileTail).toBeDefined();
+        const sp = r.staticPrefix!;
+        const vt = r.volatileTail!;
+        // Static prefix: persona/rules/grounding/fallback only.
+        expect(sp).toContain('# Ground rules');
+        expect(sp).toContain('# Identity');
+        expect(sp).toContain('# Grounding');
+        expect(sp).toContain('# Fallback');
+        // Static prefix must NOT contain any volatile content.
+        expect(sp).not.toContain('# Knowledge base context');
+        expect(sp).not.toContain('KB-CHUNK');
+        expect(sp).not.toContain('SUMMARY-TEXT');
+        expect(sp).not.toContain('Available Payment Methods');
+        expect(sp).not.toContain('Current time:');
+        expect(sp).not.toContain('Current date:');
+        // Volatile tail: goal, instructions, summary, payment, KB.
+        expect(vt).toContain('GOAL-TEXT');
+        expect(vt).toContain('INSTR-TEXT');
+        expect(vt).toContain('SUMMARY-TEXT');
+        expect(vt).toContain('Available Payment Methods');
+        expect(vt).toContain('KB-CHUNK');
+        // No time block leaks into the tail — classify owns the single append.
+        expect(vt).not.toContain('Current date:');
+        expect(vt).not.toContain('Current time:');
+      } finally {
+        ragConfig.promptLayout = original;
+      }
+    });
+
+    it('leaves staticPrefix/volatileTail undefined on the freeform persona override path', () => {
+      const r = buildPrompt({ userQuery: 'q', buckets: buckets(), persona: 'CUSTOM PERSONA' });
+      expect(r.staticPrefix).toBeUndefined();
+      expect(r.volatileTail).toBeUndefined();
+      expect(r.system).toContain('CUSTOM PERSONA');
+      expect(r.system).toContain('# Knowledge base context');
+    });
+
+    it('leaves staticPrefix/volatileTail undefined in legacy layout', () => {
+      const original = ragConfig.promptLayout;
+      ragConfig.promptLayout = 'legacy';
+      try {
+        const r = buildPrompt({ userQuery: 'q', buckets: buckets(), config: {} });
+        expect(r.staticPrefix).toBeUndefined();
+        expect(r.volatileTail).toBeUndefined();
+      } finally {
+        ragConfig.promptLayout = original;
+      }
     });
   });
 
