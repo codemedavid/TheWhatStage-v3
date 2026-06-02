@@ -45,7 +45,13 @@ create index if not exists messenger_jobs_running_thread_idx
 -- 3. Re-create claim_messenger_jobs to restore outbound_media in the return.
 --    Identical to the 20260514000000 definition in every other respect
 --    (stale-reset, per-thread (a)/(b) filters, FOR UPDATE SKIP LOCKED).
+--    Drop first: this widens the RETURNS TABLE shape (adds outbound_media),
+--    and Postgres rejects a return-type change via bare CREATE OR REPLACE
+--    ("cannot change return type of existing function"). Mirrors the
+--    drop-then-recreate already used for this same function in 20260502090000.
 -- -------------------------------------------------------------------------
+drop function if exists public.claim_messenger_jobs(int, int);
+
 create or replace function public.claim_messenger_jobs(
   p_limit         int default 5,
   p_stale_seconds int default 300
