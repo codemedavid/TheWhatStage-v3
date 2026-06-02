@@ -1,4 +1,5 @@
 import { createHmac, timingSafeEqual } from 'node:crypto'
+import * as Sentry from '@sentry/nextjs'
 import { after, NextResponse, type NextRequest } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { interruptWorkflowRun } from '@/lib/workflow/trigger'
@@ -124,6 +125,14 @@ export async function POST(req: NextRequest) {
   const admin = createAdminClient()
   const messengerEnqueued: string[] = []
   const commentEnqueued: string[] = []
+  // Tracks whether any message/postback event hit a transient INFRA error
+  // (DB down/blip) before we could durably persist+enqueue it. handleEvent /
+  // handlePostback throw on infra and return null on terminal skips (unknown
+  // page, paused owner, dedup), so a throw here means "we couldn't take
+  // delivery" → we ack 5xx so Meta redelivers the batch (idempotent via
+  // unique fb_message_id + thread upsert). Comment/template events are not
+  // included — they were already lower-priority best-effort.
+  let hadInfraError = false
 
   for (const entry of payload.entry ?? []) {
     const fbPageId = entry.id
@@ -140,6 +149,8 @@ export async function POST(req: NextRequest) {
         if (jobId) messengerEnqueued.push(jobId)
       } catch (e) {
         console.error('[fb.webhook] event handling failed', e)
+        hadInfraError = true
+        Sentry.captureException(e, { tags: { area: 'fb.webhook.event' } })
       }
     }
 
@@ -166,6 +177,14 @@ export async function POST(req: NextRequest) {
   }
   if (commentEnqueued.length > 0) {
     after(() => triggerCommentWorker())
+  }
+
+  // If a message/postback event hit an infra error, ack 5xx so Meta redelivers
+  // the whole batch. Anything we DID enqueue above still gets processed (the
+  // after() trigger fires regardless of status), and redelivery is idempotent,
+  // so nothing is double-sent and the failed event gets another chance.
+  if (hadInfraError) {
+    return new NextResponse('temporary error, please redeliver', { status: 503 })
   }
 
   return NextResponse.json({ received: true })
@@ -365,8 +384,12 @@ async function handleEvent(
     .eq('fb_page_id', fbPageId)
     .maybeSingle()
 
-  if (pageErr || !page) {
-    console.warn('[fb.webhook] unknown page', { fbPageId, err: pageErr?.message })
+  // Infra error vs terminal "not our page": throw the former so the webhook
+  // returns 5xx and Meta redelivers; return null for an unknown page (nothing
+  // to redeliver for — it isn't ours).
+  if (pageErr) throw new Error(`[fb.webhook] page lookup failed: ${pageErr.message}`)
+  if (!page) {
+    console.warn('[fb.webhook] unknown page', { fbPageId })
     return null
   }
 
@@ -396,8 +419,9 @@ async function handleEvent(
     .single()
 
   if (threadErr || !thread) {
-    console.error('[fb.webhook] thread upsert failed', threadErr?.message)
-    return null
+    // Infra error — throw so Meta redelivers (thread upsert is idempotent on
+    // page_id,psid, so reprocessing is safe).
+    throw new Error(`[fb.webhook] thread upsert failed: ${threadErr?.message ?? 'no row'}`)
   }
 
   const text = msg.text ?? ''
@@ -420,10 +444,12 @@ async function handleEvent(
     .maybeSingle()
 
   if (insertErr) {
-    // 23505 = unique violation → already processed, fine.
+    // 23505 = unique violation → already processed (FB retry / our redelivery).
+    // Terminal + idempotent: return null → 200, no re-enqueue.
     if ((insertErr as { code?: string }).code === '23505') return null
-    console.error('[fb.webhook] message insert failed', insertErr.message)
-    return null
+    // Any other insert failure is infra — throw so Meta redelivers. The
+    // unique(fb_message_id) constraint makes the redelivered insert idempotent.
+    throw new Error(`[fb.webhook] message insert failed: ${insertErr.message}`)
   }
   if (!inserted) return null
 
@@ -466,8 +492,13 @@ async function handleEvent(
     .single()
 
   if (jobErr || !job) {
-    console.error('[fb.webhook] job enqueue failed', jobErr?.message)
-    return null
+    // Infra error enqueueing the worker job. Throw so the webhook returns 5xx
+    // (Meta redelivers) and Sentry sees it — strictly better than the prior
+    // silent return-null→200. Rare in practice: the message insert just above
+    // succeeded on the same connection, so a DB blip striking only this adjacent
+    // write is unlikely. (Known residual: if it DID strike only here, redelivery
+    // dedupes the message at 23505 and won't re-enqueue.)
+    throw new Error(`[fb.webhook] job enqueue failed: ${jobErr?.message ?? 'no row'}`)
   }
   return job.id
 }
@@ -550,13 +581,31 @@ async function triggerWorker(): Promise<void> {
     console.warn('[fb.webhook] worker not configured (NEXT_PUBLIC_APP_URL / MESSENGER_WORKER_SECRET)')
     return
   }
-  try {
-    await fetch(`${base}/api/messenger/process`, {
-      method: 'POST',
-      headers: { 'x-worker-secret': secret },
-    })
-  } catch (e) {
-    console.warn('[fb.webhook] worker trigger failed', e)
+  // Retry once on failure: under a burst the internal POST competes for the
+  // same (possibly throttled) Vercel pool, so a dropped wake-up is most likely
+  // exactly when there is backlog to drain. One short retry, then surface to
+  // Sentry — the 1-minute cron is still the durable backstop.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await fetch(`${base}/api/messenger/process`, {
+        method: 'POST',
+        headers: { 'x-worker-secret': secret },
+      })
+      if (res.ok) return
+      if (attempt === 0) {
+        await new Promise((r) => setTimeout(r, 250))
+        continue
+      }
+      console.warn('[fb.webhook] worker trigger non-ok', res.status)
+      Sentry.captureMessage(`[fb.webhook] worker trigger non-ok ${res.status} after retry`, 'warning')
+    } catch (e) {
+      if (attempt === 0) {
+        await new Promise((r) => setTimeout(r, 250))
+        continue
+      }
+      console.warn('[fb.webhook] worker trigger failed', e)
+      Sentry.captureException(e, { level: 'warning', tags: { area: 'messenger.trigger' } })
+    }
   }
 }
 

@@ -18,8 +18,44 @@ const SUBSCRIBED_FIELDS = [
 const GRAPH_MAX_RETRIES = 2
 const GRAPH_BASE_DELAY_MS = 500
 
+// Hard ceilings so a hung socket can't pin a worker slot indefinitely —
+// undici (native fetch) has NO default timeout. Sends get a longer budget
+// than the lightweight profile/typing reads. Mirrors capi.ts NETWORK_TIMEOUT_MS.
+// On timeout, AbortSignal.timeout throws → the call fails fast → the worker's
+// outer retry requeues with backoff instead of the whole batch stalling.
+//
+// TRADEOFF (sends have no Graph idempotency key): if Graph actually DELIVERED a
+// message but its RESPONSE was slow, an abort here makes the worker retry and
+// re-send (duplicate). We size SEND_TIMEOUT well above Graph's typical sub-2s
+// response (and near its own ~30s server ceiling) so an abort almost always
+// means a genuinely hung connection that never delivered — making the duplicate
+// path vanishingly rare while still bounding a truly stuck send. READ ops
+// (profile/typing) are idempotent, so they keep the tighter budget.
+const SEND_TIMEOUT_MS = 30_000
+const READ_TIMEOUT_MS = 8_000
+
 function shouldRetryGraph(status: number): boolean {
   return status === 429 || (status >= 500 && status < 600)
+}
+
+// Pull Graph's structured error code out of a response body. Graph reports
+// throttling via error.code (4/17/32 = app/user/page request limit reached,
+// 613 = calls exceeded the rate limit) — sometimes on HTTP 400 or even 200,
+// which a status-only check misses. We surface the code in the thrown message
+// so the worker's isRateLimitError can route true throttles to long backoff.
+function parseGraphErrorCode(text: string): number | null {
+  try {
+    const j = JSON.parse(text) as { error?: { code?: unknown } }
+    const code = j?.error?.code
+    return typeof code === 'number' ? code : null
+  } catch {
+    return null
+  }
+}
+
+function graphError(status: number, text: string): Error {
+  const code = parseGraphErrorCode(text)
+  return new Error(`Graph ${status}${code !== null ? ` (code ${code})` : ''}: ${text}`)
 }
 
 function graphRetryDelayMs(attempt: number, retryAfter: string | null): number {
@@ -44,7 +80,36 @@ async function postJson<T>(url: string, body: Record<string, unknown>): Promise<
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body),
+      signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
     })
+    const text = await res.text()
+    if (res.ok) {
+      const parsed = JSON.parse(text) as T & { error?: unknown }
+      // Graph occasionally returns 200 with an { error } envelope for some
+      // throttles. Treat that as a failure so the worker can requeue.
+      if (!parsed || typeof parsed !== 'object' || !('error' in parsed)) {
+        return parsed as T
+      }
+      lastStatus = 200
+      lastText = text
+    } else {
+      lastStatus = res.status
+      lastText = text
+    }
+    if (attempt < GRAPH_MAX_RETRIES && shouldRetryGraph(lastStatus)) {
+      await sleep(graphRetryDelayMs(attempt, res.headers.get('retry-after')))
+      continue
+    }
+    break
+  }
+  throw graphError(lastStatus, lastText)
+}
+
+async function getJson<T>(url: string): Promise<T> {
+  let lastStatus = 0
+  let lastText = ''
+  for (let attempt = 0; attempt <= GRAPH_MAX_RETRIES; attempt++) {
+    const res = await fetch(url, { signal: AbortSignal.timeout(READ_TIMEOUT_MS) })
     const text = await res.text()
     if (res.ok) return JSON.parse(text) as T
     lastStatus = res.status
@@ -55,24 +120,7 @@ async function postJson<T>(url: string, body: Record<string, unknown>): Promise<
     }
     break
   }
-  throw new Error(`Graph ${lastStatus}: ${lastText}`)
-}
-
-async function getJson<T>(url: string): Promise<T> {
-  let lastStatus = 0
-  let lastText = ''
-  for (let attempt = 0; attempt <= GRAPH_MAX_RETRIES; attempt++) {
-    const res = await fetch(url)
-    if (res.ok) return (await res.json()) as T
-    lastStatus = res.status
-    lastText = await res.text()
-    if (attempt < GRAPH_MAX_RETRIES && shouldRetryGraph(res.status)) {
-      await sleep(graphRetryDelayMs(attempt, res.headers.get('retry-after')))
-      continue
-    }
-    break
-  }
-  throw new Error(`Graph ${lastStatus}: ${lastText}`)
+  throw graphError(lastStatus, lastText)
 }
 
 /**

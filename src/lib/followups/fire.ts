@@ -9,6 +9,7 @@
 // The schedule carries its own offsets_snapshot (captured at seed time);
 // changes to the user's settings after seed do NOT affect in-flight schedules.
 
+import * as Sentry from '@sentry/nextjs'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { decryptToken } from '@/lib/facebook/crypto'
 import { sendOutbound, resolveSendPolicy } from '@/lib/messenger/outbound'
@@ -347,6 +348,16 @@ export async function handleFollowupSendJob(
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     console.error('[followups.fire] handler threw', job.id, msg)
+    // Terminal on first failure (no retry) — surface to Sentry so a systemic
+    // followup-send outage is visible, not just buried in last_error.
+    try {
+      Sentry.captureException(e, {
+        tags: { jobKind: 'followup_send', jobId: job.id, scheduleId },
+        level: 'error',
+      })
+    } catch {
+      /* never break the worker on telemetry */
+    }
     await admin
       .from('messenger_jobs')
       .update({
