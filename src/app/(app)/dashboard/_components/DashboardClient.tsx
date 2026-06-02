@@ -64,7 +64,7 @@ const CSS = `
 }
 .db-vid-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 14px;
 }
 .db-checklist-row {
@@ -107,11 +107,23 @@ const CSS = `
 `
 
 /* ── videos ──────────────────────────────────────────────────────────── */
-const VIDEOS = [
-  { id: 'v1', num: '01', title: 'Welcome to WhatStage',       length: '1:48', tag: 'Start here',   color: '#1F7A4D', desc: 'A 2-minute tour of every section of your workspace.' },
-  { id: 'v2', num: '02', title: 'Your first action page',      length: '3:20', tag: 'Action Pages', color: '#2563EB', desc: 'Build a booking, lead form, or quote page in minutes.' },
-  { id: 'v3', num: '03', title: 'Train your chatbot',          length: '4:05', tag: 'Chatbot',      color: '#7C3AED', desc: 'Voice, knowledge, and how to test before you publish.' },
-  { id: 'v4', num: '04', title: 'Capture leads from Messenger',length: '2:30', tag: 'Channels',     color: '#C2410C', desc: 'Connect your Facebook page so leads land in WhatStage.' },
+/* `loomId` is the share ID from a Loom URL (loom.com/share/<id>). Add more
+   entries here as new tutorials are recorded — the UI scales automatically. */
+type Video = {
+  id: string
+  num: string
+  title: string
+  tag: string
+  color: string
+  desc: string
+  loomId?: string
+  length?: string
+}
+
+const VIDEOS: Video[] = [
+  { id: 'v1', num: '01', title: 'Welcome & setting up your knowledge', tag: 'Start here', color: '#1F7A4D', desc: 'A tour of your dashboard and how to set up the knowledge that powers your chatbot.', loomId: '6a9d2bdb59954e4eb68ed860ad09bd95' },
+  { id: 'v2', num: '02', title: 'Create your chatbot personality',     tag: 'Chatbot',    color: '#7C3AED', desc: 'Give your chatbot a voice and personality that matches your brand.',               loomId: 'fc339f11b00d468bacb5cd0ec956ce34' },
+  { id: 'v3', num: '03', title: 'Write instructions for your chatbot',  tag: 'Chatbot',    color: '#2563EB', desc: 'Add instructions that guide how your chatbot responds to leads.',                  loomId: '99dc0b13bf40430ba34bc52eef6c6b79' },
 ]
 
 const STORAGE_KEY = 'ws_videos_watched'
@@ -296,8 +308,8 @@ export default function DashboardClient({
                 <PlayIcon size={20} />
               </div>
               <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '14px 18px', background: 'linear-gradient(transparent,rgba(0,0,0,0.7))', display: 'flex', flexDirection: 'column', gap: 2 }}>
-                <span style={{ fontFamily: S.mono, fontSize: 10.5, color: 'rgba(255,255,255,0.7)', letterSpacing: '0.06em', textTransform: 'uppercase' }}>2 min watch</span>
-                <span style={{ color: 'white', fontSize: 18, fontFamily: S.serif, letterSpacing: '-0.01em' }}>Welcome to WhatStage</span>
+                <span style={{ fontFamily: S.mono, fontSize: 10.5, color: 'rgba(255,255,255,0.7)', letterSpacing: '0.06em', textTransform: 'uppercase' }}>Watch the intro</span>
+                <span style={{ color: 'white', fontSize: 18, fontFamily: S.serif, letterSpacing: '-0.01em' }}>{VIDEOS[0].title}</span>
               </div>
               {watched.has('v1') && (
                 <div style={{ position: 'absolute', top: 12, right: 12, background: 'rgba(0,0,0,0.6)', color: 'white', fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 999, backdropFilter: 'blur(4px)' }}>Watched</div>
@@ -441,7 +453,7 @@ export default function DashboardClient({
             <div>
               <h2 style={{ fontFamily: S.serif, fontSize: 22, fontWeight: 400, margin: 0, letterSpacing: '-0.01em', color: S.ink }}>Learn WhatStage</h2>
               <p style={{ margin: '2px 0 0', fontSize: 13, color: S.ink4 }}>
-                {watchedCount === 0 && 'Four short videos to get you up to speed.'}
+                {watchedCount === 0 && `${VIDEOS.length} short videos to get you up to speed.`}
                 {watchedCount > 0 && watchedCount < VIDEOS.length && `${watchedCount} of ${VIDEOS.length} watched — keep going!`}
                 {watchedCount === VIDEOS.length && "You've finished the course. You're a WhatStage pro."}
               </p>
@@ -462,7 +474,7 @@ export default function DashboardClient({
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', minWidth: 0 }}>
                 <span style={{ fontFamily: S.mono, fontSize: 11, color: S.accentInk, fontWeight: 600, flexShrink: 0 }}>UP NEXT</span>
                 <span className="db-vid-next-title" style={{ fontSize: 13, color: S.ink, fontWeight: 500 }}>{nextVideo.num}. {nextVideo.title}</span>
-                <span className="db-vid-next-len" style={{ fontSize: 12, color: S.ink4 }}>· {nextVideo.length}</span>
+                {nextVideo.length && <span className="db-vid-next-len" style={{ fontSize: 12, color: S.ink4 }}>· {nextVideo.length}</span>}
               </div>
               <button onClick={() => openVideo(nextVideo)} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '7px 12px', background: S.accent, color: 'white', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 500, cursor: 'pointer', flexShrink: 0 }}>
                 <PlayIcon size={12} /> Watch
@@ -488,7 +500,7 @@ export default function DashboardClient({
                     <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', width: 38, height: 38, borderRadius: 999, background: 'rgba(255,255,255,0.95)', display: 'grid', placeItems: 'center', color: isWatched ? S.accent : S.ink, boxShadow: '0 4px 14px rgba(0,0,0,0.2)' }}>
                       {isWatched ? <CheckIcon size={18} /> : <PlayIcon size={14} />}
                     </div>
-                    <span style={{ position: 'absolute', right: 8, bottom: 8, fontFamily: S.mono, fontSize: 10.5, background: 'rgba(0,0,0,0.65)', color: 'white', padding: '2px 6px', borderRadius: 4 }}>{v.length}</span>
+                    {v.length && <span style={{ position: 'absolute', right: 8, bottom: 8, fontFamily: S.mono, fontSize: 10.5, background: 'rgba(0,0,0,0.65)', color: 'white', padding: '2px 6px', borderRadius: 4 }}>{v.length}</span>}
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 2, padding: '4px 6px 8px' }}>
                     <span style={{ fontFamily: S.mono, fontSize: 10, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.06em', color: isWatched ? S.ink4 : v.color }}>{v.tag}</span>
@@ -515,16 +527,29 @@ export default function DashboardClient({
                 <XIcon />
               </button>
               <div style={{ position: 'relative', aspectRatio: '16/9', width: '100%', display: 'grid', placeItems: 'center', background: `linear-gradient(135deg,${playing.color},#14120C)` }}>
-                <svg viewBox="0 0 720 405" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }} preserveAspectRatio="xMidYMid slice">
-                  <circle cx="120" cy="100" r="80" fill="rgba(255,255,255,0.06)" />
-                  <circle cx="600" cy="300" r="120" fill="rgba(255,255,255,0.04)" />
-                </svg>
-                <div style={{ width: 70, height: 70, borderRadius: 999, background: 'white', color: S.ink, display: 'grid', placeItems: 'center', boxShadow: '0 12px 30px rgba(0,0,0,0.3)', position: 'relative' }}>
-                  <PlayIcon size={28} />
-                </div>
-                <div style={{ position: 'absolute', top: 16, left: 18, fontFamily: S.mono, fontSize: 11, color: 'rgba(255,255,255,0.6)', letterSpacing: '0.06em' }}>
-                  Lesson {playing.num} of {VIDEOS.length}
-                </div>
+                {playing.loomId ? (
+                  <iframe
+                    key={playing.loomId}
+                    src={`https://www.loom.com/embed/${playing.loomId}?hideEmbedTopBar=true`}
+                    title={playing.title}
+                    allow="autoplay; fullscreen; picture-in-picture"
+                    allowFullScreen
+                    style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', border: 'none' }}
+                  />
+                ) : (
+                  <>
+                    <svg viewBox="0 0 720 405" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }} preserveAspectRatio="xMidYMid slice">
+                      <circle cx="120" cy="100" r="80" fill="rgba(255,255,255,0.06)" />
+                      <circle cx="600" cy="300" r="120" fill="rgba(255,255,255,0.04)" />
+                    </svg>
+                    <div style={{ width: 70, height: 70, borderRadius: 999, background: 'white', color: S.ink, display: 'grid', placeItems: 'center', boxShadow: '0 12px 30px rgba(0,0,0,0.3)', position: 'relative' }}>
+                      <PlayIcon size={28} />
+                    </div>
+                    <div style={{ position: 'absolute', top: 16, left: 18, fontFamily: S.mono, fontSize: 11, color: 'rgba(255,255,255,0.6)', letterSpacing: '0.06em' }}>
+                      Lesson {playing.num} of {VIDEOS.length}
+                    </div>
+                  </>
+                )}
               </div>
               <div style={{ padding: '18px 20px 20px', display: 'flex', flexDirection: 'column', gap: 6 }}>
                 <span style={{ fontFamily: S.mono, fontSize: 11, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.06em', color: playing.color }}>{playing.tag}</span>
