@@ -117,13 +117,14 @@ type Video = {
   color: string
   desc: string
   loomId?: string
+  thumb?: string
   length?: string
 }
 
 const VIDEOS: Video[] = [
-  { id: 'v1', num: '01', title: 'Welcome & setting up your knowledge', tag: 'Start here', color: '#1F7A4D', desc: 'A tour of your dashboard and how to set up the knowledge that powers your chatbot.', loomId: '6a9d2bdb59954e4eb68ed860ad09bd95' },
-  { id: 'v2', num: '02', title: 'Create your chatbot personality',     tag: 'Chatbot',    color: '#7C3AED', desc: 'Give your chatbot a voice and personality that matches your brand.',               loomId: 'fc339f11b00d468bacb5cd0ec956ce34' },
-  { id: 'v3', num: '03', title: 'Write instructions for your chatbot',  tag: 'Chatbot',    color: '#2563EB', desc: 'Add instructions that guide how your chatbot responds to leads.',                  loomId: '99dc0b13bf40430ba34bc52eef6c6b79' },
+  { id: 'v1', num: '01', title: 'Welcome & setting up your knowledge', tag: 'Start here', color: '#1F7A4D', desc: 'A tour of your dashboard and how to set up the knowledge that powers your chatbot.', loomId: '6a9d2bdb59954e4eb68ed860ad09bd95', thumb: 'https://cdn.loom.com/sessions/thumbnails/6a9d2bdb59954e4eb68ed860ad09bd95-904e470765f7f6cf.gif', length: '11:08' },
+  { id: 'v2', num: '02', title: 'Create your chatbot personality',     tag: 'Chatbot',    color: '#7C3AED', desc: 'Give your chatbot a voice and personality that matches your brand.',               loomId: 'fc339f11b00d468bacb5cd0ec956ce34', thumb: 'https://cdn.loom.com/sessions/thumbnails/fc339f11b00d468bacb5cd0ec956ce34-860a8f3021a72de1.gif', length: '6:54' },
+  { id: 'v3', num: '03', title: 'Write instructions for your chatbot',  tag: 'Chatbot',    color: '#2563EB', desc: 'Add instructions that guide how your chatbot responds to leads.',                  loomId: '99dc0b13bf40430ba34bc52eef6c6b79', thumb: 'https://cdn.loom.com/sessions/thumbnails/99dc0b13bf40430ba34bc52eef6c6b79-8ce54c3372353130.gif', length: '4:40' },
 ]
 
 const STORAGE_KEY = 'ws_videos_watched'
@@ -298,12 +299,20 @@ export default function DashboardClient({
             <div className="db-hero-video" onClick={() => openVideo(VIDEOS[0])} style={{ position: 'relative', borderRadius: 14, overflow: 'hidden', cursor: 'pointer', aspectRatio: '16/10', boxShadow: '0 12px 30px -12px rgba(0,0,0,0.25)', transition: 'transform 200ms', background: 'linear-gradient(135deg,#1F7A4D,#14120C)', zIndex: 1 }}
               onMouseEnter={e => (e.currentTarget.style.transform = 'translateY(-2px)')}
               onMouseLeave={e => (e.currentTarget.style.transform = 'translateY(0)')}>
-              <svg viewBox="0 0 240 140" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }} preserveAspectRatio="xMidYMid slice">
-                <circle cx="60" cy="40" r="34" fill="rgba(255,255,255,0.08)" />
-                <circle cx="190" cy="100" r="48" fill="rgba(255,255,255,0.06)" />
-                <rect x="120" y="20" width="80" height="6" rx="3" fill="rgba(255,255,255,0.12)" />
-                <rect x="120" y="32" width="50" height="6" rx="3" fill="rgba(255,255,255,0.08)" />
-              </svg>
+              {VIDEOS[0].thumb ? (
+                <>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={VIDEOS[0].thumb} alt={VIDEOS[0].title} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />
+                  <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg,rgba(0,0,0,0.15),transparent 40%,rgba(0,0,0,0.55))' }} />
+                </>
+              ) : (
+                <svg viewBox="0 0 240 140" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }} preserveAspectRatio="xMidYMid slice">
+                  <circle cx="60" cy="40" r="34" fill="rgba(255,255,255,0.08)" />
+                  <circle cx="190" cy="100" r="48" fill="rgba(255,255,255,0.06)" />
+                  <rect x="120" y="20" width="80" height="6" rx="3" fill="rgba(255,255,255,0.12)" />
+                  <rect x="120" y="32" width="50" height="6" rx="3" fill="rgba(255,255,255,0.08)" />
+                </svg>
+              )}
               <div style={{ position: 'absolute', left: 24, bottom: 56, width: 52, height: 52, background: 'white', color: S.ink, borderRadius: 999, display: 'grid', placeItems: 'center', boxShadow: '0 8px 20px rgba(0,0,0,0.25)' }}>
                 <PlayIcon size={20} />
               </div>
@@ -492,11 +501,17 @@ export default function DashboardClient({
                   onMouseLeave={e => { const el = e.currentTarget as HTMLElement; el.style.transform = ''; el.style.boxShadow = 'none' }}>
                   {isNext && <div style={{ position: 'absolute', top: -1, left: -1, right: -1, height: 3, background: S.accent, borderRadius: '14px 14px 0 0' }} />}
                   <div style={{ position: 'relative', aspectRatio: '16/9', borderRadius: 10, overflow: 'hidden', background: `linear-gradient(135deg,${v.color},#14120C)` }}>
-                    <svg viewBox="0 0 200 110" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }} preserveAspectRatio="xMidYMid slice">
-                      <circle cx="40" cy="30" r="22" fill="rgba(255,255,255,0.08)" />
-                      <circle cx="160" cy="80" r="32" fill="rgba(255,255,255,0.06)" />
-                    </svg>
-                    <div style={{ position: 'absolute', top: 8, left: 10, fontFamily: S.mono, fontSize: 11, color: 'rgba(255,255,255,0.7)', fontWeight: 600, letterSpacing: '0.04em' }}>{v.num}</div>
+                    {v.thumb ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={v.thumb} alt={v.title} loading="lazy" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', filter: isWatched ? 'grayscale(0.4) brightness(0.85)' : 'none' }} />
+                    ) : (
+                      <svg viewBox="0 0 200 110" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }} preserveAspectRatio="xMidYMid slice">
+                        <circle cx="40" cy="30" r="22" fill="rgba(255,255,255,0.08)" />
+                        <circle cx="160" cy="80" r="32" fill="rgba(255,255,255,0.06)" />
+                      </svg>
+                    )}
+                    {v.thumb && <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg,rgba(0,0,0,0.25),transparent 40%,rgba(0,0,0,0.35))' }} />}
+                    <div style={{ position: 'absolute', top: 8, left: 10, fontFamily: S.mono, fontSize: 11, color: 'rgba(255,255,255,0.9)', fontWeight: 600, letterSpacing: '0.04em', textShadow: '0 1px 3px rgba(0,0,0,0.5)' }}>{v.num}</div>
                     <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', width: 38, height: 38, borderRadius: 999, background: 'rgba(255,255,255,0.95)', display: 'grid', placeItems: 'center', color: isWatched ? S.accent : S.ink, boxShadow: '0 4px 14px rgba(0,0,0,0.2)' }}>
                       {isWatched ? <CheckIcon size={18} /> : <PlayIcon size={14} />}
                     </div>
