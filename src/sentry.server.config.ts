@@ -5,8 +5,11 @@ Sentry.init({
 
   tracesSampleRate: process.env.NODE_ENV === "development" ? 1.0 : 0.1,
 
-  // Attach local variable values to stack frames (server only).
-  includeLocalVariables: true,
+  // NOTE: includeLocalVariables is intentionally left OFF (Sentry default).
+  // This worker handles service-role tokens and customer PII; attaching local
+  // variable values to stack frames would egress secrets/PII to Sentry,
+  // bypassing the pipeline's own pii-redact layer. Re-enable only behind a
+  // scrubbing beforeSend if frame locals are ever needed for debugging.
 
   enableLogs: true,
 });
