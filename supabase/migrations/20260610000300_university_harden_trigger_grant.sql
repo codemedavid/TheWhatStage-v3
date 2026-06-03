@@ -1,0 +1,12 @@
+-- =========================================================================
+-- WhatStage University — harden the lesson-count trigger function grant
+--
+-- university_sync_lesson_count() is SECURITY DEFINER (it must write to
+-- university_courses regardless of the writer's RLS) but was created with the
+-- default PUBLIC execute grant. Trigger functions are never meant to be invoked
+-- directly by clients — every OTHER university function (get_lesson_playback,
+-- upsert_lesson_progress, superadmin_upsert_lesson) already revokes PUBLIC and
+-- grants only the intended role. This closes the same gap on the trigger fn and
+-- clears the Supabase linter's *_security_definer_function_executable warnings.
+-- =========================================================================
+revoke execute on function public.university_sync_lesson_count() from public, anon, authenticated;
