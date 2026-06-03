@@ -20,6 +20,8 @@ export interface RecentSubmission {
 
 export interface DashboardClientProps {
   userName: string
+  hasBusiness: boolean
+  hasKnowledge: boolean
   hasPersonality: boolean
   hasActiveActionPages: boolean
   hasFacebook: boolean
@@ -107,24 +109,29 @@ const CSS = `
 `
 
 /* ── videos ──────────────────────────────────────────────────────────── */
-/* `loomId` is the share ID from a Loom URL (loom.com/share/<id>). Add more
-   entries here as new tutorials are recorded — the UI scales automatically. */
+/* `loomId` is the share ID from a Loom URL (loom.com/share/<id>); `thumb` is
+   its CDN preview gif. Add entries here as new tutorials are recorded — the
+   grid, progress dots, and player modal all scale automatically. */
 type Video = {
   id: string
   num: string
   title: string
+  length: string
   tag: string
   color: string
   desc: string
   loomId?: string
   thumb?: string
-  length?: string
 }
 
 const VIDEOS: Video[] = [
-  { id: 'v1', num: '01', title: 'Welcome & setting up your knowledge', tag: 'Start here', color: '#1F7A4D', desc: 'A tour of your dashboard and how to set up the knowledge that powers your chatbot.', loomId: '6a9d2bdb59954e4eb68ed860ad09bd95', thumb: 'https://cdn.loom.com/sessions/thumbnails/6a9d2bdb59954e4eb68ed860ad09bd95-904e470765f7f6cf.gif', length: '11:08' },
-  { id: 'v2', num: '02', title: 'Create your chatbot personality',     tag: 'Chatbot',    color: '#7C3AED', desc: 'Give your chatbot a voice and personality that matches your brand.',               loomId: 'fc339f11b00d468bacb5cd0ec956ce34', thumb: 'https://cdn.loom.com/sessions/thumbnails/fc339f11b00d468bacb5cd0ec956ce34-860a8f3021a72de1.gif', length: '6:54' },
-  { id: 'v3', num: '03', title: 'Write instructions for your chatbot',  tag: 'Chatbot',    color: '#2563EB', desc: 'Add instructions that guide how your chatbot responds to leads.',                  loomId: '99dc0b13bf40430ba34bc52eef6c6b79', thumb: 'https://cdn.loom.com/sessions/thumbnails/99dc0b13bf40430ba34bc52eef6c6b79-8ce54c3372353130.gif', length: '4:40' },
+  { id: 'v1', num: '01', title: 'Welcome & setting up your knowledge', length: '11:08', tag: 'Start here',   color: '#1F7A4D', desc: 'A tour of your dashboard and how to set up the knowledge that powers your chatbot.', loomId: '6a9d2bdb59954e4eb68ed860ad09bd95', thumb: 'https://cdn.loom.com/sessions/thumbnails/6a9d2bdb59954e4eb68ed860ad09bd95-904e470765f7f6cf.gif' },
+  { id: 'v2', num: '02', title: 'Create your chatbot personality',     length: '6:54',  tag: 'Chatbot',      color: '#7C3AED', desc: 'Give your chatbot a voice and personality that matches your brand.',                 loomId: 'fc339f11b00d468bacb5cd0ec956ce34', thumb: 'https://cdn.loom.com/sessions/thumbnails/fc339f11b00d468bacb5cd0ec956ce34-860a8f3021a72de1.gif' },
+  { id: 'v3', num: '03', title: 'Write instructions for your chatbot',  length: '4:40',  tag: 'Chatbot',      color: '#2563EB', desc: 'Add instructions that guide how your chatbot responds to leads.',                    loomId: '99dc0b13bf40430ba34bc52eef6c6b79', thumb: 'https://cdn.loom.com/sessions/thumbnails/99dc0b13bf40430ba34bc52eef6c6b79-8ce54c3372353130.gif' },
+  { id: 'v4', num: '04', title: 'Send images to your Messenger leads',  length: '5:19',  tag: 'Channels',     color: '#C2410C', desc: 'Organise media into folders and train the bot with hashtags so it sends the right image on request.', loomId: '8f92982ae6b74dea87dfafe8898376d1', thumb: 'https://cdn.loom.com/sessions/thumbnails/8f92982ae6b74dea87dfafe8898376d1-aa564366beb33895.gif' },
+  { id: 'v5', num: '05', title: 'Action pages, explained',              length: '3:22',  tag: 'Action Pages', color: '#0F766E', desc: 'A tour of every action page type — forms, bookings, quizzes, sales pages, catalogues, and listings.', loomId: 'c66861d539c94655a3ee0b26a335315b', thumb: 'https://cdn.loom.com/sessions/thumbnails/c66861d539c94655a3ee0b26a335315b-d6318a8707a773b7.gif' },
+  { id: 'v6', num: '06', title: 'Create a booking action page',         length: '6:26',  tag: 'Action Pages', color: '#B45309', desc: 'Build and configure a booking page — availability hours and form fields included.', loomId: 'a21f9b5d099f4a20be77467584b6cf9f', thumb: 'https://cdn.loom.com/sessions/thumbnails/a21f9b5d099f4a20be77467584b6cf9f-a7e25a631f005374.gif' },
+  { id: 'v7', num: '07', title: 'Add an action page to your conversation flow', length: '3:34', tag: 'Chatbot', color: '#6D28D9', desc: 'Link an action page into your chatbot flow and instructions so it triggers at the right moment.', loomId: '8a191bb710c148d8a0f499c78d86da58', thumb: 'https://cdn.loom.com/sessions/thumbnails/8a191bb710c148d8a0f499c78d86da58-73cfc76adaed568c.gif' },
 ]
 
 const STORAGE_KEY = 'ws_videos_watched'
@@ -171,13 +178,16 @@ const S = {
 /* ── main ────────────────────────────────────────────────────────────── */
 export default function DashboardClient({
   userName,
+  hasBusiness,
+  hasKnowledge,
   hasPersonality,
   hasActiveActionPages,
   hasFacebook,
   stats,
   recentSubmissions,
 }: DashboardClientProps) {
-  const isFullySetUp = hasPersonality && hasActiveActionPages && hasFacebook
+  const isFullySetUp =
+    hasBusiness && hasKnowledge && hasPersonality && hasActiveActionPages && hasFacebook
 
   const [dismissed, setDismissed] = useState(false)
   const [watched, setWatched] = useState<Set<string>>(new Set())
@@ -225,11 +235,11 @@ export default function DashboardClient({
   const showOnboarding = !isFullySetUp && !dismissed
 
   const onboardingSteps = [
-    { id: 'business',  title: 'Tell us about your business',     desc: 'WhatStage uses this to personalize replies and pages.',         done: true,               href: '/dashboard/business',      minutes: 2 },
-    { id: 'knowledge', title: 'Add your knowledge',              desc: 'Upload FAQs, docs, or links so the chatbot can answer.',        done: true,               href: '/dashboard/knowledge',     minutes: 5 },
-    { id: 'chatbot',   title: 'Train your AI chatbot',           desc: 'Give it a voice, test it, and set its personality.',           done: hasPersonality,      href: '/dashboard/chatbot',       minutes: 6 },
-    { id: 'action',    title: 'Publish your first action page',  desc: 'Create a booking page or lead form and share the link.',       done: hasActiveActionPages, href: '/dashboard/action-pages',  minutes: 3 },
-    { id: 'connect',   title: 'Connect a channel',               desc: 'Hook up Messenger so your AI can capture leads automatically.', done: hasFacebook,         href: '/dashboard/settings',      minutes: 4 },
+    { id: 'business',  title: 'Tell us about your business',     desc: 'WhatStage uses this to personalize replies and pages.',         done: hasBusiness,          href: '/onboarding/business',         minutes: 2 },
+    { id: 'knowledge', title: 'Add your knowledge',              desc: 'Upload FAQs, docs, or links so the chatbot can answer.',        done: hasKnowledge,         href: '/dashboard/knowledge',         minutes: 5 },
+    { id: 'chatbot',   title: 'Train your AI chatbot',           desc: 'Give it a voice, test it, and set its personality.',           done: hasPersonality,       href: '/dashboard/chatbot',           minutes: 6 },
+    { id: 'action',    title: 'Publish your first action page',  desc: 'Create a booking page or lead form and share the link.',       done: hasActiveActionPages, href: '/dashboard/action-pages',      minutes: 3 },
+    { id: 'connect',   title: 'Connect a channel',               desc: 'Hook up Messenger so your AI can capture leads automatically.', done: hasFacebook,          href: '/dashboard/settings/facebook', minutes: 4 },
   ]
 
   const completed = onboardingSteps.filter(s => s.done).length
@@ -317,7 +327,7 @@ export default function DashboardClient({
                 <PlayIcon size={20} />
               </div>
               <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '14px 18px', background: 'linear-gradient(transparent,rgba(0,0,0,0.7))', display: 'flex', flexDirection: 'column', gap: 2 }}>
-                <span style={{ fontFamily: S.mono, fontSize: 10.5, color: 'rgba(255,255,255,0.7)', letterSpacing: '0.06em', textTransform: 'uppercase' }}>Watch the intro</span>
+                <span style={{ fontFamily: S.mono, fontSize: 10.5, color: 'rgba(255,255,255,0.7)', letterSpacing: '0.06em', textTransform: 'uppercase' }}>Watch the intro · {VIDEOS[0].length}</span>
                 <span style={{ color: 'white', fontSize: 18, fontFamily: S.serif, letterSpacing: '-0.01em' }}>{VIDEOS[0].title}</span>
               </div>
               {watched.has('v1') && (
@@ -483,7 +493,7 @@ export default function DashboardClient({
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', minWidth: 0 }}>
                 <span style={{ fontFamily: S.mono, fontSize: 11, color: S.accentInk, fontWeight: 600, flexShrink: 0 }}>UP NEXT</span>
                 <span className="db-vid-next-title" style={{ fontSize: 13, color: S.ink, fontWeight: 500 }}>{nextVideo.num}. {nextVideo.title}</span>
-                {nextVideo.length && <span className="db-vid-next-len" style={{ fontSize: 12, color: S.ink4 }}>· {nextVideo.length}</span>}
+                <span className="db-vid-next-len" style={{ fontSize: 12, color: S.ink4 }}>· {nextVideo.length}</span>
               </div>
               <button onClick={() => openVideo(nextVideo)} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '7px 12px', background: S.accent, color: 'white', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 500, cursor: 'pointer', flexShrink: 0 }}>
                 <PlayIcon size={12} /> Watch
@@ -502,20 +512,22 @@ export default function DashboardClient({
                   {isNext && <div style={{ position: 'absolute', top: -1, left: -1, right: -1, height: 3, background: S.accent, borderRadius: '14px 14px 0 0' }} />}
                   <div style={{ position: 'relative', aspectRatio: '16/9', borderRadius: 10, overflow: 'hidden', background: `linear-gradient(135deg,${v.color},#14120C)` }}>
                     {v.thumb ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={v.thumb} alt={v.title} loading="lazy" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', filter: isWatched ? 'grayscale(0.4) brightness(0.85)' : 'none' }} />
+                      <>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={v.thumb} alt={v.title} loading="lazy" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', filter: isWatched ? 'grayscale(0.4) brightness(0.85)' : 'none' }} />
+                        <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg,rgba(0,0,0,0.25),transparent 40%,rgba(0,0,0,0.35))' }} />
+                      </>
                     ) : (
                       <svg viewBox="0 0 200 110" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }} preserveAspectRatio="xMidYMid slice">
                         <circle cx="40" cy="30" r="22" fill="rgba(255,255,255,0.08)" />
                         <circle cx="160" cy="80" r="32" fill="rgba(255,255,255,0.06)" />
                       </svg>
                     )}
-                    {v.thumb && <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg,rgba(0,0,0,0.25),transparent 40%,rgba(0,0,0,0.35))' }} />}
                     <div style={{ position: 'absolute', top: 8, left: 10, fontFamily: S.mono, fontSize: 11, color: 'rgba(255,255,255,0.9)', fontWeight: 600, letterSpacing: '0.04em', textShadow: '0 1px 3px rgba(0,0,0,0.5)' }}>{v.num}</div>
                     <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', width: 38, height: 38, borderRadius: 999, background: 'rgba(255,255,255,0.95)', display: 'grid', placeItems: 'center', color: isWatched ? S.accent : S.ink, boxShadow: '0 4px 14px rgba(0,0,0,0.2)' }}>
                       {isWatched ? <CheckIcon size={18} /> : <PlayIcon size={14} />}
                     </div>
-                    {v.length && <span style={{ position: 'absolute', right: 8, bottom: 8, fontFamily: S.mono, fontSize: 10.5, background: 'rgba(0,0,0,0.65)', color: 'white', padding: '2px 6px', borderRadius: 4 }}>{v.length}</span>}
+                    <span style={{ position: 'absolute', right: 8, bottom: 8, fontFamily: S.mono, fontSize: 10.5, background: 'rgba(0,0,0,0.65)', color: 'white', padding: '2px 6px', borderRadius: 4 }}>{v.length}</span>
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 2, padding: '4px 6px 8px' }}>
                     <span style={{ fontFamily: S.mono, fontSize: 10, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.06em', color: isWatched ? S.ink4 : v.color }}>{v.tag}</span>
