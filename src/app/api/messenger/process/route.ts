@@ -1,4 +1,5 @@
 import { timingSafeEqual } from 'node:crypto'
+import * as Sentry from '@sentry/nextjs'
 import { NextResponse, type NextRequest } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { decryptToken } from '@/lib/facebook/crypto'
@@ -71,7 +72,18 @@ const LLM_HISTORY_TURNS = 12
 // Rolling summary cadence: every N turns past the LLM window, refresh the
 // summary so older context isn't lost. Cheap LLM call, fire-and-forget.
 const SUMMARY_INTERVAL_TURNS = 8
-const BATCH_SIZE = 3
+// How many disjoint-thread jobs one invocation processes in parallel per claim.
+// The SQL claim guarantees the batch contains no two jobs for the same thread,
+// so Promise.allSettled over the batch is safe. Env-tunable so we can widen
+// per-invocation parallelism without a deploy. Default 8 (was 3).
+const BATCH_SIZE = Math.max(1, Number(process.env.MESSENGER_WORKER_BATCH_SIZE) || 8)
+// Bounded worker self-fan-out: when an invocation claims a FULL batch (backlog
+// likely exceeds what one invocation can drain in time), it kicks one more
+// worker invocation and stamps an incrementing x-fanout-depth. Each generation
+// kicks at most one child, so the live worker pool grows with backlog up to
+// (WORKER_FANOUT_MAX + 1) invocations and stops as soon as batches stop coming
+// back full. The SQL claim keeps every invocation on disjoint threads.
+const WORKER_FANOUT_MAX = Math.max(0, Number(process.env.MESSENGER_WORKER_FANOUT_MAX) || 6)
 
 // Recognise rate-limit errors from any of the upstream APIs the worker calls:
 //   - Meta Graph: `Graph 429: ...`
@@ -86,7 +98,12 @@ function isRateLimitError(msg: string): boolean {
     m.includes('rate limit') ||
     m.includes('rate_limit') ||
     m.includes('too many requests') ||
-    m.includes('overloaded')
+    m.includes('overloaded') ||
+    // Meta Graph throttles that arrive on HTTP 400/200, not 429:
+    //   #4 app / #17 user / #32 page "request limit reached", #613 rate limit.
+    // messenger.ts surfaces the numeric code in the thrown message.
+    m.includes('request limit reached') ||
+    /\(code (4|17|32|613)\)/.test(m)
   )
 }
 
@@ -110,11 +127,42 @@ const HEARTBEAT_INTERVAL_MS = 30 * 1000
 const CLASSIFY_EVERY = 4
 // Stop claiming new batches once this much wall-clock has elapsed in the
 // invocation. Leaves headroom under maxDuration=300 for the longest
-// in-flight batch (LLM + FB calls can run ~30s, occasionally longer under
-// provider degradation).
-const DRAIN_DEADLINE_MS = 200_000
+// in-flight batch: a pessimistic job (slow LLM tail + several media sends)
+// plus a same-time batch can run ~80s, so a claim at the deadline must still
+// finish well under 300s. Lowered 200s → 165s to widen that margin now that
+// self-fan-out spreads backlog across more invocations.
+const DRAIN_DEADLINE_MS = 165_000
+// When a claim comes back empty but queued jobs exist with a near-future
+// scheduled_at (rate-limit backoff), a warm worker waits for them instead of
+// exiting and leaving recovery to the 1-minute cron. Only waits for jobs due
+// within this window; anything further out is left to the cron / next webhook.
+const DRAIN_WAIT_MAX_MS = 20_000
+// Floor on the wait so we never busy-spin when the only queued jobs belong to
+// threads currently running in another invocation (claim returns [] but a job
+// is "due now").
+const DRAIN_WAIT_MIN_MS = 1_000
 
 type AdminClient = ReturnType<typeof createAdminClient>
+
+// Surface a terminally-failed job to Sentry. The job state machine already
+// records `status='failed'` + `last_error`, but Sentry's auto-instrumentation
+// never sees these because the per-kind catch blocks swallow the error (they
+// requeue/park rather than rethrow). Without this, a Meta/OpenRouter outage can
+// fail thousands of replies with the operator finding out only from customer
+// complaints. Capture is best-effort and must never throw into the worker.
+function captureJobFailure(
+  err: unknown,
+  job: { id: string; thread_id: string; kind: string },
+): void {
+  try {
+    Sentry.captureException(err, {
+      tags: { jobKind: job.kind, jobId: job.id, threadId: job.thread_id },
+      level: 'error',
+    })
+  } catch {
+    /* Sentry must never break the worker */
+  }
+}
 
 interface JobRow {
   id: string
@@ -157,33 +205,91 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'forbidden' }, { status: 403 })
   }
 
+  const depth = Math.max(0, Number(req.headers.get('x-fanout-depth')) || 0)
   const admin = createAdminClient()
-  const result = await drainMessengerJobs(admin)
+  const result = await drainMessengerJobs(admin, depth)
   return NextResponse.json(result)
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms))
+}
+
 /**
- * Drain loop. Repeatedly claim batches and process them in parallel until
- * either the queue is empty or the wall-clock deadline is reached.
+ * Kick one more worker invocation, stamping an incremented fan-out depth so the
+ * chain is self-limiting (stops at WORKER_FANOUT_MAX). Fire-and-forget: the
+ * child runs as its own Vercel invocation. Gated by the same secret as the
+ * webhook trigger so it can't be invoked by outsiders. Never throws.
+ */
+function selfFanOut(depth: number): void {
+  if (depth >= WORKER_FANOUT_MAX) return
+  const base = process.env.NEXT_PUBLIC_APP_URL
+  const secret = process.env.MESSENGER_WORKER_SECRET
+  if (!base || !secret) return
+  void fetch(`${base}/api/messenger/process`, {
+    method: 'POST',
+    headers: { 'x-worker-secret': secret, 'x-fanout-depth': String(depth + 1) },
+  }).catch((e) => console.warn('[messenger.worker] self fan-out failed', e))
+}
+
+/**
+ * Milliseconds until the next queued job becomes due, or null when no queued
+ * jobs remain. Used to keep a warm worker alive across short rate-limit
+ * backoffs instead of exiting and waiting on the 1-minute cron.
+ */
+async function msUntilNextQueued(admin: AdminClient): Promise<number | null> {
+  const { data, error } = await admin
+    .from('messenger_jobs')
+    .select('scheduled_at')
+    .eq('status', 'queued')
+    .order('scheduled_at', { ascending: true })
+    .limit(1)
+    .maybeSingle<{ scheduled_at: string }>()
+  if (error || !data?.scheduled_at) return null
+  return Math.max(0, Date.parse(data.scheduled_at) - Date.now())
+}
+
+/**
+ * Drain loop. Repeatedly claim batches and process them in parallel until the
+ * queue is empty (and no near-future backoff jobs remain) or the wall-clock
+ * deadline is reached.
  *
- * Per-thread serialization is enforced by the SQL claim function (Phase 1):
- * no two rows in a single batch share a thread_id, and no thread with a
- * `running` job is reclaimable. That makes `Promise.allSettled` over the
- * batch safe — parallel jobs touch disjoint conversations.
+ * Per-thread serialization is enforced by the SQL claim function: no two rows
+ * in a single batch share a thread_id, and no thread with a `running` job is
+ * reclaimable. That makes `Promise.allSettled` over the batch safe — parallel
+ * jobs touch disjoint conversations — AND makes it safe for the additional
+ * invocations spawned by `selfFanOut` to drain concurrently.
  *
  * The per-job try/catch is kept (via allSettled + individual catch) so one
  * failed job never poisons the batch.
  */
 async function drainMessengerJobs(
   admin: AdminClient,
+  depth = 0,
 ): Promise<{ processed: number; batches: number }> {
   const startedAt = Date.now()
   const claimDeadline = startedAt + DRAIN_DEADLINE_MS
   let processed = 0
   let batches = 0
+  let firedChild = false
   while (Date.now() < claimDeadline) {
     const jobs = await claimJobs(admin, BATCH_SIZE)
-    if (jobs.length === 0) break
+    if (jobs.length === 0) {
+      // Queue drained for now. If a backoff-scheduled job is due soon, wait for
+      // it; otherwise let the cron / next webhook pick up far-future work.
+      const waitMs = await msUntilNextQueued(admin)
+      if (waitMs === null || waitMs > DRAIN_WAIT_MAX_MS) break
+      const remaining = claimDeadline - Date.now()
+      if (remaining <= DRAIN_WAIT_MIN_MS) break
+      await sleep(Math.min(Math.max(waitMs, DRAIN_WAIT_MIN_MS), remaining))
+      continue
+    }
+    // A full batch means there is probably more backlog than one invocation
+    // can clear in time — spread it across another invocation (once per worker).
+    if (!firedChild && jobs.length >= BATCH_SIZE) {
+      firedChild = true
+      selfFanOut(depth)
+    }
     batches += 1
     await Promise.allSettled(
       jobs.map((job) =>
@@ -234,6 +340,7 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
       const failed = attempts >= MAX_ATTEMPTS
       const msg = err instanceof Error ? err.message : String(err)
       console.error('[messenger.worker] reminder job error', job.id, msg)
+      if (failed) captureJobFailure(err, job)
       await admin
         .from('messenger_jobs')
         .update({
@@ -262,6 +369,7 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
       const failed = attempts >= MAX_ATTEMPTS
       const msg = err instanceof Error ? err.message : String(err)
       console.error('[messenger.worker] campaign job error', job.id, msg)
+      if (failed) captureJobFailure(err, job)
       await admin
         .from('messenger_jobs')
         .update({
@@ -345,6 +453,21 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
       leadId: thread.lead_id,
     }).catch((e) => console.warn('[messenger.worker] resolveCommentBridges failed', e))
 
+    // Kick off the heavy reply-context preload now — it depends only on the
+    // thread + inbound id (both already resolved) and not on the reminder
+    // extraction below, so overlap them instead of paying both serially in
+    // front of the LLM. Awaited further down (`const ctx = await ctxPromise`).
+    const ctxPromise = loadReplyContext(admin, {
+      thread,
+      inboundMsgId: job.inbound_msg_id,
+    })
+    // Neutralize the orphaned-rejection window: if an await BETWEEN here and
+    // `await ctxPromise` (below) throws, we'd never attach a handler and a
+    // ctxPromise rejection would surface as an unhandled rejection (which can
+    // tear down the whole batch invocation). This no-op marks it handled; the
+    // real error still propagates to the outer try/catch via `await ctxPromise`.
+    ctxPromise.catch(() => {})
+
     // Synchronous reminder detection BEFORE bot reply, so we know whether to
     // suppress the default auto silent-followup for this lead. The hasTimeMarker
     // pre-filter inside extractReminder keeps median-latency cost ~0.
@@ -412,10 +535,7 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
     // history, lead-context block, sendable action_pages — then campaign +
     // funnels in a second parallel round if the lead is on a campaign.
     // Replaces ~7 serial round-trips (~2s) with ~2 parallel rounds (~600ms).
-    const ctx = await loadReplyContext(admin, {
-      thread,
-      inboundMsgId: job.inbound_msg_id,
-    })
+    const ctx = await ctxPromise
     const config = ctx.config
     const classifyEnabled = config.autoClassifyEnabled
     const stages = classifyEnabled ? ctx.stages : ([] as StageBrief[])
@@ -530,17 +650,18 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
       // explicit typing_off is needed. Page Reactions used to live here but
       // Meta has effectively gated the API (#100 "invalid or not present" on
       // every call) and each failed attempt burns against the page rate limit.
-      try {
-        await sendMessengerSenderAction({
-          pageAccessToken: pageToken,
-          recipientPsid: thread.psid,
-          action: 'typing_on',
-        })
-      } catch (e) {
+      // Fire-and-forget: awaiting the typing bubble added a serial Graph
+      // round-trip in front of every reply LLM call for a purely cosmetic
+      // signal. The 8s read-timeout in messenger.ts bounds the detached call.
+      void sendMessengerSenderAction({
+        pageAccessToken: pageToken,
+        recipientPsid: thread.psid,
+        action: 'typing_on',
+      }).catch((e) => {
         console.warn('[messenger.worker] typing_on send failed', {
           err: e instanceof Error ? e.message : String(e),
         })
-      }
+      })
 
       // Combined call: reply + (optional) stage classification + action page choice in one shot.
       let reply = ''
@@ -638,13 +759,17 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
           await markDone(admin, job.id, 'skipped', 'policy_blocked')
           return
         }
-        textFbId = result.messageId ?? null
-        if (textFbId) {
-          await admin
-            .from('messenger_jobs')
-            .update({ outbound_text_fb_id: textFbId })
-            .eq('id', job.id)
-        }
+        // Graph returns a message_id on success. In the rare case it reports
+        // sent:true with no id, fall back to a synthetic per-job marker so the
+        // idempotency key is ALWAYS persisted — otherwise a retry would re-send
+        // and duplicate the reply. The marker is only ever used as an
+        // idempotency guard and as messenger_messages.fb_message_id (dedup), so
+        // a non-Graph value is safe here.
+        textFbId = result.messageId ?? `sent:${job.id}`
+        await admin
+          .from('messenger_jobs')
+          .update({ outbound_text_fb_id: textFbId })
+          .eq('id', job.id)
       }
 
       // Persist the outbound message and update thread tail. The unique
@@ -700,20 +825,25 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
 
       // Rolling summary: refresh `conversation_summary` every
       // SUMMARY_INTERVAL_TURNS turns once history exceeds the LLM window.
-      // This keeps long threads coherent without paying for a 40-turn prompt
-      // every reply. Fire-and-forget — never blocks the bot response.
+      // shouldRollSummary fires on an EXACT modulo boundary, so the COUNT must
+      // be taken HERE — before the later recommendation / action-page message
+      // inserts in this same job — to reproduce the pre-change count value
+      // deterministically. (A detached COUNT would race those inserts and
+      // intermittently skip or duplicate the roll.) Only the LLM summarize call
+      // and the write stay fire-and-forget, so the single indexed COUNT is the
+      // only thing on the path and the customer-visible sends below are never
+      // gated on the summary. Nothing later in this job reads conversation_summary.
       const totalThreadMessages = await countThreadMessages(admin, thread.id)
       if (shouldRollSummary(totalThreadMessages, LLM_HISTORY_TURNS, SUMMARY_INTERVAL_TURNS)) {
-        summarizeConversation(history, message, reply, conversationSummary)
-          .then((summary) => {
-            if (summary) {
-              return admin
-                .from('messenger_threads')
-                .update({ conversation_summary: summary })
-                .eq('id', thread.id)
-            }
-          })
-          .catch((e) => console.warn('[messenger.worker] summary update failed', e))
+        void (async () => {
+          const summary = await summarizeConversation(history, message, reply, conversationSummary)
+          if (summary) {
+            await admin
+              .from('messenger_threads')
+              .update({ conversation_summary: summary })
+              .eq('id', thread.id)
+          }
+        })().catch((e) => console.warn('[messenger.worker] rolling summary failed', e))
       }
 
       console.log('[messenger.worker] media handoff', {
@@ -743,15 +873,21 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
                 payload: { kind: 'image', imageUrl: img.imageUrl },
                 kind: 'bot',
               })
-            }
-            if (gateResult.newKeys.length > 0) {
-              const merged = [...(thread.attached_item_keys ?? []), ...gateResult.newKeys]
-              const trimmed = merged.slice(-100)
-              await admin
-                .from('messenger_threads')
-                .update({ attached_item_keys: trimmed })
-                .eq('id', thread.id)
-              thread.attached_item_keys = trimmed
+              // Persist this key IMMEDIATELY after its send (REL-5) rather than
+              // writing the merged set only after the whole loop. If the job
+              // crashes / is stale-reclaimed mid-loop, the retry's firstMentionGate
+              // sees the already-attached key and skips the re-send. (Visual-intent
+              // re-sends of already-attached keys remain intentional and unaffected,
+              // since the gate re-approves them regardless of this set.)
+              const attached = thread.attached_item_keys ?? []
+              if (!attached.includes(img.sourceKey)) {
+                const trimmed = [...attached, img.sourceKey].slice(-100)
+                await admin
+                  .from('messenger_threads')
+                  .update({ attached_item_keys: trimmed })
+                  .eq('id', thread.id)
+                thread.attached_item_keys = trimmed
+              }
             }
           }
         } catch (e) {
@@ -763,8 +899,15 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
       // (customer explicitly asked OR operator rules triggered). Sends the
       // matched product's image + a single-product button card. When it
       // succeeds we skip the catalog carousel below to avoid double-sending.
-      let recommendationSent = false
-      if (productRecommendation && activeCatalogPageId) {
+      //
+      // Idempotency (REL-2): the reply LLM re-runs on every retry, so without a
+      // guard a requeue would re-run the RAG match AND re-send a button card.
+      // A stamped outbound_button_fb_id means a prior attempt already delivered
+      // a button (recommendation OR action-page) for this job — treat the
+      // recommendation as already sent and skip both the match and the send,
+      // mirroring the action-page block's `if (job.outbound_button_fb_id)` skip.
+      let recommendationSent = Boolean(job.outbound_button_fb_id)
+      if (!recommendationSent && productRecommendation && activeCatalogPageId) {
         const catalogPage = sendablePages.find((p) => p.id === activeCatalogPageId)
         if (catalogPage) {
           try {
@@ -1287,6 +1430,7 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
     } else {
       console.error('[messenger.worker] job error', job.id, msg)
     }
+    if (failed) captureJobFailure(err, job)
     await admin
       .from('messenger_jobs')
       .update({

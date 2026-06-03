@@ -168,15 +168,31 @@ export async function sendOutbound(args: {
     return { sent: false, reason: 'marketing_blocked' }
   }
 
-  // OTN: consume the token — mark it as used so it cannot be spent twice.
+  // OTN: atomically CLAIM the token BEFORE sending. The conditional
+  // `update ... is null ... returning row` is the lock — exactly one caller
+  // can flip a given token from unconsumed→consumed and get a row back, so two
+  // concurrent sends on the same thread (e.g. a worker reply racing an
+  // action-page submission_echo, which is NOT per-thread serialized by the job
+  // claim) can't both spend it. No row back ⇒ another sender already took it
+  // (or it expired between resolve and now) ⇒ no valid channel ⇒ don't send.
+  // If the send below throws we RELEASE the claim so a failed send never burns
+  // the token (REL-6).
   if (policy.mode === 'OTN') {
-    await admin
+    const { data: claimed, error: claimErr } = await admin
       .from('messenger_otn_tokens')
       .update({ consumed_at: new Date().toISOString() })
       .eq('thread_id', thread.id)
+      .eq('token', policy.token)
       .is('consumed_at', null)
-      .order('requested_at', { ascending: true })
-      .limit(1)
+      .select('id')
+      .maybeSingle()
+    if (claimErr) throw new Error(`[outbound] OTN claim failed: ${claimErr.message}`)
+    if (!claimed) {
+      console.warn('[outbound] OTN token already spent or expired before send', {
+        threadId: thread.id,
+      })
+      return { sent: false, reason: 'otn' }
+    }
   }
 
   // Determine the messaging_type to use. HUMAN_AGENT requires MESSAGE_TAG + tag field.
@@ -184,37 +200,50 @@ export async function sendOutbound(args: {
 
   let messageId: string
 
-  if (payload.kind === 'text') {
-    const result = await sendMessengerText({
-      pageAccessToken: pageToken,
-      recipientPsid: thread.psid,
-      text: payload.text,
-      ...(useHumanAgent ? { messagingType: 'MESSAGE_TAG', tag: 'HUMAN_AGENT' } : {}),
-    })
-    messageId = result.message_id
-  } else if (payload.kind === 'button') {
-    const result = await sendMessengerButton({
-      pageAccessToken: pageToken,
-      recipientPsid: thread.psid,
-      text: payload.text,
-      url: payload.url,
-      ctaLabel: payload.ctaLabel,
-    })
-    messageId = result.message_id
-  } else if (payload.kind === 'generic_template') {
-    const result = await sendMessengerGenericTemplate({
-      pageAccessToken: pageToken,
-      recipientPsid: thread.psid,
-      elements: payload.elements,
-    })
-    messageId = result.message_id
-  } else {
-    const result = await sendMessengerImage({
-      pageAccessToken: pageToken,
-      recipientPsid: thread.psid,
-      imageUrl: payload.imageUrl,
-    })
-    messageId = result.message_id
+  try {
+    if (payload.kind === 'text') {
+      const result = await sendMessengerText({
+        pageAccessToken: pageToken,
+        recipientPsid: thread.psid,
+        text: payload.text,
+        ...(useHumanAgent ? { messagingType: 'MESSAGE_TAG', tag: 'HUMAN_AGENT' } : {}),
+      })
+      messageId = result.message_id
+    } else if (payload.kind === 'button') {
+      const result = await sendMessengerButton({
+        pageAccessToken: pageToken,
+        recipientPsid: thread.psid,
+        text: payload.text,
+        url: payload.url,
+        ctaLabel: payload.ctaLabel,
+      })
+      messageId = result.message_id
+    } else if (payload.kind === 'generic_template') {
+      const result = await sendMessengerGenericTemplate({
+        pageAccessToken: pageToken,
+        recipientPsid: thread.psid,
+        elements: payload.elements,
+      })
+      messageId = result.message_id
+    } else {
+      const result = await sendMessengerImage({
+        pageAccessToken: pageToken,
+        recipientPsid: thread.psid,
+        imageUrl: payload.imageUrl,
+      })
+      messageId = result.message_id
+    }
+  } catch (e) {
+    // Send failed — release the OTN claim so the retry can reuse the token.
+    if (policy.mode === 'OTN') {
+      const { error: relErr } = await admin
+        .from('messenger_otn_tokens')
+        .update({ consumed_at: null })
+        .eq('thread_id', thread.id)
+        .eq('token', policy.token)
+      if (relErr) console.error('[outbound] OTN token release failed', relErr.message)
+    }
+    throw e
   }
 
   await admin

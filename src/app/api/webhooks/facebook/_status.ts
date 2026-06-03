@@ -14,8 +14,11 @@ export async function isUserActive(admin: AdminClient, userId: string): Promise<
     .eq('id', userId)
     .maybeSingle<{ status: string }>()
   if (error) {
-    console.error('[fb.webhook] status lookup failed', error.message)
-    return false
+    // A query failure is an INFRA error, not "user is paused". Returning false
+    // here would silently drop the inbound message (the caller treats false as
+    // "bot off" → returns 200 to Meta → no redelivery). Throw so the webhook
+    // returns 5xx and Meta redelivers the batch once the DB recovers.
+    throw new Error(`[fb.webhook] status lookup failed: ${error.message}`)
   }
   return data?.status === 'active'
 }

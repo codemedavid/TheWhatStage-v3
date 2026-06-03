@@ -156,22 +156,25 @@ export async function answerWithClassification(
     }
   }
 
-  const paymentBlock = await paymentEnumBlock(
-    supabase, userId, activePageTitle, activePaymentMethodIds,
-  ).catch((err) => {
-    console.warn('[classify] paymentEnumBlock failed', err)
-    return ''
-  })
-
-  const ctx = await retrieve(
-    {
-      client: supabase,
-      embedder,
-      rewriteQuery: (q) => llm.rewriteQuery(q),
-      rpcName: options.rpcName,
-    },
-    { userId, query: message, paymentMethodIds: activePaymentMethodIds },
-  )
+  // paymentEnumBlock and retrieve are independent (neither reads the other's
+  // output) — run them concurrently so the slower of the two, not their sum,
+  // sits in front of the reply LLM. Both depend only on activePaymentMethodIds,
+  // resolved above.
+  const [paymentBlock, ctx] = await Promise.all([
+    paymentEnumBlock(supabase, userId, activePageTitle, activePaymentMethodIds).catch((err) => {
+      console.warn('[classify] paymentEnumBlock failed', err)
+      return ''
+    }),
+    retrieve(
+      {
+        client: supabase,
+        embedder,
+        rewriteQuery: (q) => llm.rewriteQuery(q),
+        rpcName: options.rpcName,
+      },
+      { userId, query: message, paymentMethodIds: activePaymentMethodIds },
+    ),
+  ])
 
   const built = buildPrompt({
     userQuery: message,
@@ -392,36 +395,43 @@ export async function answerWithClassification(
     attachImages = media.length > 0
   }
 
-  try {
-    const forced = await decideForceSend({
-      userId,
-      leadId: options.leadId ?? null,
-      threadId: options.threadId ?? null,
-      history,
-      latestCustomerMessage: message,
-      currentStage: stages.find((s) => s.id === currentStageId) ?? null,
-      stages,
-      stageChangeThisTurn: stageChange,
-      llmActionPage: actionPage,
-      actionPages,
-      primaryActionPageId: config.primaryActionPageId ?? null,
-      supabase,
-    })
-    if (forced.overrideFired) {
-      console.info('[force-send] override fired', {
-        userId,
-        leadId: options.leadId ?? null,
-        threadId: options.threadId ?? null,
-        reason: forced.reason,
-        pageId: forced.actionPage?.action_page_id ?? null,
-      })
-    }
-    actionPage = forced.actionPage
-  } catch (e) {
-    console.error('[force-send] decideForceSend threw — keeping LLM choice', e)
-  }
-
-  const sourceTitles = await resolveSourceTitles(supabase, userId, built.contextChunkIds)
+  // decideForceSend (a cheap classifier call + DB reads) and resolveSourceTitles
+  // (a single lookup) are both post-reply and independent — run them
+  // concurrently so the force-send decision and the source-title resolution
+  // overlap instead of stacking serially before the function returns.
+  const [, sourceTitles] = await Promise.all([
+    (async () => {
+      try {
+        const forced = await decideForceSend({
+          userId,
+          leadId: options.leadId ?? null,
+          threadId: options.threadId ?? null,
+          history,
+          latestCustomerMessage: message,
+          currentStage: stages.find((s) => s.id === currentStageId) ?? null,
+          stages,
+          stageChangeThisTurn: stageChange,
+          llmActionPage: actionPage,
+          actionPages,
+          primaryActionPageId: config.primaryActionPageId ?? null,
+          supabase,
+        })
+        if (forced.overrideFired) {
+          console.info('[force-send] override fired', {
+            userId,
+            leadId: options.leadId ?? null,
+            threadId: options.threadId ?? null,
+            reason: forced.reason,
+            pageId: forced.actionPage?.action_page_id ?? null,
+          })
+        }
+        actionPage = forced.actionPage
+      } catch (e) {
+        console.error('[force-send] decideForceSend threw — keeping LLM choice', e)
+      }
+    })(),
+    resolveSourceTitles(supabase, userId, built.contextChunkIds),
+  ])
   console.log('[chatbot.classify] media resolved', {
     userId,
     count: media.length,
