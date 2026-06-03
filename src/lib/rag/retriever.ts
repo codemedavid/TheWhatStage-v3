@@ -50,7 +50,22 @@ async function searchOnce(
   paymentMethodIds?: string[] | null,
 ): Promise<RetrievedChunk[]> {
   const tEmbed = Date.now();
-  const qvec = await deps.embedder.embed(query);
+  // Graceful degradation: the embed call retries internally (withRetry). If it
+  // STILL fails — typically a 429 rate-limit or provider outage — we must not
+  // crash the chat turn. Returning no vector candidates lets retrieve() fall
+  // through to its existing empty-pool handling (CRAG rewrite if configured,
+  // otherwise the chatbot answers from persona), which is far better than
+  // throwing up the stack and failing the whole reply. The happy path is
+  // unchanged: a successful embed proceeds straight to the hybrid RPC below.
+  let qvec: number[];
+  try {
+    qvec = await deps.embedder.embed(query);
+  } catch (err) {
+    console.warn('[rag.retrieve] query embed failed; degrading to no vector candidates', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return [];
+  }
   console.log('[rag.timing] embed', { ms: Date.now() - tEmbed });
 
   if (!deps.client.rpc) throw new Error('Supabase client missing rpc()');

@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { withSentryConfig } from "@sentry/nextjs";
 
 // Stamp every build with a deployment id so stale clients trigger a hard
 // reload instead of failing with "Server Action … was not found on the server".
@@ -17,4 +18,20 @@ const nextConfig: NextConfig = {
   ...(deploymentId ? { deploymentId } : {}),
 };
 
-export default nextConfig;
+export default withSentryConfig(nextConfig, {
+  org: "whatstage",
+  project: "javascript-nextjs",
+
+  // Auth token for source map upload during `next build`.
+  // Set SENTRY_AUTH_TOKEN (e.g. in .env.sentry-build-plugin) to enable.
+  authToken: process.env.SENTRY_AUTH_TOKEN,
+
+  // Upload a wider set of source maps for prettier stack traces (slightly slower builds).
+  widenClientFileUpload: true,
+
+  // Route browser → Sentry requests through this Next.js rewrite to circumvent ad-blockers.
+  tunnelRoute: "/monitoring",
+
+  // Only print source-map upload logs in CI.
+  silent: !process.env.CI,
+});

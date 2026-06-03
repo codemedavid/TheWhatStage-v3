@@ -71,9 +71,20 @@ export const ragConfig = {
   // Prompt layout. `cache_friendly` puts the stable persona / rules /
   // grounding / fallback block FIRST and the volatile per-turn pieces
   // (funnel goal, instructions, summary, KB context) LAST, so providers
-  // that cache long stable prefixes (Anthropic, vLLM) can hit the cache
-  // on the bulk of the system prompt. `legacy` preserves the previous
-  // order (volatile sections first) — kept as a one-release safety toggle.
+  // that automatically cache long stable prefixes (DeepSeek KV cache via
+  // OpenRouter, Anthropic, vLLM) hit the cache on the bulk of the system
+  // prompt. In `cache_friendly`, classify.ts additionally (a) interleaves the
+  // stage-instruction STATIC prose (## STAGE CLASSIFICATION header, schema
+  // shape, hierarchy/calibration/examples, attach-images and action-page
+  // PREAMBLE, recommend instructions) into the same contiguous leading prefix
+  // — right after the persona/rules block and BEFORE any volatile data — and
+  // (b) appends a DATE-resolution manilaNow block at the very tail (rotates
+  // once/day, never busting the cached prefix). `legacy` preserves the
+  // previous order (volatile sections first, MINUTE-resolution time mid-prompt,
+  // stage prose appended after built.system rather than interleaved) — kept as
+  // a one-release, byte-level safety toggle. Caching is AUTOMATIC for the
+  // deepseek route, so no cache_control breakpoints are emitted; the lever is
+  // purely the contiguous byte-identical prefix plus the cached_tokens log.
   promptLayout:
     (process.env.RAG_PROMPT_LAYOUT ?? 'cache_friendly') as 'cache_friendly' | 'legacy',
 };

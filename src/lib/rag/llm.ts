@@ -16,6 +16,33 @@ export interface LlmUsage {
   promptTokens: number;
   completionTokens: number;
   totalTokens: number;
+  /**
+   * Prompt tokens served from the provider's automatic prefix (KV) cache on
+   * this turn, when the route reports it. Null when the provider does not
+   * surface a cache-hit count (treat as UNKNOWN, not "no cache"). Read from
+   * the OpenRouter-normalized `usage.prompt_tokens_details.cached_tokens`
+   * with a fallback to the DeepSeek-native `usage.prompt_cache_hit_tokens`.
+   */
+  cachedPromptTokens: number | null;
+  /**
+   * DeepSeek-native cache-MISS prompt-token count when present
+   * (`prompt_tokens === hit + miss`). Null when unavailable. Additive
+   * observability only.
+   */
+  cacheMissPromptTokens: number | null;
+}
+
+/**
+ * Local typed view of the cache-hit fields a usage object may carry. The
+ * OpenAI SDK already types `prompt_tokens_details.cached_tokens`; the
+ * DeepSeek-native pass-through fields (`prompt_cache_hit_tokens` /
+ * `prompt_cache_miss_tokens`) are not in the SDK types, so we read them
+ * through this narrow interface rather than `any`.
+ */
+interface UsageWithCacheFields {
+  prompt_tokens_details?: { cached_tokens?: number | null } | null;
+  prompt_cache_hit_tokens?: number | null;
+  prompt_cache_miss_tokens?: number | null;
 }
 
 export interface LlmCompletion {
@@ -87,11 +114,19 @@ export class HfRouterLlm {
     });
     const choice = r.choices[0];
     const usage = r.usage
-      ? {
-          promptTokens: r.usage.prompt_tokens ?? 0,
-          completionTokens: r.usage.completion_tokens ?? 0,
-          totalTokens: r.usage.total_tokens ?? 0,
-        }
+      ? (() => {
+          const u = r.usage as unknown as UsageWithCacheFields;
+          const cachedPromptTokens =
+            u.prompt_tokens_details?.cached_tokens ?? u.prompt_cache_hit_tokens ?? null;
+          const cacheMissPromptTokens = u.prompt_cache_miss_tokens ?? null;
+          return {
+            promptTokens: r.usage!.prompt_tokens ?? 0,
+            completionTokens: r.usage!.completion_tokens ?? 0,
+            totalTokens: r.usage!.total_tokens ?? 0,
+            cachedPromptTokens,
+            cacheMissPromptTokens,
+          };
+        })()
       : null;
     return {
       text: choice?.message?.content ?? '',
