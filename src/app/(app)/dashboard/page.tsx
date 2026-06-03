@@ -146,17 +146,15 @@ export default async function DashboardPage() {
   }))
 
   return (
-    <>
-      <DashboardClient
-        userName={userName}
-        hasBusiness={hasBusiness}
-        hasKnowledge={hasKnowledge}
-        hasPersonality={hasPersonality}
-        hasActiveActionPages={hasActiveActionPages}
-        hasFacebook={hasFacebook}
-        stats={stats}
-        recentSubmissions={recentSubmissions}
-      />
-    </>
+    <DashboardClient
+      userName={userName}
+      hasBusiness={hasBusiness}
+      hasKnowledge={hasKnowledge}
+      hasPersonality={hasPersonality}
+      hasActiveActionPages={hasActiveActionPages}
+      hasFacebook={hasFacebook}
+      stats={stats}
+      recentSubmissions={recentSubmissions}
+    />
   )
 }

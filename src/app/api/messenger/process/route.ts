@@ -48,7 +48,7 @@ import { interruptWorkflowRun } from '@/lib/workflow/trigger'
 import { runDeepReclassify } from '@/lib/chatbot/deep-reclassify'
 import { isBotPaused } from '@/lib/chatbot/takeover'
 import { resolveSourceImages } from '@/lib/chatbot/source-images'
-import { firstMentionGate } from '@/lib/chatbot/attach-gate'
+import { firstMentionGate, filterAttachableMedia, mediaAttachKey } from '@/lib/chatbot/attach-gate'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -674,6 +674,9 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
         ReturnType<typeof answerWithClassification>
       >['propertyRecommendation'] = null
       let selectedMedia: SelectedMediaAsset[] = []
+      // Whether this turn warrants attaching the selected media. Defaults to
+      // false so a path that never sets it never sends images.
+      let attachImages = false
       let topChunks: Awaited<ReturnType<typeof answerWithClassification>>['topChunks'] = []
       const activeCatalogPageId = sendablePages.find((p) => p.kind === 'catalog')?.id ?? null
       const activeRealestatePageId = sendablePages.find((p) => p.kind === 'realestate')?.id ?? null
@@ -715,6 +718,7 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
           productRecommendation = r.productRecommendation
           propertyRecommendation = r.propertyRecommendation
           selectedMedia = r.media
+          attachImages = r.attachImages
           topChunks = r.topChunks
         } catch (e) {
           console.error('[messenger.worker] combined call failed, falling back', e)
@@ -731,6 +735,7 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
         })
         reply = r.text.trim()
         selectedMedia = r.media
+        attachImages = r.attachImages
       }
       if (!reply) {
         await markDone(admin, job.id, 'skipped', 'empty reply')
@@ -850,10 +855,23 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
         jobId: job.id,
         threadId: thread.id,
         selectedCount: selectedMedia.length,
+        attachImages,
         slugs: selectedMedia.map((m) => m.slug),
         alreadySent: job.outbound_media.length,
       })
-      await sendSelectedMedia(admin, { job, thread, pageToken, selectedMedia })
+      // Respect the LLM's attach_images decision: only dispatch the selected
+      // knowledge media when this turn actually warrants images. Without this
+      // gate the bot re-sent proof/screenshot assets on every (even unrelated)
+      // turn, because the resolved candidates were sent unconditionally.
+      if (attachImages) {
+        await sendSelectedMedia(admin, {
+          job,
+          thread,
+          pageToken,
+          selectedMedia,
+          customerMessage: message,
+        })
+      }
 
       // Source-image attach: send first-mention product/payment images from RAG chunks
       if (topChunks && topChunks.length > 0) {
@@ -2032,6 +2050,9 @@ async function markDone(
     .eq('id', jobId)
 }
 
+// Max knowledge-media images attached in a single turn.
+const MEDIA_ATTACH_CAP = 4
+
 async function sendSelectedMedia(
   admin: AdminClient,
   args: {
@@ -2039,44 +2060,77 @@ async function sendSelectedMedia(
     thread: ThreadRow
     pageToken: string
     selectedMedia: SelectedMediaAsset[]
+    /** This turn's inbound customer text — used to detect "show me again"
+     *  visual intent so already-shown assets may be re-sent on request. */
+    customerMessage: string
   },
 ): Promise<void> {
   const sent = [...args.job.outbound_media]
   const sentIds = new Set(sent.map((m) => m.media_asset_id))
+  const attachedKeys = args.thread.attached_item_keys ?? []
+  const attachedSet = new Set(attachedKeys)
+
+  // Cross-turn dedup (mirrors the source-image firstMentionGate): an asset
+  // already shown on this thread is NOT re-sent on a later turn UNLESS the
+  // customer explicitly asks to see images again (visual intent). The
+  // within-job `outbound_media` set stays as the retry-idempotency guard.
+  const eligible = filterAttachableMedia({
+    candidates: args.selectedMedia,
+    sentAssetIds: [...sentIds],
+    attachedItemKeys: attachedKeys,
+    customerText: args.customerMessage,
+    maxPerTurn: MEDIA_ATTACH_CAP,
+  })
+
+  if (eligible.length === 0) {
+    console.log('[messenger.worker] media none eligible', {
+      jobId: args.job.id,
+      requested: args.selectedMedia.length,
+      alreadySent: sentIds.size,
+    })
+    return
+  }
+
+  // Sign every URL up front IN PARALLEL so the images dispatch back-to-back
+  // with no per-image signing round-trip stretching the gap between them.
+  const signed = await Promise.all(
+    eligible.map(async (asset) => {
+      const { data, error } = await admin.storage
+        .from('media-assets')
+        .createSignedUrl(asset.storagePath, 60 * 60)
+      return { asset, url: data?.signedUrl ?? null, error }
+    }),
+  )
+
+  const messageRows: Record<string, unknown>[] = []
+  const newKeys: string[] = []
   let sentThisCall = 0
 
-  for (const asset of args.selectedMedia.slice(0, 4)) {
-    if (sentIds.has(asset.id)) {
-      console.log('[messenger.worker] media skip dedup', {
-        jobId: args.job.id,
+  for (const { asset, url, error: signErr } of signed) {
+    if (signErr || !url) {
+      console.error('[messenger.worker] media sign failed', {
         assetId: asset.id,
         slug: asset.slug,
+        storagePath: asset.storagePath,
+        err: signErr instanceof Error ? signErr.message : String(signErr ?? 'signed URL missing'),
       })
       continue
     }
     try {
-      const { data: signed, error: signErr } = await admin.storage
-        .from('media-assets')
-        .createSignedUrl(asset.storagePath, 60 * 60)
-      if (signErr || !signed?.signedUrl) throw signErr ?? new Error('signed URL missing')
-
       const fb = await sendMessengerImage({
         pageAccessToken: args.pageToken,
         recipientPsid: args.thread.psid,
-        imageUrl: signed.signedUrl,
+        imageUrl: url,
       })
       sent.push({ media_asset_id: asset.id, fb_message_id: fb.message_id })
       sentIds.add(asset.id)
       sentThisCall++
+      // Persist outbound_media right after each send so a mid-loop crash /
+      // stale reclaim retry skips the already-sent asset (REL-5). This single
+      // small write is the only DB round-trip between sends; the inbox rows are
+      // batched after the loop so the images keep arriving back-to-back.
       await admin.from('messenger_jobs').update({ outbound_media: sent }).eq('id', args.job.id)
-      console.log('[messenger.worker] media sent', {
-        jobId: args.job.id,
-        assetId: asset.id,
-        slug: asset.slug,
-        fbMessageId: fb.message_id,
-      })
-
-      const { error: insertErr } = await admin.from('messenger_messages').insert({
+      messageRows.push({
         thread_id: args.thread.id,
         user_id: args.thread.user_id,
         direction: 'outbound',
@@ -2086,7 +2140,17 @@ async function sendSelectedMedia(
         body: `[image] ${asset.name}`,
         attachments: [{ type: 'image', media_asset_id: asset.id, storage_path: asset.storagePath }],
       })
-      if (insertErr && (insertErr as { code?: string }).code !== '23505') throw insertErr
+      const key = mediaAttachKey(asset.id)
+      if (!attachedSet.has(key)) {
+        attachedSet.add(key)
+        newKeys.push(key)
+      }
+      console.log('[messenger.worker] media sent', {
+        jobId: args.job.id,
+        assetId: asset.id,
+        slug: asset.slug,
+        fbMessageId: fb.message_id,
+      })
     } catch (e) {
       console.error('[messenger.worker] media send failed', {
         assetId: asset.id,
@@ -2096,9 +2160,39 @@ async function sendSelectedMedia(
       })
     }
   }
+
+  // Batch-insert the inbox rows in one round-trip. ignoreDuplicates handles the
+  // fb_message_id UNIQUE collision from a partial prior attempt (replaces the
+  // old per-row 23505 swallow). Inbox display is best-effort — a failed insert
+  // never blocks or unwinds the already-delivered images.
+  if (messageRows.length > 0) {
+    const { error: insertErr } = await admin
+      .from('messenger_messages')
+      .upsert(messageRows, { onConflict: 'fb_message_id', ignoreDuplicates: true })
+    if (insertErr) {
+      console.warn('[messenger.worker] media inbox-row insert failed', {
+        jobId: args.job.id,
+        err: insertErr.message,
+      })
+    }
+  }
+
+  // Persist the new cross-turn dedup keys once (capped, same array + slice(-100)
+  // budget the source-image path uses; mutate the in-memory thread so the
+  // source-image block below sees the merged set).
+  if (newKeys.length > 0) {
+    const merged = [...attachedKeys, ...newKeys].slice(-100)
+    await admin
+      .from('messenger_threads')
+      .update({ attached_item_keys: merged })
+      .eq('id', args.thread.id)
+    args.thread.attached_item_keys = merged
+  }
+
   console.log('[messenger.worker] media done', {
     jobId: args.job.id,
     requested: args.selectedMedia.length,
+    eligible: eligible.length,
     sentThisCall,
     totalSent: sent.length,
   })

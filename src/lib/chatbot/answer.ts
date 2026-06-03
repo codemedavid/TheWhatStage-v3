@@ -14,6 +14,7 @@ import { guardReply } from '@/lib/chatbot/reply-guard'
 import { redactForLlm } from '@/lib/chatbot/pii-redact'
 import { classifyIntentHeuristic } from '@/lib/chatbot/intent'
 import { selectReplyModel } from '@/lib/chatbot/model-router'
+import { recordUsage } from '@/lib/billing/recordUsage'
 
 export { findUngroundedContacts } from './reply-guard'
 
@@ -23,11 +24,13 @@ export interface AnswerResult {
   text: string
   sourceTitles: string[]
   media: SelectedMediaAsset[]
-  /** Whether the bot decided this turn's reply warrants attaching images.
-   *  Gates every image-send path (selected media, source-image first-mention,
-   *  sales-page hero). The fallback `answer()` path can't reason about this
-   *  per-turn, so it returns `media.length > 0` — operator-tagged explicit
-   *  @asset/#folder refs are trustworthy enough to keep sending. */
+  /** Whether this turn's reply warrants attaching the selected `media`. The
+   *  Messenger worker gates the media send on this flag — it skips
+   *  sendSelectedMedia when false — so `media` is only ever dispatched when
+   *  `attachImages` is true. (Source-image first-mention sends are gated
+   *  separately via firstMentionGate.) The fallback `answer()` path has no
+   *  structured per-turn decision, so it returns `media.length > 0`: operator
+   *  @asset/#folder refs that survived the relevance filter are trusted. */
   attachImages: boolean
 }
 
@@ -127,14 +130,15 @@ export async function answer(
     paymentEnumBlock: paymentBlock,
   })
 
-  // Scan ALL retrieved chunks (including grader-rejected ones) for @asset /
-  // #folder references. A standalone slug paragraph often gets a near-zero
-  // rerank score and lands in `reject`, which would otherwise hide its image
-  // even though the user explicitly attached it in the knowledge doc.
+  // Scan retrieved chunks for @asset / #folder references, but ONLY the
+  // useful/ambiguous buckets — NOT `reject`. Scanning reranker-rejected
+  // (irrelevant) chunks caused operator docs that merely mention a slug to
+  // re-attach their image on unrelated turns. This is the non-streaming
+  // fallback path with no structured attach_images decision, so the worker
+  // additionally gates the send on `attachImages` (= media.length > 0 here).
   const refChunks = [
     ...ctx.buckets.useful,
     ...ctx.buckets.ambiguous,
-    ...ctx.buckets.reject,
   ]
   const mediaPromise = selectMediaForReply({
     client: supabase,
@@ -187,6 +191,8 @@ export async function answer(
     systemChars: system.length,
     ms: Date.now() - t0,
   })
+  // Persist to the usage ledger for billing. Best-effort; never blocks the reply.
+  await recordUsage(supabase, userId, 'chatbot.answer', completion)
 
   const sourceTitles = await resolveSourceTitles(supabase, userId, built.contextChunkIds)
   console.log('[chatbot.answer] media resolved', {

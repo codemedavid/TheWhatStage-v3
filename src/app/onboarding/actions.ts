@@ -1077,16 +1077,27 @@ export async function saveFlowAction(
     .select('recommendation_rules, instructions')
     .eq('user_id', auth.user.id)
     .maybeSingle()
+  // Persist in the canonical snake_case shape that parseRecommendationRules
+  // reads. Earlier builds wrote camelCase here, which the parser silently
+  // dropped — keep merging from BOTH casings so we don't lose rules saved by a
+  // prior session, then write back snake_case only.
   const existing = (cfgRow?.recommendation_rules as Record<string, unknown> | null) ?? {}
-  const per = (existing.perActionPage as Record<string, unknown> | undefined) ?? {}
+  const per =
+    (existing.per_action_page as Record<string, unknown> | undefined) ??
+    (existing.perActionPage as Record<string, unknown> | undefined) ??
+    {}
+  const prevThreshold =
+    (existing.default_confidence_threshold as number | undefined) ??
+    (existing.defaultConfidenceThreshold as number | undefined) ??
+    0.55
   const next = {
-    defaultConfidenceThreshold: (existing.defaultConfidenceThreshold as number | undefined) ?? 0.55,
-    perActionPage: {
+    default_confidence_threshold: prevThreshold,
+    per_action_page: {
       ...per,
       [parsed.data.pageId]: {
         rules: parsed.data.recommendation_rules,
-        requiredSlots: parsed.data.required_slots,
-        confidenceThreshold: parsed.data.confidence_threshold,
+        required_slots: parsed.data.required_slots,
+        confidence_threshold: parsed.data.confidence_threshold,
       },
     },
   }

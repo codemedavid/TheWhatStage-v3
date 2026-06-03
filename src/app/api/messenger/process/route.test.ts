@@ -41,6 +41,7 @@ const mocks = vi.hoisted(() => ({
   sendMessengerReaction: vi.fn(async () => undefined),
   sendMessengerSenderAction: vi.fn(async () => undefined),
   sendMessengerText: vi.fn(async () => ({ message_id: 'mid.text.1' })),
+  sendMessengerImage: vi.fn(async () => ({ message_id: 'mid.img.1' })),
   deeplinkActionPageUrl: vi.fn(() => 'https://app.test/a/current?p=signed'),
   sendPropertyRecommendation: vi.fn(async () => ({
     sent: true,
@@ -78,6 +79,7 @@ vi.mock('@/lib/facebook/messenger', () => ({
   sendMessengerReaction: mocks.sendMessengerReaction,
   sendMessengerSenderAction: mocks.sendMessengerSenderAction,
   sendMessengerText: mocks.sendMessengerText,
+  sendMessengerImage: mocks.sendMessengerImage,
 }))
 
 vi.mock('@/lib/action-pages/urls', () => ({
@@ -167,6 +169,11 @@ function makeWorkerAdminMock() {
           single: async () => ({ data: { id: 'inserted-id' }, error: null }),
         }),
       }
+    }
+    upsert(payload: unknown) {
+      this.insertPayload = payload
+      inserts[this.table] = [...(inserts[this.table] ?? []), payload]
+      return { error: null }
     }
     async single() {
       return this.resolveSingle()
@@ -356,6 +363,14 @@ function makeWorkerAdminMock() {
       }
     }),
     from: vi.fn((table: string) => new Query(table)),
+    storage: {
+      from: () => ({
+        createSignedUrl: async (path: string) => ({
+          data: { signedUrl: `https://signed.test/${path}` },
+          error: null,
+        }),
+      }),
+    },
   }
 
   return { admin, inserts, updates }
@@ -443,6 +458,11 @@ function makeWorkerAdminMockWithRealestate(allSold = false) {
           single: async () => ({ data: { id: 'inserted-id' }, error: null }),
         }),
       }
+    }
+    upsert(payload: unknown) {
+      this.insertPayload = payload
+      inserts[this.table] = [...(inserts[this.table] ?? []), payload]
+      return { error: null }
     }
     async single() {
       return this.resolveSingle()
@@ -614,6 +634,14 @@ function makeWorkerAdminMockWithRealestate(allSold = false) {
       }
     }),
     from: vi.fn((table: string) => new Query(table)),
+    storage: {
+      from: () => ({
+        createSignedUrl: async (path: string) => ({
+          data: { signedUrl: `https://signed.test/${path}` },
+          error: null,
+        }),
+      }),
+    },
   }
 
   return { admin, inserts, updates }
@@ -837,6 +865,14 @@ function makeWorkerAdminMockWithPause(bot_paused_until: string | null) {
       }
     }),
     from: vi.fn((table: string) => new Query(table)),
+    storage: {
+      from: () => ({
+        createSignedUrl: async (path: string) => ({
+          data: { signedUrl: `https://signed.test/${path}` },
+          error: null,
+        }),
+      }),
+    },
   }
 
   return { admin, inserts, updates }
@@ -1010,6 +1046,69 @@ describe('POST /api/messenger/process', () => {
     expect(res.status).toBe(200)
     expect(mocks.sendPropertyRecommendation).toHaveBeenCalledTimes(1)
     expect(mocks.sendMessengerGenericTemplate).not.toHaveBeenCalled()
+  })
+
+  describe('knowledge-media attachment gate', () => {
+    const mediaAsset = (id: string) => ({
+      id,
+      folderId: 'f1',
+      name: `Proof ${id}`,
+      slug: `proof-${id}`,
+      description: null,
+      storagePath: `proofs/${id}.png`,
+      mimeType: 'image/png',
+      matchReason: 'asset_ref' as const,
+    })
+
+    it('attach_images:true → sends each asset full-size back-to-back (NOT a carousel) and records cross-turn keys', async () => {
+      const { admin, updates } = makeWorkerAdminMock()
+      mocks.admin = admin
+      mocks.answerWithClassification.mockResolvedValueOnce({
+        text: 'Eto po yung proof:',
+        sourceTitles: [],
+        stageChange: null,
+        actionPage: null,
+        productRecommendation: null,
+        propertyRecommendation: null,
+        media: [mediaAsset('m1'), mediaAsset('m2')],
+        attachImages: true,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } as any)
+
+      const res = await POST(makeWorkerRequest() as Parameters<typeof POST>[0])
+      expect(res.status).toBe(200)
+      // Full-size images, one bubble each (user-chosen delivery) — never a carousel.
+      expect(mocks.sendMessengerImage).toHaveBeenCalledTimes(2)
+      expect(mocks.sendMessengerGenericTemplate).not.toHaveBeenCalled()
+      // Cross-turn dedup keys persisted so later unrelated turns won't re-send.
+      const threadUpdates = (updates['messenger_threads'] ?? []) as Array<{ attached_item_keys?: unknown }>
+      const keyUpdate = threadUpdates.find((u) => Array.isArray(u.attached_item_keys))
+      expect(keyUpdate?.attached_item_keys).toEqual(
+        expect.arrayContaining(['media:m1', 'media:m2']),
+      )
+    })
+
+    it('attach_images:false → never sends media even if candidates leaked through', async () => {
+      const { admin } = makeWorkerAdminMock()
+      mocks.admin = admin
+      mocks.answerWithClassification.mockResolvedValueOnce({
+        text: 'Magkano po ang budget niyo?',
+        sourceTitles: [],
+        stageChange: null,
+        actionPage: null,
+        productRecommendation: null,
+        propertyRecommendation: null,
+        // classify already empties this on attach_images:false; assert the
+        // worker ALSO refuses to dispatch when the flag is false.
+        media: [mediaAsset('m1')],
+        attachImages: false,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } as any)
+
+      const res = await POST(makeWorkerRequest() as Parameters<typeof POST>[0])
+      expect(res.status).toBe(200)
+      expect(mocks.sendMessengerImage).not.toHaveBeenCalled()
+    })
   })
 
   describe('deep re-evaluation trigger', () => {

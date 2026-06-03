@@ -6,6 +6,7 @@ import { usePathname } from 'next/navigation'
 const tabs = [
   { href: '/dashboard/settings/profile', label: 'Profile' },
   { href: '/dashboard/settings/account', label: 'Account' },
+  { href: '/dashboard/settings/billing', label: 'Billing & Usage' },
   { href: '/dashboard/settings/facebook', label: 'Facebook' },
   { href: '/dashboard/settings/notifications', label: 'Notifications' },
 ]

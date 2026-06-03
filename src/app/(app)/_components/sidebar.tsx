@@ -25,8 +25,15 @@ type IconName =
   | 'reminders'
   | 'templates'
   | 'payments'
+  | 'university'
 
-type NavItem = { href: string; label: string; icon: IconName; requiresFacebookPage?: boolean }
+type NavItem = {
+  href: string
+  label: string
+  icon: IconName
+  requiresFacebookPage?: boolean
+  requiresSuperadmin?: boolean
+}
 
 const items: NavItem[] = [
   { href: '/dashboard', label: 'Overview', icon: 'overview' },
@@ -39,6 +46,7 @@ const items: NavItem[] = [
   { href: '/dashboard/payment-methods', label: 'Payment methods', icon: 'payments' },
   { href: '/dashboard/reminders', label: 'Reminders', icon: 'reminders' },
   { href: '/dashboard/media', label: 'Media', icon: 'media' },
+  { href: '/dashboard/university', label: 'University', icon: 'university', requiresSuperadmin: true },
   { href: '/dashboard/settings', label: 'Settings', icon: 'settings' },
 ]
 
@@ -167,6 +175,13 @@ function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
         <path d="M7 15h4" />
       </>
     ),
+    university: (
+      <>
+        <path d="M12 4 2 9l10 5 10-5-10-5Z" />
+        <path d="M6 11.5V16c0 1.5 2.7 3 6 3s6-1.5 6-3v-4.5" />
+        <path d="M21 9v5" />
+      </>
+    ),
   }
   return (
     <svg
@@ -189,14 +204,20 @@ export function Sidebar({
   userInitial = 'D',
   userName = 'David',
   hasFacebookPage = false,
+  isSuperadmin = false,
   pendingSuggestionCount = 0,
 }: {
   userInitial?: string
   userName?: string
   hasFacebookPage?: boolean
+  isSuperadmin?: boolean
   pendingSuggestionCount?: number
 } = {}) {
-  const visibleItems = items.filter((item) => !item.requiresFacebookPage || hasFacebookPage)
+  const visibleItems = items.filter(
+    (item) =>
+      (!item.requiresFacebookPage || hasFacebookPage) &&
+      (!item.requiresSuperadmin || isSuperadmin),
+  )
   const pathname = usePathname() ?? '/dashboard'
   const [collapsed, setCollapsed] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)

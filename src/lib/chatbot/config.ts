@@ -74,32 +74,59 @@ export const DEFAULT_CHATBOT_CONFIG: ChatbotConfig = {
 
 export function parseRecommendationRules(raw: unknown): RecommendationRulesMap {
   if (!raw || typeof raw !== 'object') return DEFAULT_RECOMMENDATION_RULES
-  const r = raw as { default_confidence_threshold?: unknown; per_action_page?: unknown }
-  const threshold =
-    typeof r.default_confidence_threshold === 'number' &&
-    r.default_confidence_threshold >= 0 &&
-    r.default_confidence_threshold <= 1
+  // Accept BOTH key casings. The onboarding writer (saveFlowAction) historically
+  // persisted camelCase (`per_action_page` → `perActionPage`, `required_slots`
+  // → `requiredSlots`, etc.), while this parser was written for snake_case. The
+  // mismatch silently dropped every configured rule, which disabled the
+  // `recommend_*` routing entirely (the bot would describe products/properties
+  // in prose instead of sending the card). Reading both casings recovers all
+  // already-saved rows without a migration.
+  const r = raw as {
+    default_confidence_threshold?: unknown
+    defaultConfidenceThreshold?: unknown
+    per_action_page?: unknown
+    perActionPage?: unknown
+  }
+  const rawThreshold =
+    typeof r.default_confidence_threshold === 'number'
       ? r.default_confidence_threshold
+      : typeof r.defaultConfidenceThreshold === 'number'
+        ? r.defaultConfidenceThreshold
+        : undefined
+  const threshold =
+    typeof rawThreshold === 'number' && rawThreshold >= 0 && rawThreshold <= 1
+      ? rawThreshold
       : DEFAULT_RECOMMENDATION_RULES.defaultConfidenceThreshold
 
   const perPage: Record<string, ActionPageRecommendationRules> = {}
-  const map = r.per_action_page
+  const map = r.per_action_page ?? r.perActionPage
   if (map && typeof map === 'object') {
     for (const [pageId, val] of Object.entries(map)) {
       if (!val || typeof val !== 'object') continue
-      const v = val as { rules?: unknown; required_slots?: unknown; confidence_threshold?: unknown }
+      const v = val as {
+        rules?: unknown
+        required_slots?: unknown
+        requiredSlots?: unknown
+        confidence_threshold?: unknown
+        confidenceThreshold?: unknown
+      }
       const rules = typeof v.rules === 'string' ? v.rules.trim() : ''
-      const requiredSlots = Array.isArray(v.required_slots)
+      const slotsRaw = Array.isArray(v.required_slots)
         ? v.required_slots
-            .map((s) => (typeof s === 'string' ? s.trim() : ''))
-            .filter((s): s is string => !!s)
-        : []
-      const conf =
-        typeof v.confidence_threshold === 'number' &&
-        v.confidence_threshold >= 0 &&
-        v.confidence_threshold <= 1
+        : Array.isArray(v.requiredSlots)
+          ? v.requiredSlots
+          : []
+      const requiredSlots = slotsRaw
+        .map((s) => (typeof s === 'string' ? s.trim() : ''))
+        .filter((s): s is string => !!s)
+      const confRaw =
+        typeof v.confidence_threshold === 'number'
           ? v.confidence_threshold
-          : threshold
+          : typeof v.confidenceThreshold === 'number'
+            ? v.confidenceThreshold
+            : undefined
+      const conf =
+        typeof confRaw === 'number' && confRaw >= 0 && confRaw <= 1 ? confRaw : threshold
       if (rules) perPage[pageId] = { rules, requiredSlots, confidenceThreshold: conf }
     }
   }

@@ -85,12 +85,13 @@ describe('saveFlowAction', () => {
 
     const cfgUpsert = chatbotConfigs.upsert.mock.calls[0][0]
     expect(cfgUpsert.user_id).toBe('u1')
-    expect(cfgUpsert.recommendation_rules.perActionPage[PAGE_ID]).toEqual({
+    // Canonical snake_case shape — must match what parseRecommendationRules reads.
+    expect(cfgUpsert.recommendation_rules.per_action_page[PAGE_ID]).toEqual({
       rules: 'Recommend booking if user mentions schedule.',
-      requiredSlots: ['name', 'phone'],
-      confidenceThreshold: 0.7,
+      required_slots: ['name', 'phone'],
+      confidence_threshold: 0.7,
     })
-    expect(cfgUpsert.recommendation_rules.defaultConfidenceThreshold).toBe(0.55)
+    expect(cfgUpsert.recommendation_rules.default_confidence_threshold).toBe(0.55)
 
     expect(markStep).toHaveBeenCalledWith('flow')
     expect(redirectMock).toHaveBeenCalledWith('/onboarding/done')
@@ -117,10 +118,12 @@ describe('saveFlowAction', () => {
       confidence_threshold: '0.55',
     }))).rejects.toThrowError(/NEXT_REDIRECT/)
 
+    // Existing row is legacy camelCase; the writer reads either casing, preserves
+    // the prior entry verbatim, and writes back the canonical snake_case shape.
     const next = chatbotConfigs.upsert.mock.calls[0][0].recommendation_rules
-    expect(next.defaultConfidenceThreshold).toBe(0.6)
-    expect(next.perActionPage['other-page-id']).toEqual({ rules: 'keep me', requiredSlots: [], confidenceThreshold: 0.5 })
-    expect(next.perActionPage[PAGE_ID]).toBeDefined()
+    expect(next.default_confidence_threshold).toBe(0.6)
+    expect(next.per_action_page['other-page-id']).toEqual({ rules: 'keep me', requiredSlots: [], confidenceThreshold: 0.5 })
+    expect(next.per_action_page[PAGE_ID]).toBeDefined()
   })
 
   it('returns save_failed when bot_send_instructions is too short', async () => {

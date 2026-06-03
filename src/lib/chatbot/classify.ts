@@ -21,6 +21,7 @@ import { paymentEnumBlock } from '@/lib/chatbot/payment-enum'
 import { guardReply } from '@/lib/chatbot/reply-guard'
 import { redactForLlm } from '@/lib/chatbot/pii-redact'
 import { manilaDateBlock } from '@/lib/time/manilaNow'
+import { recordUsage } from '@/lib/billing/recordUsage'
 
 export interface StageBrief {
   id: string
@@ -208,13 +209,15 @@ export async function answerWithClassification(
     : null
   const leadContext = options.leadContextBlock?.trim()
 
-  // Scan ALL retrieved chunks (including grader-rejected ones) for @asset /
-  // #folder references — a slug-only paragraph often scores low in the
-  // reranker and lands in `reject`, which would otherwise hide its image.
+  // Scan retrieved chunks for @asset / #folder references, but ONLY the
+  // useful/ambiguous buckets — NOT `reject`. `reject` holds reranker-judged
+  // IRRELEVANT chunks; any operator doc that merely mentions a slug (e.g.
+  // "see proof in @proof-shot") lands there on unrelated queries and would
+  // otherwise re-attach its image on every turn. The LLM's `attach_images`
+  // decision (enforced on the returned media below) is the final relevance gate.
   const refChunks = [
     ...ctx.buckets.useful,
     ...ctx.buckets.ambiguous,
-    ...ctx.buckets.reject,
   ]
   // Resolve media BEFORE the LLM call so the reply (which is a structured
   // JSON envelope) can tee up the attached images naturally in its `reply` field.
@@ -303,6 +306,8 @@ export async function answerWithClassification(
     systemChars: system.length,
     ms: Date.now() - t0,
   })
+  // Persist to the usage ledger for billing. Best-effort; never blocks the reply.
+  await recordUsage(supabase, userId, 'chatbot.classify', completion, options.threadId)
 
   const parsed = parseJson(raw)
   let text = ''
@@ -383,6 +388,7 @@ export async function answerWithClassification(
       systemChars: fallbackSystem.length,
       ms: Date.now() - tFb,
     })
+    await recordUsage(supabase, userId, 'chatbot.answer.fallback', fb, options.threadId)
     text = sanitizeReply(fb.text)
     text = guardReply({ text, grounding, fallbackMessage: config.fallbackMessage }).text
     stageChange = null
@@ -435,6 +441,7 @@ export async function answerWithClassification(
   console.log('[chatbot.classify] media resolved', {
     userId,
     count: media.length,
+    attachImages,
     slugs: media.map((m) => m.slug),
     refChunkCount: refChunks.length,
   })
@@ -447,7 +454,13 @@ export async function answerWithClassification(
     content: c.content,
     rrf_score: ('score' in c ? (c as { score: number }).score : 0),
   }))
-  return { text, sourceTitles, media, attachImages, stageChange, actionPage, productRecommendation, propertyRecommendation, topChunks }
+  // Enforce the LLM's attach_images decision. The resolved `media` are only
+  // CANDIDATES — surfaced to the model via mediaBlock above so it can tee them
+  // up — and must be emitted to the caller ONLY when the model opted in.
+  // Without this gate the Messenger worker re-sent the same proof/screenshot
+  // assets on every turn, even when the message was unrelated.
+  const gatedMedia = attachImages ? media : []
+  return { text, sourceTitles, media: gatedMedia, attachImages, stageChange, actionPage, productRecommendation, propertyRecommendation, topChunks }
 }
 
 /**
@@ -842,9 +855,10 @@ function recommendInstruction(
   return (
     '\n\n' +
     `${heading} — INTERNAL ROUTING ONLY:\n` +
-    `Set \`${fieldName}\` ONLY when ONE of these is true:\n` +
+    `Set \`${fieldName}\` whenever ANY of these is true:\n` +
     `  (a) The customer EXPLICITLY asks for a recommendation, suggestion, or "what do you have for…".\n` +
     '  (b) The operator rules below tell you to recommend at this point.\n' +
+    `  (c) You are about to present, name, or describe a SPECIFIC ${noun} as a good fit for the customer (e.g. you found a match for their stated budget, needs, or preferences). In that case you MUST route it through \`${fieldName}\` — NEVER describe the ${noun} in \`reply\`.\n` +
     `Otherwise, set \`${fieldName}\` to null and keep chatting normally.\n\n` +
     `Operator rules: ${rules.rules}\n` +
     slotsLine +
@@ -853,8 +867,9 @@ function recommendInstruction(
     `- \`query\` is a 1-sentence summary of what the customer is looking for, distilled from the conversation. Used for search — write it in clear English even if the customer wrote Tagalog.\n` +
     '- `filters.price_min` / `filters.price_max` are extracted from any budget the customer mentioned (in PHP, numbers only). null when not mentioned.\n' +
     '- `filters.tags` are short keywords (1–3 words each) the customer cares about. Empty array when none.\n' +
-    `- The system will pick the actual ${noun}, send the image and a card AUTOMATICALLY in a SEPARATE message. Do NOT name a specific ${noun}, price, or link in \`reply\`.\n` +
+    `- The system will pick the actual ${noun}, send the image and a card AUTOMATICALLY in a SEPARATE message. Do NOT name a specific ${noun}, its price, size, location, or any other detail, and do NOT include a link, in \`reply\`.\n` +
     '- `reply` should be a short, warm acknowledgement like "Got it — let me share the best fit 👇" in the customer\'s language. Do NOT describe the result itself.\n' +
+    `- IRON RULE: if you find yourself writing the NAME of a specific ${noun}, a specific price, floor area, bedroom count, or address inside \`reply\`, STOP — set \`${fieldName}\` instead and let the card carry those details. A ${noun} named in \`reply\` without \`${fieldName}\` set is a BUG the customer sees as a missing card.\n` +
     `- If the required slots are not yet filled, set \`${fieldName}\` to null and ask for the missing info in \`reply\` instead.`
   )
 }

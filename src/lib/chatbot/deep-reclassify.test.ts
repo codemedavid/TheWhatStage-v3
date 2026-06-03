@@ -13,7 +13,18 @@ vi.mock('@/lib/rag', async (orig) => {
   return {
     ...actual,
     HfRouterLlm: vi.fn().mockImplementation(function HfRouterLlmMock() {
-      return { complete: llmMocks.complete }
+      return {
+        complete: llmMocks.complete,
+        // deep-reclassify now calls completeWithUsage; wrap the same mock so the
+        // existing JSON-string fixtures still drive `.text`. usage:null makes
+        // recordUsage skip its insert, keeping these tests storage-agnostic.
+        completeWithUsage: async (...args: unknown[]) => ({
+          text: await (llmMocks.complete as (...a: unknown[]) => Promise<string>)(...args),
+          usage: null,
+          finishReason: null,
+          model: 'deepseek/deepseek-v4-flash',
+        }),
+      }
     }),
   }
 })

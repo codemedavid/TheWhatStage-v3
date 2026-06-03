@@ -3045,3 +3045,201 @@ body {
 }
 .afu-attach-thumb-x:hover { color: #ef4444; }
 .afu-attach-thumb-x:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ===================================================================== */
+/* === WhatStage University — public learner scope (catalog/detail/player) === */
+/* ===================================================================== */
+[data-university-root] {
+  /* Surfaces — paper, warmed a half-step from the app shell */
+  --uni-bg: #FBFAF6;
+  --uni-bg-deep: #F4F1E9;
+  --uni-surface: #FFFFFF;
+  --uni-surface-2: #F6F5F0;
+  --uni-surface-3: #EFEDE5;
+  --uni-border: #E8E6DE;
+  --uni-border-strong: #D9D5C9;
+
+  /* Ink ramp */
+  --uni-ink: #171510;
+  --uni-ink-2: #3C3A32;
+  --uni-ink-3: #6B6960;
+  --uni-ink-4: #9C9A8F;
+  --uni-ink-invert: #FBFAF6;
+
+  /* Accent — brand emerald */
+  --uni-accent: #1F7A4D;
+  --uni-accent-2: #166040;
+  --uni-accent-ink: #0F4A30;
+  --uni-accent-soft: #E8F2EC;
+  --uni-accent-softer: #F2F8F4;
+  --uni-accent-ring: rgba(31,122,77,0.22);
+  --uni-progress-from: #1F7A4D;
+  --uni-progress-to: #2EA86A;
+
+  /* Premium / subscriber — warm gold, reserved for "pay to unlock" */
+  --uni-gold: #A9792B;
+  --uni-gold-ink: #6E4E18;
+  --uni-gold-soft: #F6EEDD;
+  --uni-gold-border: #E7D6B0;
+  --uni-gold-grad: linear-gradient(135deg,#C79A48 0%,#A9792B 100%);
+
+  /* Auth-gate (sign-in) — neutral graphite ("free, just log in") */
+  --uni-locked: #6B6960;
+  --uni-locked-soft: #EFEDE5;
+
+  /* Resume marker — amber */
+  --uni-resume: #B8762B;
+
+  --uni-danger: #B23A2B;
+  --uni-danger-soft: #FBEBE7;
+
+  /* Video letterbox — the only dark surface in the public system */
+  --uni-stage-bg: #14120C;
+
+  /* Elevation */
+  --uni-shadow-sm: 0 1px 2px rgba(23,21,16,0.04);
+  --uni-shadow-md: 0 1px 3px rgba(23,21,16,0.05), 0 8px 24px rgba(23,21,16,0.05);
+  --uni-shadow-lg: 0 18px 48px -12px rgba(23,21,16,0.18);
+  --uni-shadow-card-hover: 0 14px 30px -16px rgba(23,21,16,0.22);
+
+  /* Radii */
+  --uni-r-sm: 8px;
+  --uni-r-md: 12px;
+  --uni-r-lg: 16px;
+  --uni-r-xl: 20px;
+
+  /* Type (reuse global font vars) */
+  --uni-serif: var(--font-instrument-serif), Georgia, serif;
+  --uni-sans: var(--font-geist-sans), -apple-system, sans-serif;
+  --uni-mono: var(--font-geist-mono), ui-monospace, monospace;
+
+  /* Layout */
+  --uni-maxw: 1180px;
+  --uni-maxw-read: 720px;
+
+  color: var(--uni-ink-2);
+  background: var(--uni-bg);
+  font-family: var(--uni-sans);
+  min-height: 100%;
+}
+
+[data-university-root] .uni-focus:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--uni-bg), 0 0 0 4px var(--uni-accent-ring);
+}
+[data-university-root] a { color: inherit; text-decoration: none; }
+[data-university-root] .uni-serif { font-family: var(--uni-serif); font-weight: 400; }
+[data-university-root] .uni-eyebrow {
+  font-family: var(--uni-mono); font-size: 11px; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--uni-ink-3); font-weight: 500;
+}
+[data-university-root] .uni-wrap { max-width: var(--uni-maxw); margin: 0 auto; padding: 0 24px; width: 100%; }
+
+/* Buttons */
+[data-university-root] .uni-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  height: 44px; padding: 0 18px; border-radius: var(--uni-r-md);
+  font-size: 14px; font-weight: 600; line-height: 1; cursor: pointer;
+  border: 1px solid transparent; transition: background .15s, border-color .15s, color .15s, transform .05s;
+  text-decoration: none; white-space: nowrap;
+}
+[data-university-root] .uni-btn:active { transform: translateY(0.5px); }
+[data-university-root] .uni-btn[disabled] { opacity: .55; cursor: not-allowed; }
+[data-university-root] .uni-btn-sm { height: 36px; padding: 0 14px; font-size: 13px; }
+[data-university-root] .uni-btn-primary { background: var(--uni-accent); color: #fff; }
+[data-university-root] .uni-btn-primary:hover { background: var(--uni-accent-2); }
+[data-university-root] .uni-btn-upgrade { background: var(--uni-gold-grad); color: #fff; }
+[data-university-root] .uni-btn-upgrade:hover { filter: brightness(0.97); }
+[data-university-root] .uni-btn-secondary { background: var(--uni-surface); border-color: var(--uni-border-strong); color: var(--uni-ink); }
+[data-university-root] .uni-btn-secondary:hover { background: var(--uni-surface-2); }
+[data-university-root] .uni-btn-ghost { background: transparent; color: var(--uni-ink-2); }
+[data-university-root] .uni-btn-ghost:hover { background: var(--uni-surface-2); }
+
+/* Card */
+[data-university-root] .uni-card {
+  background: var(--uni-surface); border: 1px solid var(--uni-border);
+  border-radius: var(--uni-r-lg); box-shadow: var(--uni-shadow-sm);
+}
+
+/* Access / status badges */
+[data-university-root] .uni-badge {
+  display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 9px;
+  border-radius: 999px; font-size: 11.5px; font-weight: 600; line-height: 1;
+  font-family: var(--uni-mono); letter-spacing: 0.02em;
+}
+[data-university-root] .uni-badge-free { background: var(--uni-surface-2); color: var(--uni-ink-3); }
+[data-university-root] .uni-badge-auth { background: var(--uni-locked-soft); color: var(--uni-ink-2); }
+[data-university-root] .uni-badge-pro { background: var(--uni-gold-soft); color: var(--uni-gold-ink); }
+[data-university-root] .uni-badge-completed { background: var(--uni-accent-soft); color: var(--uni-accent-ink); }
+[data-university-root] .uni-badge-progress { background: var(--uni-accent-softer); color: var(--uni-accent-ink); }
+
+/* Progress bar */
+[data-university-root] .uni-progress { height: 8px; border-radius: 999px; background: var(--uni-surface-3); overflow: hidden; }
+[data-university-root] .uni-progress > span {
+  display: block; height: 100%; border-radius: 999px;
+  background: linear-gradient(90deg, var(--uni-progress-from), var(--uni-progress-to));
+  transition: width .4s ease;
+}
+[data-university-root] .uni-progress-sm { height: 4px; }
+
+/* Lesson rows (shared curriculum list) */
+[data-university-root] .uni-lesson-row {
+  display: flex; align-items: center; gap: 12px; padding: 11px 14px;
+  border-radius: var(--uni-r-sm); border: 1px solid transparent; color: var(--uni-ink-2);
+}
+[data-university-root] .uni-lesson-row + .uni-lesson-row { border-top: 1px solid var(--uni-border); border-radius: 0; }
+[data-university-root] .uni-lesson-row:hover { background: var(--uni-surface-2); }
+[data-university-root] .uni-lesson-row.is-active { background: var(--uni-accent-softer); border-color: var(--uni-accent-soft); }
+[data-university-root] .uni-lesson-row.is-locked { color: var(--uni-ink-3); }
+[data-university-root] .uni-glyph-complete { color: var(--uni-accent); }
+[data-university-root] .uni-glyph-progress { color: var(--uni-resume); }
+[data-university-root] .uni-glyph-lock-auth { color: var(--uni-locked); }
+[data-university-root] .uni-glyph-lock-pro { color: var(--uni-gold); }
+
+/* Video stage */
+[data-university-root] .uni-stage {
+  position: relative; aspect-ratio: 16 / 9; width: 100%; background: var(--uni-stage-bg);
+  border-radius: var(--uni-r-lg); overflow: hidden; box-shadow: var(--uni-shadow-md);
+}
+[data-university-root] .uni-stage iframe,
+[data-university-root] .uni-stage video { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+
+/* Skeleton shimmer */
+[data-university-root] .uni-skeleton {
+  background: linear-gradient(90deg, var(--uni-surface-3) 25%, var(--uni-surface-2) 50%, var(--uni-surface-3) 75%);
+  background-size: 200% 100%; animation: uni-shimmer 1.4s ease-in-out infinite; border-radius: var(--uni-r-sm);
+}
+@keyframes uni-shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  [data-university-root] *, [data-university-root] *::before, [data-university-root] *::after {
+    animation: none !important; transition: none !important;
+  }
+}
+
+/* ===================================================================== */
+/* === WhatStage University — superadmin CMS scope === */
+/* ===================================================================== */
+[data-university-admin] {
+  --uni-admin-drop-line: var(--ws-accent);
+  --uni-admin-preview-bg: #14120C;
+  --uni-admin-valid: var(--ws-accent);
+  --uni-admin-invalid: var(--ws-warn);
+  --uni-admin-pro-bg: var(--ws-accent-soft);
+}
+[data-university-admin] .uni-access {
+  display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 9px;
+  border-radius: 999px; font-size: 11.5px; font-weight: 600; line-height: 1;
+}
+[data-university-admin] .uni-access.public { background: var(--ws-surface-3); color: var(--ws-ink-3); }
+[data-university-admin] .uni-access.authenticated { background: var(--ws-accent-softer); color: var(--ws-accent-ink); }
+[data-university-admin] .uni-access.subscriber { background: var(--ws-accent-soft); color: var(--ws-accent-ink); }
+[data-university-admin] .uni-lesson-drag.drag-over { box-shadow: inset 0 2px 0 var(--uni-admin-drop-line); }
+[data-university-admin] .uni-validity-ok { color: var(--uni-admin-valid); }
+[data-university-admin] .uni-validity-bad { color: var(--uni-admin-invalid); }
+[data-university-admin] .uni-embed-preview {
+  aspect-ratio: 16 / 9; width: 100%; background: var(--uni-admin-preview-bg);
+  border-radius: 10px; overflow: hidden;
+}
+[data-university-admin] .uni-embed-preview iframe,
+[data-university-admin] .uni-embed-preview video { width: 100%; height: 100%; border: 0; }

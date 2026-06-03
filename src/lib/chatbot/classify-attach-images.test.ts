@@ -25,7 +25,21 @@ vi.mock('@/lib/rag', () => ({
   createEmbedder: () => ({ embed: async () => [] }),
 }))
 
-vi.mock('@/lib/media/selector', () => ({ selectMediaForReply: async () => [] }))
+const mediaMocks = vi.hoisted(() => ({
+  selectMediaForReply: vi.fn(async () => [] as unknown[]),
+}))
+vi.mock('@/lib/media/selector', () => ({ selectMediaForReply: mediaMocks.selectMediaForReply }))
+
+const fakeAsset = (id: string) => ({
+  id,
+  folderId: 'f1',
+  name: `Asset ${id}`,
+  slug: `asset-${id}`,
+  description: null,
+  storagePath: `path/${id}.png`,
+  mimeType: 'image/png',
+  matchReason: 'asset_ref' as const,
+})
 
 vi.mock('@/lib/action-pages/force-send', () => ({
   decideForceSend: async () => ({
@@ -48,6 +62,8 @@ const supabase = {
 describe('answerWithClassification attach_images coercion', () => {
   beforeEach(() => {
     llmResponse = ''
+    mediaMocks.selectMediaForReply.mockReset()
+    mediaMocks.selectMediaForReply.mockResolvedValue([])
   })
 
   it('returns attachImages=true when the model sets attach_images:true', async () => {
@@ -80,5 +96,24 @@ describe('answerWithClassification attach_images coercion', () => {
     // Fallback path triggers; media selector is mocked to [] so attachImages
     // resolves to false (media.length > 0 === false).
     expect(r.attachImages).toBe(false)
+  })
+
+  it('emits resolved media when the model opts in (attach_images:true)', async () => {
+    mediaMocks.selectMediaForReply.mockResolvedValue([fakeAsset('m1'), fakeAsset('m2')])
+    llmResponse = JSON.stringify({ reply: 'Eto po yung proof.', attach_images: true })
+    const r = await answerWithClassification(supabase, 'u1', 'pakita mo yung proof', [], [], null)
+    expect(r.attachImages).toBe(true)
+    expect(r.media.map((m) => m.id)).toEqual(['m1', 'm2'])
+  })
+
+  it('gates resolved media to [] when the model opts out (attach_images:false)', async () => {
+    // The selector DID resolve candidate assets (a doc mentioned @asset), but
+    // the model decided this turn is unrelated — the gate must drop them so the
+    // worker never sends images on an unrelated turn.
+    mediaMocks.selectMediaForReply.mockResolvedValue([fakeAsset('m1'), fakeAsset('m2')])
+    llmResponse = JSON.stringify({ reply: 'Magkano po ang budget niyo?', attach_images: false })
+    const r = await answerWithClassification(supabase, 'u1', 'magkano?', [], [], null)
+    expect(r.attachImages).toBe(false)
+    expect(r.media).toEqual([])
   })
 })

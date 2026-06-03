@@ -1,12 +1,11 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { HfRouterLlm } from '@/lib/rag'
-import type { LlmMessage } from '@/lib/rag/llm'
+import type { LlmCompletion } from '@/lib/rag/llm'
 import { ragConfig } from '@/lib/rag/config'
 import { moveLeadToStage } from '@/lib/leads/move-stage'
+import { recordUsage } from '@/lib/billing/recordUsage'
 
-type LlmLike = { complete: (messages: LlmMessage[], opts?: { temperature?: number; maxTokens?: number; responseFormat?: 'json_object' }) => Promise<string> }
-
-function createLlm(): LlmLike {
+function createLlm(): HfRouterLlm {
   return new HfRouterLlm({ model: ragConfig.classifierModel })
 }
 
@@ -138,7 +137,10 @@ export async function runDeepReclassify(args: RunDeepReclassifyArgs): Promise<vo
       return
     }
 
-    const decision = await callLlm(ctx)
+    const { decision, completion } = await callLlm(ctx)
+    // Record token usage for billing (best-effort; the call cost tokens whether
+    // or not it yielded an actionable decision).
+    await recordUsage(admin, userId, 'deep.reclassify', completion, threadId)
     if (!decision) return
 
     // Same-stage skip
@@ -200,7 +202,6 @@ export async function runDeepReclassify(args: RunDeepReclassifyArgs): Promise<vo
       from: ctx.lead.stage_id,
       to: decision.to_stage_id,
     })
-    void userId
   } catch (e) {
     console.error('[deep-reclassify] threw', e)
   }
@@ -280,12 +281,14 @@ async function loadContext(
 // LLM call
 // ---------------------------------------------------------------------------
 
-async function callLlm(ctx: DeepContext): Promise<DeepDecision | null> {
+async function callLlm(
+  ctx: DeepContext,
+): Promise<{ decision: DeepDecision | null; completion: Pick<LlmCompletion, 'model' | 'usage'> }> {
   const llm = createLlm()
   const system = buildSystemPrompt(ctx)
   const userBlock = buildUserBlock(ctx)
 
-  const raw = await llm.complete(
+  const completion = await llm.completeWithUsage(
     [
       { role: 'system', content: system },
       { role: 'user', content: userBlock },
@@ -293,7 +296,7 @@ async function callLlm(ctx: DeepContext): Promise<DeepDecision | null> {
     { temperature: 0, maxTokens: 400, responseFormat: 'json_object' },
   )
 
-  return coerceDecision(raw)
+  return { decision: coerceDecision(completion.text), completion }
 }
 
 // ---------------------------------------------------------------------------

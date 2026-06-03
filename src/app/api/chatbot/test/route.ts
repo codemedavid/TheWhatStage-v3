@@ -141,10 +141,12 @@ export async function POST(req: NextRequest) {
           embedder,
           userId,
           customerMessage: message,
+          // Match production: scan only useful/ambiguous for @asset/#folder
+          // refs, NOT `reject` (reranker-judged irrelevant) — otherwise a doc
+          // that merely mentions a slug surfaces its image on every turn.
           retrievedChunks: [
             ...ctx.buckets.useful,
             ...ctx.buckets.ambiguous,
-            ...ctx.buckets.reject,
           ],
           limit: 4,
         })

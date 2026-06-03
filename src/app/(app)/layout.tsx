@@ -57,6 +57,7 @@ async function SidebarWithSession() {
       userInitial={initial}
       userName={session.fullName || 'Account'}
       hasFacebookPage={hasFacebookPage}
+      isSuperadmin={session.role === 'superadmin'}
       pendingSuggestionCount={pendingSuggestionCount}
     />
   )

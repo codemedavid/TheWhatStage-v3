@@ -2,6 +2,10 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { getSession } from '@/lib/auth/get-session'
 import { isAccountStatus, type AccountStatus } from '@/lib/auth/account-status'
 import { UserRowActions } from './UserRowActions'
+import { UserTierToggle } from './UserTierToggle'
+import SuperadminUsage from './SuperadminUsage'
+
+type SubscriptionTier = 'free' | 'pro'
 
 type ProfileRow = {
   id: string
@@ -9,6 +13,7 @@ type ProfileRow = {
   full_name: string
   role: 'user' | 'admin' | 'superadmin'
   status: AccountStatus
+  subscription_tier: SubscriptionTier
   created_at: string
 }
 
@@ -25,13 +30,14 @@ export default async function SuperadminDashboard({ userName }: { userName: stri
   const supabase = createAdminClient()
   const { data, error } = await supabase
     .from('profiles')
-    .select('id, email, full_name, role, status, created_at')
+    .select('id, email, full_name, role, status, subscription_tier, created_at')
     .order('created_at', { ascending: false })
 
-  const profiles = ((data ?? []) as Array<Omit<ProfileRow, 'status'> & { status: string }>)
+  const profiles = ((data ?? []) as Array<Omit<ProfileRow, 'status' | 'subscription_tier'> & { status: string; subscription_tier: string | null }>)
     .map<ProfileRow>((p) => ({
       ...p,
       status: isAccountStatus(p.status) ? p.status : 'active',
+      subscription_tier: p.subscription_tier === 'pro' ? 'pro' : 'free',
     }))
     .sort((a, b) => STATUS_SORT[a.status] - STATUS_SORT[b.status])
 
@@ -59,6 +65,7 @@ export default async function SuperadminDashboard({ userName }: { userName: stri
                 <th className="px-4 py-3 font-medium">Name</th>
                 <th className="px-4 py-3 font-medium">Email</th>
                 <th className="px-4 py-3 font-medium">Role</th>
+                <th className="px-4 py-3 font-medium">Tier</th>
                 <th className="px-4 py-3 font-medium">Status</th>
                 <th className="px-4 py-3 font-medium">Joined</th>
                 <th className="px-4 py-3 font-medium text-right">Actions</th>
@@ -86,6 +93,15 @@ export default async function SuperadminDashboard({ userName }: { userName: stri
                       </span>
                     </td>
                     <td className="px-4 py-3">
+                      {p.role === 'user' ? (
+                        <UserTierToggle userId={p.id} tier={p.subscription_tier} />
+                      ) : (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">
+                          ✦ Pro <span className="text-emerald-500">(role)</span>
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
                       <span className={statusBadgeClass[p.status]}>{p.status}</span>
                     </td>
                     <td className="px-4 py-3 text-neutral-500">
@@ -103,7 +119,7 @@ export default async function SuperadminDashboard({ userName }: { userName: stri
               })}
               {profiles.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-neutral-500">
+                  <td colSpan={7} className="px-4 py-8 text-center text-neutral-500">
                     No users found.
                   </td>
                 </tr>
@@ -112,6 +128,8 @@ export default async function SuperadminDashboard({ userName }: { userName: stri
           </table>
         </div>
       )}
+
+      <SuperadminUsage />
     </div>
   )
 }

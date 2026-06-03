@@ -4,12 +4,15 @@ import { isAccountStatus, type AccountStatus } from './account-status'
 
 export type Role = 'user' | 'admin' | 'superadmin'
 
+export type SubscriptionTier = 'free' | 'pro'
+
 export type SessionContext = {
   userId: string
   email: string
   fullName: string
   role: Role
   status: AccountStatus
+  subscriptionTier: SubscriptionTier
 }
 
 export const getSession = cache(async (): Promise<SessionContext | null> => {
@@ -19,7 +22,7 @@ export const getSession = cache(async (): Promise<SessionContext | null> => {
 
   const { data: profile } = await supabase
     .from('profiles')
-    .select('full_name, role, status')
+    .select('full_name, role, status, subscription_tier')
     .eq('id', user.id)
     .single()
 
@@ -30,6 +33,9 @@ export const getSession = cache(async (): Promise<SessionContext | null> => {
 
   const status: AccountStatus = isAccountStatus(profile?.status) ? profile.status : 'active'
 
+  const subscriptionTier: SubscriptionTier =
+    profile?.subscription_tier === 'pro' ? 'pro' : 'free'
+
   // Superadmin is never gated — they own the kill switch.
   if (status !== 'active' && role !== 'superadmin') return null
 
@@ -39,5 +45,6 @@ export const getSession = cache(async (): Promise<SessionContext | null> => {
     fullName: profile?.full_name ?? '',
     role,
     status,
+    subscriptionTier,
   }
 })
