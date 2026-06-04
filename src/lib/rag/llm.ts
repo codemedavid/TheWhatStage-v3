@@ -30,6 +30,16 @@ export interface LlmUsage {
    * observability only.
    */
   cacheMissPromptTokens: number | null;
+  /**
+   * Provider-reported exact charge for this call, in USD, when the route
+   * surfaces it (OpenRouter returns `usage.cost` when usage-accounting is
+   * enabled on the request). This is the SOURCE OF TRUTH for billing — it
+   * already reflects the provider's real per-tier rates, cache-read discount,
+   * and any margin, so `recordUsage` prefers it over the estimated price map.
+   * Optional/undefined when the provider does not report a cost (then the
+   * price-map estimate in `pricing.ts` is used as a fallback).
+   */
+  costUsd?: number | null;
 }
 
 /**
@@ -43,6 +53,8 @@ interface UsageWithCacheFields {
   prompt_tokens_details?: { cached_tokens?: number | null } | null;
   prompt_cache_hit_tokens?: number | null;
   prompt_cache_miss_tokens?: number | null;
+  /** OpenRouter usage-accounting: exact charge for the call in USD. */
+  cost?: number | null;
 }
 
 export interface LlmCompletion {
@@ -55,6 +67,14 @@ export interface LlmCompletion {
 export class HfRouterLlm {
   private client: OpenAI;
   private model: string;
+  /**
+   * Whether to ask the provider for usage accounting (`usage: {include: true}`),
+   * which makes OpenRouter return the exact per-call `usage.cost`. Gated to the
+   * OpenRouter base URL so we never send the extension to a stricter
+   * OpenAI-compatible server (HF router / Groq) that might reject an unknown
+   * body field.
+   */
+  private usageAccounting: boolean;
 
   constructor(opts?: { token?: string; model?: string; baseURL?: string }) {
     const apiKey = opts?.token ?? ragConfig.llmApiKey;
@@ -76,6 +96,7 @@ export class HfRouterLlm {
       timeout: 60_000,
     });
     this.model = opts?.model ?? ragConfig.llmModel;
+    this.usageAccounting = baseURL.includes('openrouter');
   }
 
   async complete(
@@ -111,6 +132,12 @@ export class HfRouterLlm {
       ...(opts.responseFormat
         ? { response_format: { type: opts.responseFormat } }
         : {}),
+      // OpenRouter usage accounting: makes the response include `usage.cost`
+      // (provider-exact USD charge) so billing does not rely on the estimated
+      // price map. Spread so it is omitted entirely off OpenRouter.
+      ...(this.usageAccounting
+        ? ({ usage: { include: true } } as Record<string, unknown>)
+        : {}),
     });
     const choice = r.choices[0];
     const usage = r.usage
@@ -119,12 +146,14 @@ export class HfRouterLlm {
           const cachedPromptTokens =
             u.prompt_tokens_details?.cached_tokens ?? u.prompt_cache_hit_tokens ?? null;
           const cacheMissPromptTokens = u.prompt_cache_miss_tokens ?? null;
+          const costUsd = typeof u.cost === 'number' ? u.cost : null;
           return {
             promptTokens: r.usage!.prompt_tokens ?? 0,
             completionTokens: r.usage!.completion_tokens ?? 0,
             totalTokens: r.usage!.total_tokens ?? 0,
             cachedPromptTokens,
             cacheMissPromptTokens,
+            costUsd,
           };
         })()
       : null;

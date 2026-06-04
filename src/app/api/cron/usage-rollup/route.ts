@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { checkUsageHealth, type UsageHealth } from '@/lib/billing/usage-alerts'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -29,5 +30,14 @@ export async function GET(req: Request) {
     return NextResponse.json({ ok: false, error: error.message }, { status: 500 })
   }
 
-  return NextResponse.json({ ok: true, rowsUpserted: data ?? 0 })
+  // Usage-health watchdog: cache-hit collapse / cost spike (best-effort — never
+  // fail the rollup on it). Raises a Sentry warning internally on anomaly.
+  let health: UsageHealth | null = null
+  try {
+    health = await checkUsageHealth(admin)
+  } catch (e) {
+    console.error('[cron.usage-rollup] usage-health check failed', e)
+  }
+
+  return NextResponse.json({ ok: true, rowsUpserted: data ?? 0, health })
 }
