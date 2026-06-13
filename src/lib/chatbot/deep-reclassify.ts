@@ -140,7 +140,7 @@ export async function runDeepReclassify(args: RunDeepReclassifyArgs): Promise<vo
     const { decision, completion } = await callLlm(ctx)
     // Record token usage for billing (best-effort; the call cost tokens whether
     // or not it yielded an actionable decision).
-    await recordUsage(admin, userId, 'deep.reclassify', completion, threadId)
+    await recordUsage(admin, userId, 'deep.reclassify', completion, threadId, `deepreclass:${threadId}:${windowIndex}`)
     if (!decision) return
 
     // Same-stage skip

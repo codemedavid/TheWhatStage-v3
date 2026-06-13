@@ -5,8 +5,9 @@
 // (src/lib/university/admin.ts), which is the only content writer.
 
 import { z } from 'zod'
-import { revalidatePath } from 'next/cache'
+import { revalidatePath, revalidateTag } from 'next/cache'
 import { getSession } from '@/lib/auth/get-session'
+import { UNIVERSITY_CATALOG_TAG } from '@/lib/university/data'
 import {
   saveCourse,
   deleteCourse,
@@ -25,6 +26,12 @@ async function requireSuperadmin(): Promise<{ ok: true; userId: string } | { ok:
 }
 
 function revalidateAll() {
+  // Invalidate the cached published content (catalog + every per-course entry,
+  // which all carry this tag). revalidatePath alone does NOT clear
+  // unstable_cache entries, so the tag revalidation is required for freshness.
+  // 'max' = stale-while-revalidate; superadmins read the live path so they
+  // always see their edit immediately, end-users get fresh content in the bg.
+  revalidateTag(UNIVERSITY_CATALOG_TAG, 'max')
   revalidatePath('/dashboard/university')
   revalidatePath('/university')
 }
@@ -116,6 +123,8 @@ export async function createCategoryAction(
 
   const result = await createCategory(slug, trimmed)
   if (!result.ok) return result
+  // Categories are part of the cached public catalog (filter chips).
+  revalidateTag(UNIVERSITY_CATALOG_TAG, 'max')
   revalidatePath('/dashboard/university')
   return { ok: true, category: { id: result.id, slug: result.slug, name: result.name } }
 }

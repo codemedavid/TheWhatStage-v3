@@ -8,6 +8,9 @@ const SUBSCRIBED_FIELDS = [
   'feed',
   // Required for utility-message template approval/rejection events from Meta.
   'message_template_status_update',
+  // Required for human-takeover detection: page-admin replies from Page
+  // Inbox / Business Suite / the Messenger app only reach us as echoes.
+  'message_echoes',
 ].join(',')
 
 // Retry transient Graph failures (429 throttling, 5xx) before bubbling up to

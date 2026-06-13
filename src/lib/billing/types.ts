@@ -1,6 +1,6 @@
 /**
  * Usage-billing scope taxonomy. Mirrors the `public.llm_usage_scope` Postgres
- * enum (migration 20260609000000_llm_usage_events.sql) — keep the two in sync.
+ * enum (migration 20260602134254_llm_usage_events.sql) — keep the two in sync.
  *
  * Phase 1 actively records the first three (the chat reply path, ~90% of spend).
  * The rest are reserved for Phase 2 when the summary / comment / deep-reclassify

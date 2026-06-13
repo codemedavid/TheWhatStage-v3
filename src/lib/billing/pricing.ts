@@ -47,15 +47,32 @@ export interface TokenCounts {
 }
 
 /**
+ * Whether we have a price entry for this model. Callers (recordUsage) use this
+ * to flag rows whose cost fell back to $0 because the model is unpriced, so that
+ * gap is detectable and back-fillable rather than silent.
+ */
+export function isModelPriced(model: string): boolean {
+  return Object.prototype.hasOwnProperty.call(PRICES, model)
+}
+
+// Warn at most once per model per process so an unpriced model doesn't flood the
+// logs on the hot path (recordUsage additionally raises a Sentry alert + flags
+// the row). Module-scoped, intentionally not reset between calls.
+const warnedUnpricedModels = new Set<string>()
+
+/**
  * Convert a call's token counts to USD micros for the given model. Splits the
  * prompt into fresh vs. cached input so the live DeepSeek prefix cache shows up
- * as real savings. Returns 0 for an unknown model (and warns once via console)
- * so an unpriced model never silently bills as huge or crashes the worker.
+ * as real savings. Returns 0 for an unknown model (warning once per model) so an
+ * unpriced model never silently bills as huge or crashes the worker.
  */
 export function costMicros(model: string, t: TokenCounts): number {
   const p = PRICES[model]
   if (!p) {
-    console.warn('[billing.pricing] no price entry for model — billing as $0', { model })
+    if (!warnedUnpricedModels.has(model)) {
+      warnedUnpricedModels.add(model)
+      console.warn('[billing.pricing] no price entry for model — billing as $0', { model })
+    }
     return 0
   }
   const freshInput = Math.max(0, t.promptTokens - t.cachedPromptTokens)
@@ -63,6 +80,18 @@ export function costMicros(model: string, t: TokenCounts): number {
     (freshInput / 1e6) * p.inputPerM +
     (t.cachedPromptTokens / 1e6) * p.cachedInputPerM +
     (t.completionTokens / 1e6) * p.outputPerM
+  return Math.round(usd * 1e6)
+}
+
+/**
+ * Convert a provider-reported USD charge (e.g. OpenRouter `usage.cost`) to
+ * integer USD micros (USD * 1e6) for the ledger. Preferred over `costMicros`
+ * whenever the provider surfaces an exact cost, since that already encodes the
+ * real per-tier rates, cache-read discount, and provider margin — none of which
+ * the estimated `PRICES` map can track precisely.
+ */
+export function microsFromUsd(usd: number): number {
+  if (!Number.isFinite(usd) || usd < 0) return 0
   return Math.round(usd * 1e6)
 }
 

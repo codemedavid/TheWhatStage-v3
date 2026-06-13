@@ -18,7 +18,16 @@ export default async function DashboardPage() {
   const supabase = await createClient()
 
   const now = new Date()
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString()
+  // "Today" must start at Asia/Manila midnight (UTC+8), not the server's local
+  // midnight (UTC on Vercel) — otherwise "today" disagrees with the rest of the
+  // app, which buckets days in Manila. Week/month stay rolling windows.
+  const manilaDay = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Manila',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(now)
+  const startOfToday = new Date(`${manilaDay}T00:00:00+08:00`).toISOString()
   const startOfWeek = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString()
   const startOfMonth = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString()
 

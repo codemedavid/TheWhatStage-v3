@@ -5,10 +5,12 @@
 // This module MUST NEVER select from university_lesson_sources — the playable
 // source is obtained ONLY via playback.ts -> get_lesson_playback() RPC.
 
+import { unstable_cache } from 'next/cache'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 import type { SessionContext } from '@/lib/auth/get-session'
-import { getEntitlement, type Entitlement } from './access'
+import { getEntitlement, isSuperadmin, type Entitlement } from './access'
 import { coursePct, fetchAllProgress, fetchCourseProgress, type ProgressRow } from './progress'
 import type {
   AccessLevel,
@@ -53,6 +55,116 @@ const COURSE_COLS_DETAIL =
   'id, slug, title, subtitle, description, cover_image_url, access_level, status, lesson_count, total_duration_seconds, position, category:university_categories(slug, name)'
 const LESSON_COLS = 'id, slug, title, summary, provider, duration_seconds, position, is_preview'
 
+// ---------------------------------------------------------------------------
+// Cached content layer (session-independent, published-only).
+//
+// Published course/lesson/category CONTENT is identical for every viewer and
+// only changes when a superadmin edits via the CMS, so we cache it across
+// requests with unstable_cache and invalidate on-demand by tag (see actions.ts).
+// Per-user data (progress, entitlement) is layered on live, below.
+//
+// SECURITY: these readers use the service-role client but ALWAYS filter
+// status='published', so they can only ever return what an anonymous viewer
+// would see via RLS — no draft leak. They never touch university_lesson_sources.
+// Superadmin draft preview is served by the LIVE path (loadCourseContent),
+// which uses the cookie-bound client and RLS.
+
+/** Tag carried by EVERY cached university-content entry. Revalidating it
+ *  invalidates the catalog and all per-course content in one shot. */
+export const UNIVERSITY_CATALOG_TAG = 'university-catalog'
+/** Per-course tag for targeted invalidation. */
+export function universityCourseTag(slug: string): string {
+  return `university-course:${slug}`
+}
+// Time-based safety net; on-demand revalidateTag is the primary mechanism.
+const CONTENT_REVALIDATE_SECONDS = 60 * 60
+
+type CatalogContent = { courses: CourseRow[]; categories: CategoryVM[] }
+type CourseContent = { course: CourseRow; lessons: LessonRow[] }
+
+const getCatalogContent = unstable_cache(
+  async (): Promise<CatalogContent> => {
+    const admin = createAdminClient()
+    const [coursesRes, categoriesRes] = await Promise.all([
+      admin
+        .from('university_courses')
+        .select(COURSE_COLS)
+        .eq('status', 'published')
+        .order('position', { ascending: true })
+        .order('created_at', { ascending: false }),
+      admin.from('university_categories').select('slug, name').order('position', { ascending: true }),
+    ])
+    return {
+      courses: (coursesRes.data ?? []) as CourseRow[],
+      categories: (categoriesRes.data ?? []) as CategoryVM[],
+    }
+  },
+  ['university-catalog-content'],
+  { tags: [UNIVERSITY_CATALOG_TAG], revalidate: CONTENT_REVALIDATE_SECONDS },
+)
+
+/** Cached published course content by slug. The per-slug tag enables targeted
+ *  invalidation; the catalog tag is also attached so a single revalidate of
+ *  UNIVERSITY_CATALOG_TAG clears every course entry too. */
+function getCourseContentCached(slug: string): Promise<CourseContent | null> {
+  return unstable_cache(
+    async (): Promise<CourseContent | null> => {
+      const admin = createAdminClient()
+      const { data: courseData } = await admin
+        .from('university_courses')
+        .select(COURSE_COLS_DETAIL)
+        .eq('slug', slug)
+        .eq('status', 'published')
+        .maybeSingle()
+      if (!courseData) return null
+      const course = courseData as CourseRow
+      const { data: lessonData } = await admin
+        .from('university_lessons')
+        .select(LESSON_COLS)
+        .eq('course_id', course.id)
+        .order('position', { ascending: true })
+        .order('created_at', { ascending: true })
+      return { course, lessons: (lessonData ?? []) as LessonRow[] }
+    },
+    ['university-course-content', slug],
+    { tags: [UNIVERSITY_CATALOG_TAG, universityCourseTag(slug)], revalidate: CONTENT_REVALIDATE_SECONDS },
+  )()
+}
+
+/** Live, RLS-gated course content (cookie client). Used ONLY for superadmin so
+ *  draft preview on the public site keeps working — drafts must never be cached. */
+async function getCourseContentLive(
+  supabase: SupabaseClient,
+  slug: string,
+): Promise<CourseContent | null> {
+  const { data: courseData } = await supabase
+    .from('university_courses')
+    .select(COURSE_COLS_DETAIL)
+    .eq('slug', slug)
+    .maybeSingle()
+  if (!courseData) return null
+  const course = courseData as CourseRow
+  const { data: lessonData } = await supabase
+    .from('university_lessons')
+    .select(LESSON_COLS)
+    .eq('course_id', course.id)
+    .order('position', { ascending: true })
+    .order('created_at', { ascending: true })
+  return { course, lessons: (lessonData ?? []) as LessonRow[] }
+}
+
+/** Acquire course content: cached published for everyone, live (drafts) for superadmin. */
+async function loadCourseContent(
+  session: SessionContext | null,
+  slug: string,
+): Promise<CourseContent | null> {
+  if (isSuperadmin(session)) {
+    const supabase = await createClient()
+    return getCourseContentLive(supabase, slug)
+  }
+  return getCourseContentCached(slug)
+}
+
 function stripId<T extends { id: string }>(o: T): Omit<T, 'id'> {
   const copy: Record<string, unknown> = { ...o }
   delete copy.id
@@ -93,40 +205,25 @@ export type CatalogData = {
 }
 
 export async function getCatalog(session: SessionContext | null): Promise<CatalogData> {
-  const supabase = await createClient()
-
-  const [coursesRes, categoriesRes] = await Promise.all([
-    supabase
-      .from('university_courses')
-      .select(COURSE_COLS)
-      .eq('status', 'published')
-      .order('position', { ascending: true })
-      .order('created_at', { ascending: false }),
-    supabase
-      .from('university_categories')
-      .select('slug, name')
-      .order('position', { ascending: true }),
-  ])
-
-  const courseRows = (coursesRes.data ?? []) as CourseRow[]
-  const categories = (categoriesRes.data ?? []) as CategoryVM[]
+  // Published catalog content is shared across all viewers → served from cache.
+  const { courses: courseRows, categories } = await getCatalogContent()
 
   const completedByCourse = new Map<string, number>()
   let progressRows: ProgressRow[] = []
+  let continueItems: ResumeVM[] = []
   if (session) {
+    // Per-user progress overlay stays live (RLS owner-only, cookie client).
+    const supabase = await createClient()
     progressRows = await fetchAllProgress(supabase, session.userId)
     for (const p of progressRows) {
       if (p.completed_at) completedByCourse.set(p.course_id, (completedByCourse.get(p.course_id) ?? 0) + 1)
     }
+    continueItems = await buildContinueItems(supabase, courseRows, progressRows, completedByCourse)
   }
 
   const courses = courseRows.map((c) =>
     mapCourseCard(c, session ? { total: c.lesson_count, completed: completedByCourse.get(c.id) ?? 0 } : undefined),
   )
-
-  const continueItems = session
-    ? await buildContinueItems(supabase, courseRows, progressRows, completedByCourse)
-    : []
 
   return { courses, categories, continueItems }
 }
@@ -197,29 +294,19 @@ type LoadedCourse = {
 }
 
 async function loadCourseWithLessons(
-  supabase: SupabaseClient,
   session: SessionContext | null,
   courseSlug: string,
 ): Promise<LoadedCourse | null> {
-  const { data: courseData } = await supabase
-    .from('university_courses')
-    .select(COURSE_COLS_DETAIL)
-    .eq('slug', courseSlug)
-    .maybeSingle()
-  if (!courseData) return null
-  const course = courseData as CourseRow
-
-  const { data: lessonData } = await supabase
-    .from('university_lessons')
-    .select(LESSON_COLS)
-    .eq('course_id', course.id)
-    .order('position', { ascending: true })
-    .order('created_at', { ascending: true })
-  const lessonRows = (lessonData ?? []) as LessonRow[]
+  // Content: cached published rows (or live drafts for superadmin preview).
+  const content = await loadCourseContent(session, courseSlug)
+  if (!content) return null
+  const { course, lessons: lessonRows } = content
 
   const progressByLesson = new Map<string, ProgressRow>()
   let completed = 0
   if (session) {
+    // Per-user progress overlay stays live (RLS owner-only, cookie client).
+    const supabase = await createClient()
     const rows = await fetchCourseProgress(supabase, session.userId, course.id)
     for (const r of rows) {
       progressByLesson.set(r.lesson_id, r)
@@ -291,8 +378,7 @@ export async function getCourseDetail(
   session: SessionContext | null,
   courseSlug: string,
 ): Promise<CourseDetailData | null> {
-  const supabase = await createClient()
-  const loaded = await loadCourseWithLessons(supabase, session, courseSlug)
+  const loaded = await loadCourseWithLessons(session, courseSlug)
   if (!loaded) return null
   return {
     course: loaded.course,
@@ -318,8 +404,7 @@ export async function loadLessonContext(
   courseSlug: string,
   lessonSlug: string,
 ): Promise<LessonContextData | null> {
-  const supabase = await createClient()
-  const loaded = await loadCourseWithLessons(supabase, session, courseSlug)
+  const loaded = await loadCourseWithLessons(session, courseSlug)
   if (!loaded) return null
 
   const idx = loaded.lessons.findIndex((l) => l.slug === lessonSlug)

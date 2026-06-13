@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { costMicros } from './pricing'
+import { costMicros, isModelPriced } from './pricing'
 
 const MODEL = 'deepseek/deepseek-v4-flash'
 
@@ -53,5 +53,12 @@ describe('costMicros', () => {
     expect(got).toBe(0)
     expect(warn).toHaveBeenCalled()
     warn.mockRestore()
+  })
+})
+
+describe('isModelPriced', () => {
+  it('is true for a known model and false for an unknown one', () => {
+    expect(isModelPriced(MODEL)).toBe(true)
+    expect(isModelPriced('meta-llama/Llama-3.3-70B-Instruct:groq')).toBe(false)
   })
 })

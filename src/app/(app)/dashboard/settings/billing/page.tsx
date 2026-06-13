@@ -22,7 +22,6 @@ export default async function BillingSettingsPage() {
     year: 'numeric',
   }).format(new Date())
 
-  const costUsd = quota.costMicros / 1e6
   const pct = quota.ratio != null ? Math.round(quota.ratio * 100) : null
   const barWidth = quota.ratio != null ? Math.min(100, Math.round(quota.ratio * 100)) : 0
 
@@ -77,15 +76,13 @@ export default async function BillingSettingsPage() {
         </div>
       </div>
 
-      {/* Estimated cost */}
+      {/* Usage detail */}
       <div className="rounded-xl border border-[#E5E7EB] bg-white p-6 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
-        <h2 className="text-[15px] font-semibold text-[#111827]">Estimated cost</h2>
+        <h2 className="text-[15px] font-semibold text-[#111827]">About your usage</h2>
         <p className="mt-1 text-[13px] text-[#6B7280]">
-          AI usage cost so far this month. Estimate only — final billing in pesos arrives with checkout.
+          Usage is measured in tokens — the units your AI assistant consumes as it reads and writes
+          messages. Your plan includes a monthly allowance; going over is never blocked.
         </p>
-        <div className="mt-4 text-[28px] font-semibold tabular-nums text-[#111827]">
-          ${costUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}
-        </div>
       </div>
     </section>
   )

@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { z } from 'zod'
 import { getSession } from '@/lib/auth/get-session'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { logAdminAction } from '@/lib/auth/admin-audit'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -67,5 +68,14 @@ export async function POST(
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
+
+  await logAdminAction(admin, {
+    actorId: session.userId,
+    actorEmail: session.email,
+    action: 'user.status.set',
+    targetUserId: id,
+    detail: { status: parsed.data.status, previousStatus: target.status },
+  })
+
   return NextResponse.json(data)
 }

@@ -21,7 +21,7 @@ import { paymentEnumBlock } from '@/lib/chatbot/payment-enum'
 import { guardReply } from '@/lib/chatbot/reply-guard'
 import { redactForLlm } from '@/lib/chatbot/pii-redact'
 import { manilaDateBlock } from '@/lib/time/manilaNow'
-import { recordUsage } from '@/lib/billing/recordUsage'
+import { recordUsageDeferred } from '@/lib/billing/recordUsage'
 
 export interface StageBrief {
   id: string
@@ -306,8 +306,9 @@ export async function answerWithClassification(
     systemChars: system.length,
     ms: Date.now() - t0,
   })
-  // Persist to the usage ledger for billing. Best-effort; never blocks the reply.
-  await recordUsage(supabase, userId, 'chatbot.classify', completion, options.threadId)
+  // Persist to the usage ledger for billing. Deferred past the response so the
+  // DB write never delays the reply; best-effort, idempotent per turn.
+  recordUsageDeferred(supabase, userId, 'chatbot.classify', completion, options.threadId, options.idempotencyKey)
 
   const parsed = parseJson(raw)
   let text = ''
@@ -388,7 +389,7 @@ export async function answerWithClassification(
       systemChars: fallbackSystem.length,
       ms: Date.now() - tFb,
     })
-    await recordUsage(supabase, userId, 'chatbot.answer.fallback', fb, options.threadId)
+    recordUsageDeferred(supabase, userId, 'chatbot.answer.fallback', fb, options.threadId, options.idempotencyKey)
     text = sanitizeReply(fb.text)
     text = guardReply({ text, grounding, fallbackMessage: config.fallbackMessage }).text
     stageChange = null
@@ -472,6 +473,15 @@ export async function classifyOnly(
   latestMessage: string,
   stages: StageBrief[],
   currentStageId: string | null,
+  /** When supplied (the Messenger worker on a muted thread), the call's tokens
+   *  are metered to the usage ledger. Without it the call is unmetered (e.g.
+   *  unit tests). This closes the muted-thread spend leak. */
+  metering?: {
+    supabase: SupabaseClient
+    userId: string
+    threadId?: string | null
+    idempotencyKey?: string | null
+  },
 ): Promise<StageChange | null> {
   const llm = new HfRouterLlm({ model: ragConfig.classifierModel })
   const system =
@@ -503,14 +513,25 @@ export async function classifyOnly(
     `Latest customer message:\n${latestMessage}\n\n` +
     `Decide the correct stage_id for this lead, or null if no change is warranted.`
 
-  const raw = await llm.complete(
+  const completion = await llm.completeWithUsage(
     [
       { role: 'system', content: system },
       { role: 'user', content: userBlock },
     ],
     { temperature: 0, maxTokens: 400, responseFormat: 'json_object' },
   )
-  const parsed = parseJson(raw)
+  // Meter the muted-thread classify call (previously unbilled spend leak).
+  if (metering) {
+    recordUsageDeferred(
+      metering.supabase,
+      metering.userId,
+      'chatbot.classify',
+      completion,
+      metering.threadId,
+      metering.idempotencyKey,
+    )
+  }
+  const parsed = parseJson(completion.text)
   if (!parsed || typeof parsed !== 'object') return null
   return coerceStageChange((parsed as { stage_change?: unknown }).stage_change, stages, currentStageId)
 }

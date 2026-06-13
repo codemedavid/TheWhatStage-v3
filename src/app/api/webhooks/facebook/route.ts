@@ -59,9 +59,11 @@ type FbMessaging = {
     mid?: string
     text?: string
     is_echo?: boolean
-    // Present on Send-API echoes (our bot, our dashboard, any other connected
-    // app). Absent on echoes of replies typed in Page Inbox / Meta Business
-    // Suite / Messenger app — those are how we detect a human takeover.
+    // Identifies the app that sent the echoed message. Our own Send-API
+    // traffic (worker, dashboard) carries our FB_APP_ID. Replies typed in
+    // Page Inbox / Meta Business Suite / the Messenger app arrive with no
+    // app_id or a Meta first-party app_id — anything that isn't ours is a
+    // human takeover.
     app_id?: number | string
     attachments?: FbAttachment[]
   }
@@ -365,10 +367,17 @@ async function handleEvent(
   const msg = ev.message
   if (!msg) return null
   if (msg.is_echo) {
-    // Send-API echoes (our worker, our dashboard, any connected app) carry
-    // `app_id`. Echoes typed in Meta's own UIs (Page Inbox, Business Suite,
-    // Messenger app) do not — those are human takeovers we must respect.
-    if (msg.app_id === undefined || msg.app_id === null) {
+    // Only echoes of OUR OWN sends (worker, dashboard) carry our FB_APP_ID.
+    // Everything else — no app_id, a Meta first-party app_id (Page Inbox /
+    // Business Suite / Messenger app), or another connected tool — means a
+    // human (or other system) replied, and the bot must back off.
+    const ourAppId = process.env.FB_APP_ID
+    const echoAppId =
+      msg.app_id === undefined || msg.app_id === null ? null : String(msg.app_id)
+    // Fail-safe when FB_APP_ID is unset: fall back to the app_id-absence
+    // heuristic rather than treating our own sends as takeovers.
+    const isOurEcho = ourAppId ? echoAppId === ourAppId : echoAppId !== null
+    if (!isOurEcho) {
       await handleOperatorEcho(admin, fbPageId, ev)
     }
     return null

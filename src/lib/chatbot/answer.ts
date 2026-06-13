@@ -14,7 +14,7 @@ import { guardReply } from '@/lib/chatbot/reply-guard'
 import { redactForLlm } from '@/lib/chatbot/pii-redact'
 import { classifyIntentHeuristic } from '@/lib/chatbot/intent'
 import { selectReplyModel } from '@/lib/chatbot/model-router'
-import { recordUsage } from '@/lib/billing/recordUsage'
+import { recordUsageDeferred } from '@/lib/billing/recordUsage'
 
 export { findUngroundedContacts } from './reply-guard'
 
@@ -67,6 +67,12 @@ export interface AnswerOptions {
    *  getChatbotConfig fetch — used by the Messenger worker to dedupe the
    *  chatbot_configs read across the reply pipeline. */
   preloadedConfig?: ChatbotConfig
+  /** messenger_threads.id for the current turn. Attributes usage rows to a
+   *  thread so per-conversation cost is visible (mirrors the classify path). */
+  threadId?: string | null
+  /** Per-turn idempotency token (e.g. inbound message id) so a requeued worker
+   *  job never double-counts usage. Forwarded to recordUsage as the event_key. */
+  idempotencyKey?: string | null
 }
 
 /**
@@ -191,8 +197,9 @@ export async function answer(
     systemChars: system.length,
     ms: Date.now() - t0,
   })
-  // Persist to the usage ledger for billing. Best-effort; never blocks the reply.
-  await recordUsage(supabase, userId, 'chatbot.answer', completion)
+  // Persist to the usage ledger for billing. Deferred past the response so the
+  // DB write never delays the reply; best-effort, idempotent per turn.
+  recordUsageDeferred(supabase, userId, 'chatbot.answer', completion, options.threadId, options.idempotencyKey)
 
   const sourceTitles = await resolveSourceTitles(supabase, userId, built.contextChunkIds)
   console.log('[chatbot.answer] media resolved', {

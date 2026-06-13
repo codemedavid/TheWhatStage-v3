@@ -40,11 +40,21 @@ export async function getQuotaState(
   const [year, month] = parts.split('-')
   const monthStart = `${year}-${month}-01T00:00:00+08:00`
 
-  const [profileRes, eventsRes] = await Promise.all([
-    supabase.from('profiles').select('subscription_tier').eq('id', userId).maybeSingle(),
+  const [profileRes, eventsRes, adjRes] = await Promise.all([
+    supabase
+      .from('profiles')
+      .select('subscription_tier, included_tokens_override')
+      .eq('id', userId)
+      .maybeSingle(),
     supabase
       .from('llm_usage_events')
       .select('total_tokens, cost_micros')
+      .eq('user_id', userId)
+      .gte('created_at', monthStart),
+    // Superadmin corrections (credits / manual adds / resets) for this period.
+    supabase
+      .from('usage_adjustments')
+      .select('delta_tokens, delta_cost_micros')
       .eq('user_id', userId)
       .gte('created_at', monthStart),
   ])
@@ -58,11 +68,21 @@ export async function getQuotaState(
     .maybeSingle()
 
   const rows = eventsRes.data ?? []
-  const usedTokens = rows.reduce((s, r) => s + Number(r.total_tokens ?? 0), 0)
-  const costMicros = rows.reduce((s, r) => s + Number(r.cost_micros ?? 0), 0)
+  const adjustments = adjRes.data ?? []
+  const adjTokens = adjustments.reduce((s, r) => s + Number(r.delta_tokens ?? 0), 0)
+  const adjCost = adjustments.reduce((s, r) => s + Number(r.delta_cost_micros ?? 0), 0)
+  // Metered + adjustments, clamped so a net credit never shows negative usage.
+  const usedTokens = Math.max(0, rows.reduce((s, r) => s + Number(r.total_tokens ?? 0), 0) + adjTokens)
+  const costMicros = Math.max(0, rows.reduce((s, r) => s + Number(r.cost_micros ?? 0), 0) + adjCost)
 
+  // Per-user override wins over the tier's cap; null = uncapped.
+  const overrideCap = profileRes.data?.included_tokens_override
   const includedTokens =
-    plan?.included_tokens != null ? Number(plan.included_tokens) : null
+    overrideCap != null
+      ? Number(overrideCap)
+      : plan?.included_tokens != null
+        ? Number(plan.included_tokens)
+        : null
   const ratio =
     includedTokens && includedTokens > 0 ? usedTokens / includedTokens : null
 

@@ -157,6 +157,7 @@ describe('facebook webhook comment events', () => {
     vi.resetModules()
     vi.clearAllMocks()
     process.env.FB_APP_SECRET = 'app-secret'
+    process.env.FB_APP_ID = '424242424242'
     process.env.NEXT_PUBLIC_APP_URL = 'https://app.test'
     process.env.MESSENGER_WORKER_SECRET = 'messenger-secret'
     process.env.COMMENT_WORKER_SECRET = 'comment-secret'
@@ -429,10 +430,10 @@ describe('facebook webhook comment events', () => {
     expect(global.fetch).not.toHaveBeenCalled()
   })
 
-  it('drops echoes from Send-API senders (our bot/dashboard) without engaging takeover', async () => {
+  it('drops echoes of our own sends (app_id matches FB_APP_ID) without engaging takeover', async () => {
     // Wire a strict mock: any DB touch from the echo path fails the test.
     mocks.from.mockImplementation((table: string) => {
-      throw new Error(`should not touch ${table} for app_id-tagged echo`)
+      throw new Error(`should not touch ${table} for our own echo`)
     })
 
     const res = await postWebhook({
@@ -448,7 +449,7 @@ describe('facebook webhook comment events', () => {
                 mid: 'mid-our-bot-echo',
                 text: 'Bot reply',
                 is_echo: true,
-                app_id: 1234567890,
+                app_id: 424242424242,
               },
             },
           ],
@@ -459,6 +460,81 @@ describe('facebook webhook comment events', () => {
     expect(res.status).toBe(200)
     expect(mocks.from).not.toHaveBeenCalled()
     expect(mocks.after).not.toHaveBeenCalled()
+    expect(global.fetch).not.toHaveBeenCalled()
+  })
+
+  it('engages human takeover on echoes from a foreign app_id (Business Suite / other tools)', async () => {
+    const threadUpdatePatches: Record<string, unknown>[] = []
+
+    mocks.from.mockImplementation((table: string) => {
+      if (table === 'facebook_pages') return pageLookup()
+      if (table === 'profiles') return profilesLookup('active')
+      if (table === 'messenger_threads') {
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              eq: vi.fn(() => ({
+                maybeSingle: vi.fn(async () => ({
+                  data: { id: 'thread-1', controlled_by_run_id: null },
+                  error: null,
+                })),
+              })),
+            })),
+          })),
+          update: vi.fn((patch: Record<string, unknown>) => {
+            threadUpdatePatches.push(patch)
+            return { eq: vi.fn(async () => ({ error: null })) }
+          }),
+        }
+      }
+      if (table === 'messenger_messages') {
+        return {
+          insert: vi.fn(() => ({
+            select: vi.fn(() => ({
+              maybeSingle: vi.fn(async () => ({ data: { id: 'message-op-3' }, error: null })),
+            })),
+          })),
+        }
+      }
+      if (table === 'chatbot_configs') {
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              maybeSingle: vi.fn(async () => ({
+                data: { human_takeover_minutes: 60 },
+                error: null,
+              })),
+            })),
+          })),
+        }
+      }
+      throw new Error(`unexpected table ${table}`)
+    })
+
+    const res = await postWebhook({
+      object: 'page',
+      entry: [
+        {
+          id: 'fb-page-1',
+          messaging: [
+            {
+              sender: { id: 'fb-page-1' },
+              recipient: { id: 'psid-1' },
+              message: {
+                mid: 'mid-business-suite',
+                text: 'Operator reply via Business Suite',
+                is_echo: true,
+                // Meta first-party app id — NOT ours.
+                app_id: 263902037430900,
+              },
+            },
+          ],
+        },
+      ],
+    })
+
+    expect(res.status).toBe(200)
+    expect(threadUpdatePatches.some((p) => 'bot_paused_until' in p)).toBe(true)
     expect(global.fetch).not.toHaveBeenCalled()
   })
 

@@ -710,6 +710,7 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
               preloadedConfig: config,
               leadId: thread.lead_id ?? null,
               threadId: thread.id,
+              idempotencyKey: job.inbound_msg_id ?? job.id,
             },
           )
           reply = r.text.trim()
@@ -732,6 +733,8 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
           leadContextBlock,
           leadName: thread.full_name ?? undefined,
           preloadedConfig: config,
+          threadId: thread.id,
+          idempotencyKey: job.inbound_msg_id ?? job.id,
         })
         reply = r.text.trim()
         selectedMedia = r.media
@@ -739,6 +742,22 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
       }
       if (!reply) {
         await markDone(admin, job.id, 'skipped', 'empty reply')
+        return
+      }
+
+      // An operator may have taken over while the LLM was running (the pause
+      // check above used thread state from claim time). Re-read it right
+      // before sending so the bot doesn't talk over the human.
+      const { data: freshThread } = await admin
+        .from('messenger_threads')
+        .select('bot_paused_until')
+        .eq('id', thread.id)
+        .maybeSingle<{ bot_paused_until: string | null }>()
+      if (isBotPaused(freshThread?.bot_paused_until)) {
+        console.log('[messenger.worker] takeover engaged mid-job — reply suppressed', {
+          threadId: thread.id,
+        })
+        await markDone(admin, job.id, 'skipped', 'bot paused (takeover during processing)')
         return
       }
 
@@ -1398,7 +1417,12 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
       const next = thread.inbound_since_classify + 1
       if (next % CLASSIFY_EVERY === 0) {
         try {
-          const change = await classifyOnly(history, message, stages, currentStageId)
+          const change = await classifyOnly(history, message, stages, currentStageId, {
+            supabase: admin,
+            userId: thread.user_id,
+            threadId: thread.id,
+            idempotencyKey: job.inbound_msg_id ?? job.id,
+          })
           if (change) {
             await applyStageChange(admin, {
               leadId: thread.lead_id,
