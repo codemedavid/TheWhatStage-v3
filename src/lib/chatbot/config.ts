@@ -17,6 +17,10 @@ export interface RecommendationRulesMap {
   perActionPage: Record<string, ActionPageRecommendationRules>
 }
 
+/** Upper bound on stored pause-rule text — bounds per-turn prompt growth.
+ *  Pause rules are short by nature; this is a generous ceiling, not a target. */
+export const MAX_PAUSE_AI_INSTRUCTIONS_LENGTH = 2000
+
 export const DEFAULT_RECOMMENDATION_RULES: RecommendationRulesMap = {
   defaultConfidenceThreshold: 0.55,
   perActionPage: {},
@@ -38,6 +42,8 @@ export type ChatbotConfigRow = {
   recommendation_rules: unknown
   followup_settings: unknown
   primary_action_page_id: string | null
+  pause_ai_instructions: string
+  human_takeover_minutes: number
   created_at: string
   updated_at: string
 }
@@ -51,6 +57,8 @@ export type ChatbotConfig = ChatbotPersona & {
   recommendationRules: RecommendationRulesMap
   followupSettings: FollowupSettings
   primaryActionPageId: string | null
+  /** Pause-window duration (minutes) reused for AI self-pause handoffs. */
+  humanTakeoverMinutes: number
   updatedAt: string
 }
 
@@ -69,6 +77,8 @@ export const DEFAULT_CHATBOT_CONFIG: ChatbotConfig = {
   recommendationRules: DEFAULT_RECOMMENDATION_RULES,
   followupSettings: DEFAULT_FOLLOWUP_SETTINGS,
   primaryActionPageId: null,
+  // Mirrors the DB default in 20260604000000_human_takeover.sql.
+  humanTakeoverMinutes: 60,
   updatedAt: '',
 }
 
@@ -151,6 +161,8 @@ export function rowToConfig(row: ChatbotConfigRow): ChatbotConfig {
     name: row.name || DEFAULT_CHATBOT_CONFIG.name,
     persona: row.persona || DEFAULT_CHATBOT_CONFIG.persona,
     instructions: row.instructions ?? '',
+    pauseAiInstructions: row.pause_ai_instructions ?? '',
+    humanTakeoverMinutes: row.human_takeover_minutes ?? DEFAULT_CHATBOT_CONFIG.humanTakeoverMinutes,
     doRules: row.do_rules?.length ? row.do_rules : DEFAULT_CHATBOT_CONFIG.doRules,
     dontRules: row.dont_rules?.length ? row.dont_rules : DEFAULT_CHATBOT_CONFIG.dontRules,
     fallbackMessage: row.fallback_message || DEFAULT_CHATBOT_CONFIG.fallbackMessage,
@@ -189,6 +201,7 @@ export type ChatbotConfigInput = {
   fallbackMessage: string
   temperature: number
   maxContext: number
+  pauseAiInstructions: string
 }
 
 export async function upsertChatbotConfig(
@@ -202,6 +215,7 @@ export async function upsertChatbotConfig(
       name: input.name.trim() || DEFAULT_CHATBOT_CONFIG.name,
       persona: input.persona.trim(),
       instructions: input.instructions.trim(),
+      pause_ai_instructions: input.pauseAiInstructions.trim().slice(0, MAX_PAUSE_AI_INSTRUCTIONS_LENGTH),
       do_rules: input.doRules.map((s) => s.trim()).filter(Boolean),
       dont_rules: input.dontRules.map((s) => s.trim()).filter(Boolean),
       fallback_message: input.fallbackMessage.trim() || DEFAULT_CHATBOT_CONFIG.fallbackMessage,

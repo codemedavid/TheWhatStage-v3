@@ -248,6 +248,50 @@ describe('buildPrompt', () => {
   });
 });
 
+describe('buildPrompt — auto-pause rules', () => {
+  it('injects a # Auto-Pause Rules section when pauseAiInstructions is set', () => {
+    const r = buildPrompt({
+      userQuery: 'q',
+      buckets: buckets(),
+      config: { pauseAiInstructions: 'PAUSE-RULE-TEXT' },
+    })
+    expect(r.system).toContain('# Auto-Pause Rules')
+    expect(r.system).toContain('PAUSE-RULE-TEXT')
+  })
+
+  it('omits the section when pauseAiInstructions is empty or absent', () => {
+    expect(buildPrompt({ userQuery: 'q', buckets: buckets(), config: { pauseAiInstructions: '' } }).system)
+      .not.toContain('# Auto-Pause Rules')
+    expect(buildPrompt({ userQuery: 'q', buckets: buckets(), config: {} }).system)
+      .not.toContain('# Auto-Pause Rules')
+  })
+
+  it('cache_friendly: places the pause section in the volatile tail next to instructions', () => {
+    const original = ragConfig.promptLayout
+    ragConfig.promptLayout = 'cache_friendly'
+    try {
+      const r = buildPrompt({
+        userQuery: 'q',
+        buckets: buckets([chunk('a', 'KB-CHUNK', 0.9)]),
+        config: { instructions: 'INSTR-TEXT', pauseAiInstructions: 'PAUSE-RULE-TEXT' },
+      })
+      expect(r.volatileTail).toBeDefined()
+      expect(r.volatileTail!).toContain('# Auto-Pause Rules')
+      expect(r.volatileTail!).toContain('PAUSE-RULE-TEXT')
+      // The static (cacheable) prefix must not carry the per-config pause text.
+      expect(r.staticPrefix!).not.toContain('PAUSE-RULE-TEXT')
+      // Ordering: instructions before pause rules, both before KB context.
+      const idxInstr = r.system.indexOf('INSTR-TEXT')
+      const idxPause = r.system.indexOf('PAUSE-RULE-TEXT')
+      const idxKb = r.system.indexOf('KB-CHUNK')
+      expect(idxInstr).toBeLessThan(idxPause)
+      expect(idxPause).toBeLessThan(idxKb)
+    } finally {
+      ragConfig.promptLayout = original
+    }
+  })
+})
+
 describe('buildPrompt — payment enum block', () => {
   it('injects the payment enum block above the KB context', () => {
     const r = buildPrompt({
