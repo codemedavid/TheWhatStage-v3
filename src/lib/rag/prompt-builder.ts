@@ -26,6 +26,13 @@ export interface ChatbotPersona {
    * it acts as persistent directive context.
    */
   instructions?: string;
+  /**
+   * Free-form rules describing WHEN the bot should pause itself and hand the
+   * conversation off to a human. Injected as the "# Auto-Pause Rules" section
+   * so the model is aware of them; the classifier turns a match into a
+   * structured `pause` decision. Empty/undefined = no section, feature off.
+   */
+  pauseAiInstructions?: string;
 }
 
 export interface BuildPromptArgs {
@@ -143,6 +150,15 @@ function assembleSystemPrompt(p: ChatbotPersona, contextBlock: string, conversat
       ]
     : [];
 
+  const pauseSection = p.pauseAiInstructions?.trim()
+    ? [
+        `# Auto-Pause Rules`,
+        `These describe when you must STOP replying and hand the conversation to a human teammate. When the customer's latest message clearly matches one of these situations, hand off instead of trying to resolve it yourself:`,
+        p.pauseAiInstructions.trim(),
+        ``,
+      ]
+    : [];
+
   const summarySection = conversationSummary?.trim()
     ? [
         `# Earlier Conversation (summary)`,
@@ -225,6 +241,7 @@ function assembleSystemPrompt(p: ChatbotPersona, contextBlock: string, conversat
     const system = [
       ...goalSection,
       ...instructionsSection,
+      ...pauseSection,
       ...stable,
       ...summarySection,
       ...paymentSection,
@@ -247,6 +264,7 @@ function assembleSystemPrompt(p: ChatbotPersona, contextBlock: string, conversat
     ...stable,
     ...goalSection,
     ...instructionsSection,
+    ...pauseSection,
     ...summarySection,
     ...paymentSection,
     ...kb,
@@ -264,6 +282,7 @@ function assembleSystemPrompt(p: ChatbotPersona, contextBlock: string, conversat
   const volatileTail = [
     ...goalSection,
     ...instructionsSection,
+    ...pauseSection,
     ...summarySection,
     ...paymentSection,
     ...kb,

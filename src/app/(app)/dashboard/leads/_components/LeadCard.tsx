@@ -3,7 +3,7 @@ import { useEffect, useState, useTransition } from 'react'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import type { LeadRow } from '../_lib/queries'
-import { parseMatchedSignals } from '../_lib/queries'
+import { parseMatchedSignals } from '../_lib/signals'
 
 const STALE_AFTER_DAYS = 7
 

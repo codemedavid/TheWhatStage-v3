@@ -193,6 +193,36 @@ export function ConfigForm({
                 </div>
               </div>
             </div>
+
+            <div className="cb-section-head">
+              <h2>Pause AI rules</h2>
+              <p>
+                Describe when the bot should stop replying and hand the conversation
+                to a human. When a message clearly matches one of these, the bot sends
+                a short handoff reply and pauses itself for your human-takeover window.
+              </p>
+            </div>
+            <div className="cb-section-body">
+              <div className="cb-field">
+                <textarea
+                  id="pauseAiInstructions"
+                  name="pauseAiInstructions"
+                  rows={6}
+                  maxLength={2000}
+                  defaultValue={initial.pauseAiInstructions ?? ''}
+                  className="cb-textarea"
+                  placeholder={
+                    'Examples:\n' +
+                    '• Pause if the customer explicitly asks to talk to a person or a manager.\n' +
+                    '• Pause if the customer is clearly angry or threatening to leave.\n' +
+                    '• Pause for refund or complaint requests above 5,000.'
+                  }
+                />
+                <div className="cb-field-help">
+                  Leave blank to keep the bot replying on every turn. One rule per line works best.
+                </div>
+              </div>
+            </div>
         </div>
       </div>
 

@@ -27,6 +27,7 @@ export async function saveChatbotConfig(formData: FormData): Promise<void> {
     name: String(formData.get('name') ?? ''),
     persona: String(formData.get('persona') ?? ''),
     instructions: String(formData.get('instructions') ?? ''),
+    pauseAiInstructions: String(formData.get('pauseAiInstructions') ?? ''),
     doRules: entries(formData, 'doRules'),
     dontRules: entries(formData, 'dontRules'),
     fallbackMessage: String(formData.get('fallbackMessage') ?? ''),

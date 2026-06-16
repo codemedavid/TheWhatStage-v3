@@ -19,6 +19,7 @@ import { logChatbotUsage, type AnswerHistory, type AnswerOptions, type AnswerRes
 import { decideForceSend } from '@/lib/action-pages/force-send'
 import { paymentEnumBlock } from '@/lib/chatbot/payment-enum'
 import { guardReply } from '@/lib/chatbot/reply-guard'
+import { coercePauseDecision, type PauseDecision } from '@/lib/chatbot/pause'
 import { redactForLlm } from '@/lib/chatbot/pii-redact'
 import { manilaDateBlock } from '@/lib/time/manilaNow'
 import { recordUsageDeferred } from '@/lib/billing/recordUsage'
@@ -78,6 +79,11 @@ export interface AnswerWithClassificationResult extends AnswerResult {
   actionPage: ActionPageChoice | null
   productRecommendation: ProductRecommendationRequest | null
   propertyRecommendation: PropertyRecommendationRequest | null
+  /** AI self-pause decision: when non-null the model judged this turn matches a
+   *  configured Auto-Pause Rule and the bot should hand off to a human. The
+   *  worker stamps bot_paused_until on this. Always null on the JSON-parse-fail
+   *  fallback path (no structured envelope) and when no pause rules are set. */
+  pause: PauseDecision | null
   /** All retrieved chunks (useful + ambiguous + reject) from this turn's RAG
    *  retrieval. Used downstream for source-image attachment. */
   topChunks: Array<{
@@ -192,12 +198,14 @@ export async function answerWithClassification(
     config,
     options.activeRealestatePageId,
   )
+  const hasPauseRules = !!config.pauseAiInstructions?.trim()
   const stageParts = stageInstructionParts(
     stages,
     currentStageId,
     actionPages,
     recommendRules,
     recommendPropertyRules,
+    hasPauseRules,
   )
   // Back-compat concatenation (static prose + '\n\n' + volatile tail) used by
   // the legacy layout, the freeform-persona fallback, and the JSON-parse-fail
@@ -317,6 +325,7 @@ export async function answerWithClassification(
   let productRecommendation: ProductRecommendationRequest | null = null
   let propertyRecommendation: PropertyRecommendationRequest | null = null
   let attachImages = false
+  let pause: PauseDecision | null = null
   if (parsed && typeof parsed === 'object') {
     const r = parsed as {
       reply?: unknown
@@ -325,6 +334,7 @@ export async function answerWithClassification(
       recommend_product?: unknown
       recommend_property?: unknown
       attach_images?: unknown
+      pause?: unknown
     }
     const rawReply = typeof r.reply === 'string' ? r.reply : ''
     if (rawReply) {
@@ -334,6 +344,9 @@ export async function answerWithClassification(
     stageChange = coerceStageChange(r.stage_change, stages, currentStageId)
     actionPage = coerceActionPage(r.action_page, actionPages)
     attachImages = r.attach_images === true
+    // Only honor `pause` when the user actually configured Auto-Pause Rules, so
+    // a hallucinated field on an unconfigured bot can never take it offline.
+    pause = hasPauseRules ? coercePauseDecision(r.pause) : null
     // The model occasionally announces a link in `reply` ("Eto na yung link…")
     // but doesn't set the structured `action_page` field, so the customer sees
     // a broken promise. sanitizeReply strips the tease sentence, but we log
@@ -396,6 +409,10 @@ export async function answerWithClassification(
     actionPage = null
     productRecommendation = null
     propertyRecommendation = null
+    // No structured envelope on the fallback path → no pause signal. The bot
+    // still gets the "# Auto-Pause Rules" prose in its prompt, but cannot emit
+    // a structured pause this turn.
+    pause = null
     // The fallback model didn't produce a structured envelope, so it never
     // reasoned about image attachment. Fall back to the same rule as
     // `answer()`: trust operator-tagged @asset/#folder refs.
@@ -461,7 +478,7 @@ export async function answerWithClassification(
   // Without this gate the Messenger worker re-sent the same proof/screenshot
   // assets on every turn, even when the message was unrelated.
   const gatedMedia = attachImages ? media : []
-  return { text, sourceTitles, media: gatedMedia, attachImages, stageChange, actionPage, productRecommendation, propertyRecommendation, topChunks }
+  return { text, sourceTitles, media: gatedMedia, attachImages, stageChange, actionPage, productRecommendation, propertyRecommendation, pause, topChunks }
 }
 
 /**
@@ -664,6 +681,10 @@ export function stageInstructionParts(
   actionPages: ActionPageBrief[],
   recommendRules: ActionPageRecommendationRules | null,
   recommendPropertyRules: ActionPageRecommendationRules | null,
+  /** When true, the user configured Auto-Pause Rules — add the structured
+   *  `pause` field + decision block. Omitted/false leaves the schema untouched
+   *  so the model is never told about a field it must never emit. */
+  hasPauseRules: boolean = false,
 ): StageInstructionParts {
   const hasActionPages = actionPages.length > 0
   const hasRecommend = !!recommendRules
@@ -673,6 +694,9 @@ export function stageInstructionParts(
     '"stage_change": {"to_stage_id": string, "confidence": "low"|"medium"|"high", "reason": string} | null',
     '"attach_images": boolean',
   ]
+  if (hasPauseRules) {
+    schemaParts.push('"pause": {"reason": string} | null')
+  }
   if (hasActionPages) {
     schemaParts.push(
       '"action_page": {"action_page_id": string, "reason": string, "button_text": string} | null',
@@ -744,6 +768,18 @@ export function stageInstructionParts(
       '- Do not stall with one more qualifying question once everything is answered. Do not wait for a more explicit ask. The button arrives as a separate message — your `reply` stays conversational and references nothing about a link/button/form.\n' +
       '- This rule applies to every action page in the list below, not only the primary goal.'
     : ''
+  // Pause decision block — only emitted when the user configured Auto-Pause
+  // Rules (the rule TEXT itself lives in the system prompt's "# Auto-Pause
+  // Rules" section; this just tells the model how to signal a match). Stable
+  // across turns, so it joins the cacheable static prefix.
+  const pauseBlock = hasPauseRules
+    ? '\n\n' +
+      'AUTO-PAUSE — hand off to a human when your "# Auto-Pause Rules" match:\n' +
+      '- Those rules (in the instructions above) list the situations where you must STOP and let a human teammate take over.\n' +
+      '- When the customer\'s LATEST message clearly matches one of those rules, set `pause` to {"reason": "<which rule matched, a few words>"}. Otherwise set `pause` to null.\n' +
+      '- When you set `pause`, still write a brief, warm `reply` that tells the customer a teammate will take over shortly (e.g. "Let me get a teammate to help you with this, one moment."). Do NOT promise a specific time, and do NOT keep trying to resolve the issue yourself.\n' +
+      '- Only pause when a rule GENUINELY matches. When in doubt, set `pause` to null and keep helping.'
+    : ''
   const apListSection = hasActionPages ? '\n\n' + actionPageList(actionPages) : ''
   const recommendSection = hasRecommend ? recommendInstruction(recommendRules!, 'product') : ''
   const recommendPropertySection = hasRecommendProperty
@@ -810,6 +846,7 @@ export function stageInstructionParts(
     examplesBlock +
     '\n\n' +
     attachImagesBlock +
+    pauseBlock +
     apPreamble +
     recommendSection +
     recommendPropertySection

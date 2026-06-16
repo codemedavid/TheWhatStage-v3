@@ -259,15 +259,10 @@ export type CampaignOption = {
   weight: number
 }
 
-export function parseMatchedSignals(reason: string | null | undefined): { matched: string[]; freeReason: string } {
-  if (!reason) return { matched: [], freeReason: '' }
-  const m = reason.match(/^matched:\s*([^—]+?)\s*—\s*(.*)$/)
-  if (!m) return { matched: [], freeReason: reason }
-  return {
-    matched: m[1].split(',').map((x) => x.trim()).filter(Boolean),
-    freeReason: m[2],
-  }
-}
+// Re-exported from the client-safe module so server callers keep importing it
+// from here, while client components import it directly from './signals' (this
+// module pulls in the server-only admin client and must never reach the browser).
+export { parseMatchedSignals } from './signals'
 
 export async function fetchCampaignOptions(
   supabase: SupabaseClient,

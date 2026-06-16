@@ -47,6 +47,7 @@ import { loadLeadContext } from '@/lib/chatbot/leadContext'
 import { interruptWorkflowRun } from '@/lib/workflow/trigger'
 import { runDeepReclassify } from '@/lib/chatbot/deep-reclassify'
 import { isBotPaused } from '@/lib/chatbot/takeover'
+import { computePauseUntil } from '@/lib/chatbot/pause'
 import { resolveSourceImages } from '@/lib/chatbot/source-images'
 import { firstMentionGate, filterAttachableMedia, mediaAttachKey } from '@/lib/chatbot/attach-gate'
 
@@ -678,6 +679,9 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
       // false so a path that never sets it never sends images.
       let attachImages = false
       let topChunks: Awaited<ReturnType<typeof answerWithClassification>>['topChunks'] = []
+      // AI self-pause decision for this turn (null unless the model matched a
+      // configured Auto-Pause Rule). Stamped onto bot_paused_until after send.
+      let pauseDecision: Awaited<ReturnType<typeof answerWithClassification>>['pause'] = null
       const activeCatalogPageId = sendablePages.find((p) => p.kind === 'catalog')?.id ?? null
       const activeRealestatePageId = sendablePages.find((p) => p.kind === 'realestate')?.id ?? null
       const conversationSummary = thread.conversation_summary ?? undefined
@@ -721,6 +725,7 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
           selectedMedia = r.media
           attachImages = r.attachImages
           topChunks = r.topChunks
+          pauseDecision = r.pause
         } catch (e) {
           console.error('[messenger.worker] combined call failed, falling back', e)
         }
@@ -822,6 +827,42 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
           inbound_since_classify: 0,
         })
         .eq('id', thread.id)
+
+      // AI self-pause: the model matched a configured Auto-Pause Rule this turn.
+      // The handoff reply has already gone out above; now stamp bot_paused_until
+      // so the existing isBotPaused() gate holds the bot off until a human
+      // replies or the window expires. Reuses human_takeover_minutes (0 = the
+      // owner disabled auto-pause, so we skip). Same shape as handleOperatorEcho.
+      if (pauseDecision) {
+        const pausedUntil = computePauseUntil(new Date(), config?.humanTakeoverMinutes ?? 0)
+        if (pausedUntil) {
+          // An operator may have taken over (dashboard reply / Meta-UI echo)
+          // during the send above. Re-read and let a live human takeover WIN —
+          // never clobber it with the AI's pause. Mirrors the pre-send mid-job
+          // re-read at the top of the send block.
+          const { data: preStamp } = await admin
+            .from('messenger_threads')
+            .select('bot_paused_until')
+            .eq('id', thread.id)
+            .maybeSingle<{ bot_paused_until: string | null }>()
+          if (isBotPaused(preStamp?.bot_paused_until)) {
+            console.info('[messenger.worker] ai self-pause skipped — human takeover already active', {
+              threadId: thread.id,
+              reason: pauseDecision.reason,
+            })
+          } else {
+            await admin
+              .from('messenger_threads')
+              .update({ bot_paused_until: pausedUntil })
+              .eq('id', thread.id)
+            console.info('[messenger.worker] ai self-pause engaged', {
+              threadId: thread.id,
+              reason: pauseDecision.reason,
+              pausedUntil,
+            })
+          }
+        }
+      }
 
       // Fire-and-forget: detect customer follow-up requests in this inbound
       // message AND auto-resolve any pending reminders that this message
