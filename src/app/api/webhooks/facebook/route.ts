@@ -2,6 +2,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto'
 import * as Sentry from '@sentry/nextjs'
 import { after, NextResponse, type NextRequest } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { mapMetaStatusStrict, buildStatusUpdate } from '@/lib/messenger-templates/statusFlip'
 import { interruptWorkflowRun } from '@/lib/workflow/trigger'
 import { isBotPaused } from '@/lib/chatbot/takeover'
 import { handlePostback } from './_postback'
@@ -637,15 +638,16 @@ async function handleTemplateStatusUpdate(
   const name = v.message_template_name ?? null
   const language = v.message_template_language ?? null
 
-  let status: 'approved' | 'rejected' | 'pending' | 'disabled'
-  switch (event) {
-    case 'APPROVED': status = 'approved'; break
-    case 'REJECTED': status = 'rejected'; break
-    case 'PENDING':  status = 'pending';  break
-    case 'DISABLED': status = 'disabled'; break
-    default:
-      console.warn('[fb.webhook] unknown template event', { event })
-      return
+  // Map through the shared helper so the webhook, the submit/refresh actions,
+  // and the status-poll cron all agree — and so Meta states beyond the original
+  // four (PAUSED, IN_APPEAL, PENDING_DELETION, …) are no longer silently
+  // dropped. Use the STRICT variant: an unrecognized event token is a no-op
+  // (as before), so we never blindly downgrade an approved/rejected row to a
+  // defaulted 'pending' off some future/unknown push event.
+  const status = mapMetaStatusStrict(event)
+  if (!status) {
+    console.warn('[fb.webhook] unrecognized template event — skipping', { event })
+    return
   }
 
   // Locate the row.
@@ -671,12 +673,11 @@ async function handleTemplateStatusUpdate(
     return
   }
 
-  const update: Record<string, unknown> = {
-    meta_status: status,
-    meta_rejection_reason: status === 'rejected' ? reason : null,
-  }
-  if (status === 'approved') update.approved_at = new Date().toISOString()
-  if (metaId && !row.meta_template_id) update.meta_template_id = metaId
+  const update = buildStatusUpdate(status, {
+    rejectedReason: reason,
+    metaTemplateId: metaId,
+    hadMetaTemplateId: !!row.meta_template_id,
+  })
 
   await admin
     .from('messenger_message_templates')

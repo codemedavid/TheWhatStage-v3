@@ -7,8 +7,11 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { decryptToken } from '@/lib/facebook/crypto'
 import {
   createMessengerTemplate,
-  fetchMessengerTemplateStatus,
+  fetchAllMessengerTemplates,
+  MetaTemplateError,
 } from '@/lib/facebook/messenger-templates'
+import { resolveTargetPage } from '@/lib/facebook/templates-page-resolver'
+import { mapMetaStatus, buildStatusUpdate } from '@/lib/messenger-templates/statusFlip'
 import {
   countVariables,
   isValidTemplateName,
@@ -28,6 +31,21 @@ export type ActionResult<T = null> =
   | { ok: true; data: T }
   | { ok: false; error: string }
 
+/** Per-template result of a bulk submit-to-Meta. Partial failure is first-class. */
+export interface SubmitOutcome {
+  id: string
+  outcome: 'approved' | 'pending' | 'rejected' | 'permission_error' | 'error'
+  error?: string
+  row?: MessengerMessageTemplateWithCategories
+}
+
+/** Per-template result of a bulk status refresh; only changed rows carry a row. */
+export interface RefreshOutcome {
+  id: string
+  changed: boolean
+  row?: MessengerMessageTemplateWithCategories
+}
+
 function errResult(e: unknown): { ok: false; error: string } {
   return { ok: false, error: e instanceof Error ? e.message : String(e) }
 }
@@ -39,40 +57,90 @@ async function requireUser() {
   return { supabase, userId: user.id }
 }
 
+// One projection for "template + its categories", reused by loadTemplates and
+// by every mutation that re-reads a row so the client can merge it into state
+// (instead of a full page reload).
+const ROW_SELECT =
+  '*, messenger_template_categories(category:template_categories(id, slug, label, is_system, sort_order))'
+
+function catSort(a: TemplateCategory, b: TemplateCategory): number {
+  return a.is_system === b.is_system
+    ? (a.is_system ? a.sort_order - b.sort_order : a.label.localeCompare(b.label))
+    : (a.is_system ? -1 : 1)
+}
+
+function mapRow(row: Record<string, unknown>): MessengerMessageTemplateWithCategories {
+  const joins = (row.messenger_template_categories as Array<{ category: TemplateCategory }> | null) ?? []
+  const { messenger_template_categories: _drop, ...rest } = row as Record<string, unknown>
+  void _drop
+  return {
+    ...(rest as unknown as MessengerMessageTemplate),
+    categories: joins.map((j) => j.category).filter(Boolean).sort(catSort),
+  }
+}
+
+type UserClient = Awaited<ReturnType<typeof requireUser>>['supabase']
+
+async function fetchRow(
+  supabase: UserClient,
+  userId: string,
+  id: string,
+): Promise<MessengerMessageTemplateWithCategories | null> {
+  const { data } = await supabase
+    .from('messenger_message_templates')
+    .select(ROW_SELECT)
+    .eq('id', id)
+    .eq('user_id', userId)
+    .maybeSingle<Record<string, unknown>>()
+  return data ? mapRow(data) : null
+}
+
+async function fetchRowsByIds(
+  supabase: UserClient,
+  userId: string,
+  ids: string[],
+): Promise<Map<string, MessengerMessageTemplateWithCategories>> {
+  const out = new Map<string, MessengerMessageTemplateWithCategories>()
+  if (ids.length === 0) return out
+  const { data } = await supabase
+    .from('messenger_message_templates')
+    .select(ROW_SELECT)
+    .in('id', ids)
+    .eq('user_id', userId)
+  for (const row of (data ?? []) as Array<Record<string, unknown>>) {
+    const mapped = mapRow(row)
+    out.set(mapped.id, mapped)
+  }
+  return out
+}
+
 export async function loadTemplates(): Promise<MessengerMessageTemplateWithCategories[]> {
   const { supabase, userId } = await requireUser()
 
-  const { count } = await supabase
-    .from('messenger_message_templates')
-    .select('id', { count: 'exact', head: true })
-    .eq('user_id', userId)
-  if ((count ?? 0) === 0) {
+  // Seed default templates exactly once per user, tracked by a marker on the
+  // profile. (The old `count === 0` check re-seeded the defaults whenever a
+  // user deleted all of their templates — deletions never stuck.)
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('templates_seeded_at')
+    .eq('id', userId)
+    .maybeSingle<{ templates_seeded_at: string | null }>()
+  if (profile && !profile.templates_seeded_at) {
     await supabase.rpc('seed_default_message_templates', { p_user_id: userId })
+    await supabase
+      .from('profiles')
+      .update({ templates_seeded_at: new Date().toISOString() })
+      .eq('id', userId)
   }
 
   const { data, error } = await supabase
     .from('messenger_message_templates')
-    .select('*, messenger_template_categories(category:template_categories(id, slug, label, is_system, sort_order))')
+    .select(ROW_SELECT)
     .eq('user_id', userId)
     .order('created_at', { ascending: true })
   if (error) throw new Error(`loadTemplates: ${error.message}`)
 
-  return (data ?? []).map((row: Record<string, unknown>) => {
-    const joins = (row.messenger_template_categories as Array<{ category: TemplateCategory }> | null) ?? []
-    const { messenger_template_categories: _drop, ...rest } = row as Record<string, unknown>
-    void _drop
-    return {
-      ...(rest as unknown as MessengerMessageTemplate),
-      categories: joins
-        .map((j) => j.category)
-        .filter(Boolean)
-        .sort((a, b) =>
-          a.is_system === b.is_system
-            ? (a.is_system ? a.sort_order - b.sort_order : a.label.localeCompare(b.label))
-            : (a.is_system ? -1 : 1),
-        ),
-    }
-  })
+  return (data ?? []).map((row) => mapRow(row as Record<string, unknown>))
 }
 
 function normalizeInput(input: TemplateFormInput) {
@@ -112,7 +180,7 @@ function normalizeInput(input: TemplateFormInput) {
 
 export async function createTemplate(
   input: TemplateFormInput,
-): Promise<ActionResult<{ id: string }>> {
+): Promise<ActionResult<MessengerMessageTemplateWithCategories>> {
   try {
     const { supabase, userId } = await requireUser()
     const row = normalizeInput(input)
@@ -127,8 +195,10 @@ export async function createTemplate(
       }
       return { ok: false, error: `createTemplate: ${error.message}` }
     }
+    const created = await fetchRow(supabase, userId, data.id)
+    if (!created) return { ok: false, error: 'createTemplate: row not found after insert.' }
     revalidatePath('/dashboard/templates')
-    return { ok: true, data: { id: data.id } }
+    return { ok: true, data: created }
   } catch (e) {
     return errResult(e)
   }
@@ -137,29 +207,35 @@ export async function createTemplate(
 export async function updateTemplate(
   id: string,
   input: TemplateFormInput,
-): Promise<ActionResult<null>> {
+): Promise<ActionResult<MessengerMessageTemplateWithCategories>> {
   try {
     const { supabase, userId } = await requireUser()
     const row = normalizeInput(input)
 
-    // Once submitted/approved, body changes require re-submission. We reset
-    // the meta status back to draft so the user can re-submit explicitly.
+    // Once submitted/approved, changes to anything Meta reviewed require
+    // re-submission, so we reset to draft. The reviewable surface includes the
+    // NAME (a renamed template orphans the already-registered Meta template
+    // under the old name) and the FOOTER, in addition to body/language/buttons.
     const { data: existing } = await supabase
       .from('messenger_message_templates')
-      .select('meta_status, body_text, buttons, language')
+      .select('meta_status, name, body_text, buttons, language, footer')
       .eq('id', id)
       .eq('user_id', userId)
       .maybeSingle<{
         meta_status: string
+        name: string
         body_text: string
         buttons: TemplateButton[]
         language: string
+        footer: string | null
       }>()
     if (!existing) return { ok: false, error: 'Template not found.' }
 
     const reviewable =
+      existing.name !== row.name ||
       existing.body_text !== row.body_text ||
       existing.language !== row.language ||
+      (existing.footer ?? null) !== (row.footer ?? null) ||
       JSON.stringify(existing.buttons) !== JSON.stringify(row.buttons)
     const resetStatus = reviewable && existing.meta_status !== 'draft'
 
@@ -185,8 +261,10 @@ export async function updateTemplate(
       }
       return { ok: false, error: `updateTemplate: ${error.message}` }
     }
+    const updated = await fetchRow(supabase, userId, id)
+    if (!updated) return { ok: false, error: 'updateTemplate: row not found after update.' }
     revalidatePath('/dashboard/templates')
-    return { ok: true, data: null }
+    return { ok: true, data: updated }
   } catch (e) {
     return errResult(e)
   }
@@ -210,7 +288,7 @@ export async function deleteTemplate(id: string): Promise<ActionResult<null>> {
 
 export async function duplicateTemplate(
   id: string,
-): Promise<ActionResult<{ id: string }>> {
+): Promise<ActionResult<MessengerMessageTemplateWithCategories>> {
   try {
     const { supabase, userId } = await requireUser()
     const { data: src, error: readErr } = await supabase
@@ -254,185 +332,254 @@ export async function duplicateTemplate(
       .select('id')
       .single<{ id: string }>()
     if (insErr) return { ok: false, error: `duplicateTemplate: ${insErr.message}` }
+    const copy = await fetchRow(supabase, userId, inserted.id)
+    if (!copy) return { ok: false, error: 'duplicateTemplate: row not found after insert.' }
     revalidatePath('/dashboard/templates')
-    return { ok: true, data: { id: inserted.id } }
+    return { ok: true, data: copy }
   } catch (e) {
     return errResult(e)
   }
 }
 
 /**
- * Submit a template to Meta's Message Templates API. Resolves a target page
- * (the template's pinned `page_id`, falling back to the user's first
- * connected page), calls the Graph API, and stores the returned template id
- * + status. The webhook handler at /api/webhooks/facebook receives
- * `message_template_status_update` events and flips the row to approved /
- * rejected as Meta finishes its review.
+ * Submit one or more templates to Meta's Message Templates API in a single
+ * call. Partial success is first-class: the result is ok:true with a per-id
+ * outcome array even when some rows fail. The target page (+ token) is resolved
+ * ONCE per distinct page so a bulk submit doesn't re-query per row.
  *
- * Failures from Meta are surfaced verbatim so the user can fix the body
- * (length, disallowed phrases, missing samples) and retry.
+ * Meta returns the approval state synchronously in the create response — utility
+ * templates with simple bodies often come back APPROVED immediately, so we honor
+ * it rather than sitting in a fake 'pending' state (the page-level
+ * message_template_status_update webhook is unreliable for Messenger pages; the
+ * status-poll cron + live poll are the backstop).
+ *
+ * A permission error (Meta code 200 — missing pages_utility_messaging) is
+ * detected via the structured MetaTemplateError, NOT a regex on the message, and
+ * leaves the row as 'draft' (re-submittable) rather than bucketing it into
+ * 'rejected' alongside real content rejections.
+ */
+export async function submitTemplatesForReview(
+  ids: string[],
+): Promise<ActionResult<SubmitOutcome[]>> {
+  try {
+    const { supabase, userId } = await requireUser()
+    const uniqueIds = Array.from(new Set(ids)).filter(Boolean)
+    if (uniqueIds.length === 0) return { ok: true, data: [] }
+
+    const { data: rows } = await supabase
+      .from('messenger_message_templates')
+      .select('id, name, page_id, language, body_text, variable_count, sample_values, buttons, footer, meta_status')
+      .in('id', uniqueIds)
+      .eq('user_id', userId)
+    const rowsById = new Map<string, MessengerMessageTemplate>(
+      (rows ?? []).map((r) => [(r as MessengerMessageTemplate).id, r as MessengerMessageTemplate]),
+    )
+
+    const admin = createAdminClient()
+    const pageCache = new Map<string | null, Awaited<ReturnType<typeof resolveTargetPage>>>()
+    async function getPage(pageId: string | null) {
+      const key = pageId ?? null
+      if (!pageCache.has(key)) pageCache.set(key, await resolveTargetPage(admin, userId, key))
+      return pageCache.get(key)!
+    }
+
+    const outcomes: SubmitOutcome[] = []
+    for (const id of uniqueIds) {
+      const tpl = rowsById.get(id)
+      if (!tpl) {
+        outcomes.push({ id, outcome: 'error', error: 'Template not found.' })
+        continue
+      }
+      if (tpl.meta_status !== 'draft' && tpl.meta_status !== 'rejected') {
+        outcomes.push({ id, outcome: 'error', error: `Cannot submit a template in "${tpl.meta_status}" state.` })
+        continue
+      }
+      if (tpl.variable_count > 0 && tpl.sample_values.length < tpl.variable_count) {
+        outcomes.push({ id, outcome: 'error', error: 'Add a sample value for every variable before submitting.' })
+        continue
+      }
+
+      const pageRow = await getPage(tpl.page_id)
+      if (!pageRow) {
+        outcomes.push({
+          id,
+          outcome: 'error',
+          error: 'No connected Facebook page found. Connect a page in Settings → Facebook before submitting templates.',
+        })
+        continue
+      }
+
+      try {
+        const result = await createMessengerTemplate({
+          fbPageId: pageRow.fb_page_id,
+          pageAccessToken: decryptToken(pageRow.page_access_token),
+          name: tpl.name,
+          language: tpl.language,
+          bodyText: tpl.body_text,
+          sampleValues: tpl.sample_values,
+          buttons: tpl.buttons,
+          footer: tpl.footer,
+        })
+        const localStatus = mapMetaStatus(result.status)
+        const now = new Date().toISOString()
+        await admin
+          .from('messenger_message_templates')
+          .update({
+            ...buildStatusUpdate(localStatus, { metaTemplateId: result.id, hadMetaTemplateId: false, now }),
+            page_id: pageRow.id,
+            submitted_at: now,
+          })
+          .eq('id', id)
+        outcomes.push({ id, outcome: localStatus === 'approved' ? 'approved' : localStatus === 'rejected' ? 'rejected' : 'pending' })
+      } catch (e) {
+        if (e instanceof MetaTemplateError && e.isPermissionError) {
+          // Keep the row as draft — Meta never reviewed the content.
+          outcomes.push({
+            id,
+            outcome: 'permission_error',
+            error: 'Your Facebook app is missing the pages_utility_messaging permission. Request it in App Review, then re-submit.',
+          })
+          continue
+        }
+        const msg = e instanceof Error ? e.message : String(e)
+        const now = new Date().toISOString()
+        await admin
+          .from('messenger_message_templates')
+          .update({ meta_status: 'rejected', meta_rejection_reason: msg, submitted_at: now })
+          .eq('id', id)
+        outcomes.push({ id, outcome: 'rejected', error: msg })
+      }
+    }
+
+    // Re-read every row that still exists (everything except not-found) with its
+    // category joins so the client can merge updated rows into local state.
+    const rereadIds = outcomes.filter((o) => o.outcome !== 'error').map((o) => o.id)
+    const rowMap = await fetchRowsByIds(supabase, userId, rereadIds)
+    for (const o of outcomes) {
+      const r = rowMap.get(o.id)
+      if (r) o.row = r
+    }
+
+    revalidatePath('/dashboard/templates')
+    revalidatePath('/dashboard/agent')
+    return { ok: true, data: outcomes }
+  } catch (e) {
+    return errResult(e)
+  }
+}
+
+/**
+ * Convenience single-template submit — delegates to the bulk path so there is
+ * exactly one submit code path. Unwraps the single outcome into the discrete
+ * success/error contract the editor expects.
  */
 export async function submitTemplateForReview(
   id: string,
-): Promise<ActionResult<null>> {
-  try {
-    const { supabase, userId } = await requireUser()
-    const { data: tpl } = await supabase
-      .from('messenger_message_templates')
-      .select('id, name, page_id, language, body_text, variable_count, sample_values, buttons, footer, meta_status')
-      .eq('id', id)
-      .eq('user_id', userId)
-      .maybeSingle<MessengerMessageTemplate>()
-    if (!tpl) return { ok: false, error: 'Template not found.' }
-    if (tpl.meta_status !== 'draft' && tpl.meta_status !== 'rejected') {
-      return { ok: false, error: `Cannot submit a template in "${tpl.meta_status}" state.` }
-    }
-    if (tpl.variable_count > 0 && tpl.sample_values.length < tpl.variable_count) {
-      return { ok: false, error: 'Please add a sample value for every variable before submitting.' }
-    }
-
-    // Resolve target page via the admin client so we can read the encrypted
-    // page_access_token. RLS on facebook_pages joins through facebook_connections
-    // and would block the user-scoped client from reading the token directly.
-    const admin = createAdminClient()
-    const pageRow = await resolveTargetPage(admin, userId, tpl.page_id)
-    if (!pageRow) {
-      return {
-        ok: false,
-        error: 'No connected Facebook page found. Connect a page in Settings → Facebook before submitting templates.',
-      }
-    }
-    const pageToken = decryptToken(pageRow.page_access_token)
-
-    let metaTemplateId: string
-    let metaStatusRaw: string | undefined
-    try {
-      const result = await createMessengerTemplate({
-        fbPageId: pageRow.fb_page_id,
-        pageAccessToken: pageToken,
-        name: tpl.name,
-        language: tpl.language,
-        bodyText: tpl.body_text,
-        sampleValues: tpl.sample_values,
-        buttons: tpl.buttons,
-        footer: tpl.footer,
-      })
-      metaTemplateId = result.id
-      metaStatusRaw = result.status
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e)
-      // A 403 with code (#200) means the FB App is missing the
-      // `pages_utility_messaging` permission — Meta never actually reviewed
-      // the content. Keep the row as draft so it isn't lumped in with real
-      // content rejections, and surface an actionable hint.
-      const isPermissionError =
-        /\b403\b/.test(msg) && /\(#200\)/.test(msg) && /pages_utility_messaging/i.test(msg)
-      if (isPermissionError) {
-        return {
-          ok: false,
-          error:
-            'Your Facebook app is missing the pages_utility_messaging permission. Request it in App Review on the Meta App Dashboard, then re-submit.',
-        }
-      }
-      // Persist the rejection reason so it shows up in the UI without the user
-      // needing to re-trigger the submit just to read the error.
-      await admin
-        .from('messenger_message_templates')
-        .update({
-          meta_status: 'rejected',
-          meta_rejection_reason: msg,
-          submitted_at: new Date().toISOString(),
-        })
-        .eq('id', id)
-      revalidatePath('/dashboard/templates')
-      return { ok: false, error: `Meta rejected the submission: ${msg}` }
-    }
-
-    // Meta returns the approval state synchronously in the create response. For
-    // utility templates with simple bodies and no risky buttons, the status is
-    // commonly 'APPROVED' immediately. Honor it so we don't sit in a fake
-    // pending state — the page-level webhook for `message_template_status_update`
-    // is unreliable on Messenger and may never arrive.
-    const localStatus = mapMetaStatus(metaStatusRaw)
-    const now = new Date().toISOString()
-    await admin
-      .from('messenger_message_templates')
-      .update({
-        meta_status: localStatus,
-        meta_template_id: metaTemplateId,
-        page_id: pageRow.id,
-        submitted_at: now,
-        approved_at: localStatus === 'approved' ? now : null,
-        meta_rejection_reason: null,
-      })
-      .eq('id', id)
-    revalidatePath('/dashboard/templates')
-    return { ok: true, data: null }
-  } catch (e) {
-    return errResult(e)
+): Promise<ActionResult<SubmitOutcome>> {
+  const r = await submitTemplatesForReview([id])
+  if (!r.ok) return r
+  const o = r.data[0]
+  if (!o) return { ok: false, error: 'Template not found.' }
+  if (o.outcome === 'permission_error' || o.outcome === 'error') {
+    return { ok: false, error: o.error ?? 'Submission failed.' }
   }
-}
-
-function mapMetaStatus(raw: string | undefined): 'approved' | 'pending' | 'rejected' | 'disabled' {
-  switch ((raw ?? '').toUpperCase()) {
-    case 'APPROVED': return 'approved'
-    case 'REJECTED': return 'rejected'
-    case 'DISABLED': return 'disabled'
-    default: return 'pending'
+  if (o.outcome === 'rejected') {
+    return { ok: false, error: `Meta rejected the submission: ${o.error ?? ''}` }
   }
+  return { ok: true, data: o }
 }
 
 /**
- * Manually re-poll Meta for the current status of a submitted template.
- * The `message_template_status_update` webhook isn't reliably delivered to
- * Messenger pages, so the user can use this to flip pending → approved
- * without waiting on Meta to push us anything.
+ * Re-poll Meta for the status of the given PENDING templates (others are
+ * silently skipped). Used by both the live poll loop and the bulk "Refresh
+ * pending" button. Groups by resolved page and issues ONE paginated
+ * fetchAllMessengerTemplates per page (not per template), matching locally by
+ * (name, language). Returns ONLY rows that actually changed.
  */
-export async function refreshTemplateStatus(
-  id: string,
-): Promise<ActionResult<null>> {
+export async function refreshTemplateStatuses(
+  ids: string[],
+): Promise<ActionResult<RefreshOutcome[]>> {
   try {
     const { supabase, userId } = await requireUser()
-    const { data: tpl } = await supabase
+    const uniqueIds = Array.from(new Set(ids)).filter(Boolean)
+    if (uniqueIds.length === 0) return { ok: true, data: [] }
+
+    const { data: rows } = await supabase
       .from('messenger_message_templates')
       .select('id, name, language, page_id, meta_status, meta_template_id')
-      .eq('id', id)
+      .in('id', uniqueIds)
       .eq('user_id', userId)
-      .maybeSingle<MessengerMessageTemplate>()
-    if (!tpl) return { ok: false, error: 'Template not found.' }
-    if (tpl.meta_status === 'draft') {
-      return { ok: false, error: 'This template has not been submitted yet.' }
-    }
+    const pending = (rows ?? []).filter(
+      (r) => (r as { meta_status: string }).meta_status === 'pending',
+    ) as Array<{ id: string; name: string; language: string; page_id: string | null; meta_status: string; meta_template_id: string | null }>
+    if (pending.length === 0) return { ok: true, data: [] }
 
     const admin = createAdminClient()
-    const pageRow = await resolveTargetPage(admin, userId, tpl.page_id)
-    if (!pageRow) return { ok: false, error: 'No connected Facebook page found.' }
-
-    const pageToken = decryptToken(pageRow.page_access_token)
-    const result = await fetchMessengerTemplateStatus({
-      fbPageId: pageRow.fb_page_id,
-      pageAccessToken: pageToken,
-      name: tpl.name,
-      language: tpl.language,
-    })
-    if (!result) {
-      return { ok: false, error: 'Meta has no record of this template under that name + language.' }
+    const listCache = new Map<string | null, Awaited<ReturnType<typeof fetchAllMessengerTemplates>> | null>()
+    async function getPageTemplates(pageId: string | null) {
+      const key = pageId ?? null
+      if (listCache.has(key)) return listCache.get(key)!
+      const pageRow = await resolveTargetPage(admin, userId, key)
+      if (!pageRow) {
+        listCache.set(key, null)
+        return null
+      }
+      try {
+        const all = await fetchAllMessengerTemplates({
+          fbPageId: pageRow.fb_page_id,
+          pageAccessToken: decryptToken(pageRow.page_access_token),
+        })
+        listCache.set(key, all)
+        return all
+      } catch (e) {
+        console.warn('[refreshTemplateStatuses] page fetch failed', (e as Error).message)
+        listCache.set(key, null)
+        return null
+      }
     }
 
-    const localStatus = mapMetaStatus(result.status)
-    const update: Record<string, unknown> = {
-      meta_status: localStatus,
-      meta_rejection_reason: localStatus === 'rejected' ? result.rejected_reason : null,
+    const changedIds: string[] = []
+    let anyApproved = false
+    for (const tpl of pending) {
+      const all = await getPageTemplates(tpl.page_id)
+      if (!all) continue
+      const match = all.find((t) => t.name === tpl.name && t.language === tpl.language)
+      if (!match) continue
+      const localStatus = mapMetaStatus(match.status)
+      const statusChanged = localStatus !== tpl.meta_status
+      const backfill = !tpl.meta_template_id && !!match.id
+      if (!statusChanged && !backfill) continue
+      await admin
+        .from('messenger_message_templates')
+        .update(
+          buildStatusUpdate(localStatus, {
+            rejectedReason: match.rejected_reason,
+            metaTemplateId: match.id,
+            hadMetaTemplateId: !!tpl.meta_template_id,
+          }),
+        )
+        .eq('id', tpl.id)
+      changedIds.push(tpl.id)
+      if (localStatus === 'approved') anyApproved = true
     }
-    if (!tpl.meta_template_id) update.meta_template_id = result.id
-    if (localStatus === 'approved') update.approved_at = new Date().toISOString()
 
-    await admin.from('messenger_message_templates').update(update).eq('id', id)
-    revalidatePath('/dashboard/templates')
-    return { ok: true, data: null }
+    const rowMap = await fetchRowsByIds(supabase, userId, changedIds)
+    const data: RefreshOutcome[] = changedIds.map((id) => ({ id, changed: true, row: rowMap.get(id) }))
+    if (changedIds.length > 0) revalidatePath('/dashboard/templates')
+    if (anyApproved) revalidatePath('/dashboard/agent')
+    return { ok: true, data }
   } catch (e) {
     return errResult(e)
   }
+}
+
+/** Convenience single-template refresh — delegates to the bulk path. */
+export async function refreshTemplateStatus(
+  id: string,
+): Promise<ActionResult<RefreshOutcome | null>> {
+  const r = await refreshTemplateStatuses([id])
+  if (!r.ok) return r
+  return { ok: true, data: r.data[0] ?? null }
 }
 
 /**
@@ -440,10 +587,10 @@ export async function refreshTemplateStatus(
  * clearing the rejection reason and submission timestamps. Useful after the
  * underlying cause (e.g. a missing `pages_utility_messaging` permission)
  * is resolved on the Meta side, so the user can re-submit cleanly without
- * touching each row individually.
+ * touching each row individually. Returns the reset rows so the client merges.
  */
 export async function resetRejectedTemplates(): Promise<
-  ActionResult<{ reset: number }>
+  ActionResult<{ reset: number; rows: MessengerMessageTemplateWithCategories[] }>
 > {
   try {
     const { supabase, userId } = await requireUser()
@@ -460,42 +607,13 @@ export async function resetRejectedTemplates(): Promise<
       .eq('meta_status', 'rejected')
       .select('id')
     if (error) return { ok: false, error: `resetRejectedTemplates: ${error.message}` }
+    const ids = (data ?? []).map((r) => (r as { id: string }).id)
+    const rowMap = await fetchRowsByIds(supabase, userId, ids)
     revalidatePath('/dashboard/templates')
-    return { ok: true, data: { reset: data?.length ?? 0 } }
+    return { ok: true, data: { reset: ids.length, rows: ids.map((id) => rowMap.get(id)!).filter(Boolean) } }
   } catch (e) {
     return errResult(e)
   }
-}
-
-interface ResolvedPage {
-  id: string
-  fb_page_id: string
-  page_access_token: string
-}
-
-async function resolveTargetPage(
-  admin: ReturnType<typeof createAdminClient>,
-  userId: string,
-  preferredPageId: string | null,
-): Promise<ResolvedPage | null> {
-  if (preferredPageId) {
-    const { data } = await admin
-      .from('facebook_pages')
-      .select('id, fb_page_id, page_access_token, facebook_connections!inner(user_id)')
-      .eq('id', preferredPageId)
-      .eq('facebook_connections.user_id', userId)
-      .maybeSingle<ResolvedPage & { facebook_connections: unknown }>()
-    if (data) return { id: data.id, fb_page_id: data.fb_page_id, page_access_token: data.page_access_token }
-  }
-  const { data } = await admin
-    .from('facebook_pages')
-    .select('id, fb_page_id, page_access_token, facebook_connections!inner(user_id)')
-    .eq('facebook_connections.user_id', userId)
-    .order('created_at', { ascending: true })
-    .limit(1)
-    .maybeSingle<ResolvedPage & { facebook_connections: unknown }>()
-  if (!data) return null
-  return { id: data.id, fb_page_id: data.fb_page_id, page_access_token: data.page_access_token }
 }
 
 /* ── categories ── */
@@ -567,7 +685,7 @@ export async function deleteCategory(id: string): Promise<ActionResult<null>> {
 export async function setTemplateCategories(
   templateId: string,
   categoryIds: string[],
-): Promise<ActionResult<null>> {
+): Promise<ActionResult<MessengerMessageTemplateWithCategories>> {
   try {
     const { supabase, userId } = await requireUser()
     const { data: tpl } = await supabase
@@ -587,20 +705,20 @@ export async function setTemplateCategories(
     }
 
     const unique = Array.from(new Set(categoryIds))
-    if (unique.length === 0) {
-      revalidatePath('/dashboard/templates')
-      return { ok: true, data: null }
+    if (unique.length > 0) {
+      const rows = unique.map((category_id) => ({ template_id: templateId, category_id }))
+      const { error: insErr } = await supabase
+        .from('messenger_template_categories')
+        .insert(rows)
+      if (insErr) {
+        return { ok: false, error: `setTemplateCategories (insert): ${insErr.message}` }
+      }
     }
 
-    const rows = unique.map((category_id) => ({ template_id: templateId, category_id }))
-    const { error: insErr } = await supabase
-      .from('messenger_template_categories')
-      .insert(rows)
-    if (insErr) {
-      return { ok: false, error: `setTemplateCategories (insert): ${insErr.message}` }
-    }
+    const updated = await fetchRow(supabase, userId, templateId)
+    if (!updated) return { ok: false, error: 'setTemplateCategories: row not found.' }
     revalidatePath('/dashboard/templates')
-    return { ok: true, data: null }
+    return { ok: true, data: updated }
   } catch (e) {
     return errResult(e)
   }

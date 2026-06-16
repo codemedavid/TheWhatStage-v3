@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react'
+import { useRouter } from 'next/navigation'
 import type { TemplateButton, TemplateCategory } from '@/lib/messenger-templates/types'
 import { renderTemplate } from '@/lib/messenger-templates/types'
 import type { VariableMap, VariableRule } from '@/lib/messenger-templates/render'
@@ -61,6 +62,9 @@ interface AgentClientProps {
   templates: ApprovedTemplate[]
   actionPages: ActionPageOption[]
   categories: TemplateCategory[]
+  pendingApprovalCount?: number
+  initialTemplateId?: string | null
+  initialMode?: 'per_lead_ai' | 'shared_template' | null
 }
 
 interface Campaign {
@@ -134,13 +138,28 @@ function fmtDate(iso: string) {
 }
 
 /* ── main component ── */
-export function AgentClient({ stages, templates, actionPages, categories }: AgentClientProps) {
+export function AgentClient({ stages, templates, actionPages, categories, pendingApprovalCount = 0, initialTemplateId = null, initialMode = null }: AgentClientProps) {
+  const router = useRouter()
   const [tab, setTab] = useState<'new' | 'history'>('new')
   const [, startTransition] = useTransition()
 
   // ── send mode ──
-  const [sendMode, setSendMode] = useState<'per_lead_ai' | 'shared_template'>('shared_template')
-  const [templateId, setTemplateId] = useState<string>(templates[0]?.id ?? '')
+  const [sendMode, setSendMode] = useState<'per_lead_ai' | 'shared_template'>(initialMode ?? 'shared_template')
+  const [templateId, setTemplateId] = useState<string>(initialTemplateId ?? templates[0]?.id ?? '')
+
+  // Re-query approved templates when the tab regains focus, so a template that
+  // just got approved on the Templates page (or by the poll) shows up here
+  // without a manual reload. router.refresh() re-runs the server component and
+  // updates the `templates` prop while preserving this component's state.
+  useEffect(() => {
+    const refresh = () => { if (document.visibilityState === 'visible') router.refresh() }
+    window.addEventListener('focus', refresh)
+    document.addEventListener('visibilitychange', refresh)
+    return () => {
+      window.removeEventListener('focus', refresh)
+      document.removeEventListener('visibilitychange', refresh)
+    }
+  }, [router])
   const [variableRules, setVariableRules] = useState<VariableMap>({})
   const [stageName, setStageName] = useState<string>('')
   const [lastActiveDays, setLastActiveDays] = useState<string>('')
@@ -184,6 +203,11 @@ export function AgentClient({ stages, templates, actionPages, categories }: Agen
 
   const esRef    = useRef<EventSource | null>(null)
   const abortRef = useRef<AbortController | null>(null)
+  // Guards against a synchronous double-click on "Send" firing two dispatch
+  // POSTs before React re-renders and unmounts the button. State alone is
+  // racy here (both clicks read the same stale `phase`); a ref flips
+  // synchronously inside the handler so the second call returns immediately.
+  const dispatchingRef = useRef(false)
 
   const loadHistory = useCallback(async () => {
     setHistoryLoading(true)
@@ -359,6 +383,8 @@ export function AgentClient({ stages, templates, actionPages, categories }: Agen
   /* ── send campaign ── */
   const sendCampaign = useCallback(async () => {
     if (!campaignId || drafts.length === 0) return
+    if (dispatchingRef.current || phase === 'sending' || phase === 'done') return
+    dispatchingRef.current = true
     setPhase('sending')
     setError(null)
 
@@ -372,8 +398,13 @@ export function AgentClient({ stages, templates, actionPages, categories }: Agen
       const txt = await res?.text().catch(() => '')
       setError(`Dispatch failed: ${txt || 'unknown error'}`)
       setPhase('preview')
+      dispatchingRef.current = false
       return
     }
+
+    // Dispatch accepted — the campaign is now claimed server-side. Keep the
+    // ref latched so even a remount can't re-fire; progress now flows over SSE.
+    dispatchingRef.current = false
 
     // Start polling progress SSE.
     const es = new EventSource(`/api/agent/campaigns/${campaignId}/stream`)
@@ -394,7 +425,7 @@ export function AgentClient({ stages, templates, actionPages, categories }: Agen
       setPhase('done')
       es.close()
     }
-  }, [campaignId, drafts])
+  }, [campaignId, drafts, phase])
 
   /* ── cancel ── */
   const cancel = useCallback(async () => {
@@ -429,6 +460,8 @@ export function AgentClient({ stages, templates, actionPages, categories }: Agen
         .ag-row.excluded { opacity:0.45; }
         .ag-hist-row { display:flex; flex-direction:column; gap:6px; padding:14px 16px; background:${S.surface}; border:1px solid ${S.border}; border-radius:12px; cursor:pointer; transition:border-color 150ms; }
         .ag-hist-row:hover { border-color:#C5C2BA; }
+        .ag-spin { display:inline-block; width:12px; height:12px; border:2px solid ${S.accent}; border-top-color:transparent; border-radius:50%; animation:agspin .7s linear infinite; box-sizing:border-box; }
+        @keyframes agspin { to { transform: rotate(360deg); } }
         @media(max-width:640px) {
           .ag-wrap { padding:16px 12px 60px; gap:18px; }
           .ag-row  { grid-template-columns:20px 1fr; }
@@ -500,7 +533,14 @@ export function AgentClient({ stages, templates, actionPages, categories }: Agen
           <div style={{ display:'flex', flexDirection:'column', gap:14, padding:'16px 18px', background:S.surface, border:`1px solid ${S.border}`, borderRadius:12 }}>
             {templates.length === 0 ? (
               <p style={{ fontSize:13, color:S.ink3, margin:0 }}>
-                No approved templates yet. Submit one for review at <a href="/dashboard/templates" style={{ color: S.accent }}>Templates</a>.
+                No approved templates yet.{' '}
+                {pendingApprovalCount > 0 ? (
+                  <a href="/dashboard/templates?status=pending" style={{ color: S.accent }}>
+                    {pendingApprovalCount} awaiting Meta approval →
+                  </a>
+                ) : (
+                  <>Create and submit one at <a href="/dashboard/templates" style={{ color: S.accent }}>Templates</a>.</>
+                )}
               </p>
             ) : (
               <>
@@ -532,7 +572,10 @@ export function AgentClient({ stages, templates, actionPages, categories }: Agen
                   })}
                 </div>
                 <label style={{ display:'flex', flexDirection:'column', gap:6 }}>
-                  <span style={{ fontSize:12, fontWeight:500, color:S.ink2 }}>Template</span>
+                  <span style={{ display:'flex', alignItems:'baseline', justifyContent:'space-between', gap:8 }}>
+                    <span style={{ fontSize:12, fontWeight:500, color:S.ink2 }}>Template</span>
+                    <a href="/dashboard/templates" style={{ fontSize:11, color:S.accent, textDecoration:'none' }}>Manage templates →</a>
+                  </span>
                   <select
                     value={templateId}
                     onChange={(e) => {
@@ -774,6 +817,14 @@ export function AgentClient({ stages, templates, actionPages, categories }: Agen
                 Generating drafts…
               </span>
             )}
+          </div>
+        )}
+
+        {/* ── Dispatching indicator (sending, before first progress event) ── */}
+        {phase === 'sending' && !progress && (
+          <div style={{ display:'flex', alignItems:'center', gap:10, padding:'14px 16px', borderRadius:12, background:S.surface, border:`1px solid ${S.border}`, fontSize:13, color:S.ink2 }}>
+            <span className="ag-spin" aria-hidden />
+            Dispatching your messages…
           </div>
         )}
 

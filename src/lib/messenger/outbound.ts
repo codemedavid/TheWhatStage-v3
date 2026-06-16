@@ -125,9 +125,9 @@ export async function sendOutbound(args: {
 }): Promise<OutboundResult> {
   const { admin, thread, pageToken, payload, kind } = args
 
-  // Utility templates short-circuit policy resolution: an approved template
-  // is its own permission to send out-of-window via the UTILITY_MESSAGE tag.
-  // Inside the 24h window we still prefer RESPONSE so we don't burn a tag.
+  // Utility templates short-circuit policy resolution: an approved template is
+  // its own permission to reach the user out-of-window. It's sent with
+  // messaging_type='UTILITY' (works inside and outside the 24h window).
   if (payload.kind === 'utility_template') {
     const insideWindow = isInsideWindow(thread.last_inbound_at)
     const result = await sendMessengerUtilityTemplate({

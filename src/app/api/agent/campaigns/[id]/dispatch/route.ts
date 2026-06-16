@@ -72,11 +72,26 @@ export async function POST(
     return Response.json({ error: `campaign is ${campaign.status} — cannot dispatch` }, { status: 409 })
   }
 
-  // Mark dispatching.
-  await admin
+  // Atomically claim the campaign for dispatch. The status predicate in the
+  // WHERE clause makes this a compare-and-set: two concurrent dispatch POSTs
+  // (e.g. a double-clicked Send button that slips past the client guard) will
+  // both pass the read above, but only ONE UPDATE matches a dispatchable
+  // status — the other matches zero rows and bails here, so messages and jobs
+  // are never inserted twice.
+  const { data: claimed, error: claimErr } = await admin
     .from('agent_campaigns')
     .update({ status: 'dispatching', dispatched_at: new Date().toISOString() })
     .eq('id', campaignId)
+    .eq('user_id', userId)
+    .in('status', ['previewing', 'failed'])
+    .select('id')
+
+  if (claimErr) {
+    return Response.json({ error: `failed to claim campaign: ${claimErr.message}` }, { status: 500 })
+  }
+  if (!claimed || claimed.length === 0) {
+    return Response.json({ error: 'campaign is already being dispatched' }, { status: 409 })
+  }
 
   // Upsert agent_campaign_messages for all included rows.
   const includedMessages = messages.filter((m) => m.user_included !== false)

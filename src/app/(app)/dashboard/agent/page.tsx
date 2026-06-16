@@ -1,14 +1,23 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { AgentClient } from './_components/AgentClient'
-import type { TemplateButton } from '@/lib/messenger-templates/types'
+import { AGENT_TEMPLATE_SELECT, mapAgentTemplate } from '@/lib/messenger-templates/projection'
 
 export const dynamic = 'force-dynamic'
 
-export default async function AgentPage() {
+export default async function AgentPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>
+}) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
+
+  const sp = await searchParams
+  const initialTemplateId = typeof sp.template === 'string' ? sp.template : null
+  const initialMode =
+    sp.mode === 'shared_template' || sp.mode === 'per_lead_ai' ? sp.mode : null
 
   // Load pipeline stages so the UI can show them as audience hints.
   const { data: stagesData } = await supabase
@@ -22,26 +31,24 @@ export default async function AgentPage() {
     name: s.name as string,
   }))
 
-  // Approved utility templates available for shared-template campaigns.
+  // Approved utility templates available for shared-template campaigns —
+  // shared projection so this stays in sync with the Templates loader.
   const { data: tplData } = await supabase
     .from('messenger_message_templates')
-    .select('id, display_name, name, language, body_text, variable_count, buttons, messenger_template_categories(category:template_categories(id, slug, label, is_system, sort_order))')
+    .select(AGENT_TEMPLATE_SELECT)
     .eq('user_id', user.id)
     .eq('meta_status', 'approved')
     .order('display_name', { ascending: true })
 
-  const templates = (tplData ?? []).map((t) => ({
-    id: t.id as string,
-    display_name: t.display_name as string,
-    name: t.name as string,
-    language: t.language as string,
-    body_text: t.body_text as string,
-    variable_count: t.variable_count as number,
-    buttons: (t.buttons as TemplateButton[]) ?? [],
-    categories: ((((t as unknown) as { messenger_template_categories?: Array<{ category: { id: string; slug: string; label: string; is_system: boolean; sort_order: number } | null } | null> }).messenger_template_categories) ?? [])
-      .map((j) => j?.category)
-      .filter((c): c is { id: string; slug: string; label: string; is_system: boolean; sort_order: number } => !!c),
-  }))
+  const templates = (tplData ?? []).map((t) => mapAgentTemplate(t as unknown as Record<string, unknown>))
+
+  // How many templates are still awaiting Meta approval — drives the empty-state
+  // nudge back to the Templates page.
+  const { count: pendingApprovalCount } = await supabase
+    .from('messenger_message_templates')
+    .select('id', { count: 'exact', head: true })
+    .eq('user_id', user.id)
+    .eq('meta_status', 'pending')
 
   const { data: catData } = await supabase
     .from('template_categories')
@@ -67,5 +74,15 @@ export default async function AgentPage() {
     kind: p.kind as string,
   }))
 
-  return <AgentClient stages={stages} templates={templates} actionPages={actionPages} categories={categories} />
+  return (
+    <AgentClient
+      stages={stages}
+      templates={templates}
+      actionPages={actionPages}
+      categories={categories}
+      pendingApprovalCount={pendingApprovalCount ?? 0}
+      initialTemplateId={initialTemplateId}
+      initialMode={initialMode}
+    />
+  )
 }

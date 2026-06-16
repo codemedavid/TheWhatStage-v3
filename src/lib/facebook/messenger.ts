@@ -297,16 +297,21 @@ export async function sendMessengerGenericTemplate(args: {
 /**
  * Send an approved utility-message template via the Send API.
  *
- * Outside the standard 24-hour messaging window, plain text and free-form
- * templates are blocked by Meta. An approved utility template, dispatched
- * with `messaging_type=MESSAGE_TAG` + `tag=UTILITY_MESSAGE`, is the only way
- * to reach a recipient who hasn't messaged us in the last 24h (other than
- * HUMAN_AGENT for operator sends and OTN tokens).
+ * An approved utility template reaches a recipient who hasn't messaged us in
+ * the last 24h. It is sent with `messaging_type: 'UTILITY'` and the template
+ * referenced under `message.template` (by name + language). This is the
+ * documented Messenger Utility Messages shape, and it replaces the old
+ * `messaging_type: 'MESSAGE_TAG'` + `tag: 'UTILITY_MESSAGE'` path — the Message
+ * Tags feature is being removed by Meta globally (tags unavailable after
+ * Feb 2026), so the tag approach no longer works.
  *
- * The template body's `{{1}}, {{2}}, ...` placeholders are filled from
- * `bodyParameters` in order. Buttons are optional overrides for any
- * URL-type buttons defined on the approved template — Meta requires the
- * value to match the template's button shape (URL, QUICK_REPLY, etc.).
+ * The body's `{{1}}, {{2}}, ...` placeholders are filled from `bodyParameters`
+ * in order. `buttonUrlOverrides` supplies dynamic values for URL buttons.
+ *
+ * VERIFY-BEFORE-RELYING: the exact send wire shape was confirmed against Meta's
+ * (JS-rendered) utility-messages docs via a text-render proxy, not a live call.
+ * Validate with one real Graph send — especially the multi-button parameter
+ * mapping, which Meta's Messenger docs do not spell out.
  */
 export async function sendMessengerUtilityTemplate(args: {
   pageAccessToken: string
@@ -315,51 +320,43 @@ export async function sendMessengerUtilityTemplate(args: {
   language: string
   bodyParameters: string[]
   buttonUrlOverrides?: Array<{ index: number; url: string }>
-  // Inside-window callers can pass insideWindow=true to use RESPONSE instead
-  // of MESSAGE_TAG. Defaults to MESSAGE_TAG since the whole point of utility
-  // templates is reaching the user out-of-window.
+  // Deprecated/no-op: messaging_type='UTILITY' works both inside and outside
+  // the 24h window, so the window no longer changes the send. Retained for
+  // caller compatibility.
   insideWindow?: boolean
 }): Promise<{ message_id: string }> {
   const url = new URL(`${GRAPH}/me/messages`)
   url.searchParams.set('access_token', args.pageAccessToken)
 
-  // Body parameters per Meta's template send shape — an array of objects
-  // keyed by `type: 'text'` and the value to substitute, in order.
-  const parameters = args.bodyParameters.map((v) => ({ type: 'text', text: v }))
-
-  // Button overrides: a parallel `components` entry per overridden index.
-  // Each component declares the button index it targets and the dynamic url.
+  // Body variables in {{1}}..{{n}} order.
   const components: Array<Record<string, unknown>> = [
-    { type: 'body', parameters },
+    { type: 'body', parameters: args.bodyParameters.map((v) => ({ type: 'text', text: v })) },
   ]
-  for (const ov of args.buttonUrlOverrides ?? []) {
+
+  // Dynamic URL button overrides. Meta's Messenger utility send expresses these
+  // as a SINGLE plural 'buttons' component whose parameters carry one entry per
+  // dynamic button, in button order: { type:'URL', url } (or
+  // { type:'POSTBACK', payload }). NOTE: positional mapping for templates with
+  // multiple buttons is not clearly documented for Messenger — needs a live test.
+  if (args.buttonUrlOverrides && args.buttonUrlOverrides.length > 0) {
     components.push({
-      type: 'button',
-      sub_type: 'url',
-      index: ov.index,
-      parameters: [{ type: 'text', text: ov.url }],
+      type: 'buttons',
+      parameters: [...args.buttonUrlOverrides]
+        .sort((a, b) => a.index - b.index)
+        .map((ov) => ({ type: 'URL', url: ov.url })),
     })
   }
 
   const body: Record<string, unknown> = {
     recipient: { id: args.recipientPsid },
+    messaging_type: 'UTILITY',
     message: {
-      attachment: {
-        type: 'template',
-        payload: {
-          template_type: 'utility',
-          name: args.templateName,
-          language: { code: args.language, policy: 'deterministic' },
-          components,
-        },
+      template: {
+        name: args.templateName,
+        language: { code: args.language },
+        components,
       },
     },
-  }
-  if (args.insideWindow) {
-    body.messaging_type = 'RESPONSE'
-  } else {
-    body.messaging_type = 'MESSAGE_TAG'
-    body.tag = 'UTILITY_MESSAGE'
   }
   return postJson<{ message_id: string }>(url.toString(), body)
 }
