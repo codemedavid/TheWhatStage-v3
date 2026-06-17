@@ -6,6 +6,12 @@ import type { CSSProperties, FormEvent, ReactNode } from 'react'
 interface Props {
   slug: string
   submitLabel: string
+  /**
+   * Per-request idempotency key from the server. Rendered as a hidden input so
+   * even a no-JS or pre-hydration native POST carries it, and reused by the JS
+   * submit handler — both paths dedupe on the same value server-side.
+   */
+  idempotencyKey: string
   buttonStyle: CSSProperties
   /** Hidden inputs + field blocks, server-rendered and slotted in as children. */
   children: ReactNode
@@ -27,14 +33,16 @@ interface Props {
  * `action`/`method` stay on the <form> so submission still works with JS
  * disabled (progressive enhancement); the handler enhances the JS path.
  */
-export default function FormClient({ slug, submitLabel, buttonStyle, children }: Props) {
+export default function FormClient({
+  slug,
+  submitLabel,
+  idempotencyKey,
+  buttonStyle,
+  children,
+}: Props) {
   const [submitting, setSubmitting] = useState(false)
   const [hasError, setHasError] = useState(false)
   const inFlightRef = useRef(false)
-  // Generated lazily on first submit (an event handler, never during render) so
-  // the impure crypto/random calls stay out of the render path. The ref
-  // persists across renders, so retries of the same form reuse the key.
-  const idempotencyKeyRef = useRef<string>('')
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -49,15 +57,9 @@ export default function FormClient({ slug, submitLabel, buttonStyle, children }:
 
     inFlightRef.current = true
     const fd = new FormData(form)
-    if (!idempotencyKeyRef.current) {
-      idempotencyKeyRef.current =
-        typeof crypto !== 'undefined' && 'randomUUID' in crypto
-          ? crypto.randomUUID()
-          : `${Date.now()}-${Math.random().toString(36).slice(2)}`
-    }
-    // set (not append) so the per-instance client key always wins — a hidden
-    // idempotency_key field slipping into the form children can't override it.
-    fd.set('idempotency_key', idempotencyKeyRef.current)
+    // Pin the server-provided per-request key so every retry of this load
+    // dedupes to one row (set, not append, to collapse any stray duplicate).
+    fd.set('idempotency_key', idempotencyKey)
 
     setSubmitting(true)
     setHasError(false)
@@ -98,6 +100,7 @@ export default function FormClient({ slug, submitLabel, buttonStyle, children }:
       onSubmit={handleSubmit}
       className="space-y-4"
     >
+      <input type="hidden" name="idempotency_key" value={idempotencyKey} />
       {children}
       {hasError && (
         <p className="text-[13px] text-red-600" role="alert">

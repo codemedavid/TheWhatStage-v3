@@ -15,6 +15,13 @@ export default function FormRenderer({
 }: KindRendererProps) {
   const config = parseFormConfig(page.config)
 
+  // Per-request idempotency key. The public page is dynamically rendered (it
+  // awaits searchParams), so this is unique per load — never shared across
+  // users. Rendered as a hidden input by FormClient so even a no-JS or
+  // pre-hydration native POST (common in the Messenger in-app webview) carries
+  // a key and gets deduped server-side; the JS handler reuses the same value.
+  const idempotencyKey = crypto.randomUUID()
+
   const rootStyle: CSSProperties & Record<string, string> = {
     ['--bg']: config.theme.background_color,
     ['--accent']: config.theme.accent_color,
@@ -41,6 +48,7 @@ export default function FormRenderer({
       <FormClient
         slug={page.slug}
         submitLabel={config.submit_button_label}
+        idempotencyKey={idempotencyKey}
         buttonStyle={{
           backgroundColor: 'var(--accent)',
           color: 'var(--accent-fg)',
