@@ -1,5 +1,6 @@
 import type { CSSProperties } from 'react'
 import type { KindRendererProps } from '../types'
+import FormClient from './FormClient.client'
 import {
   parseFormConfig,
   type FieldBlock,
@@ -37,10 +38,13 @@ export default function FormRenderer({
         )}
       </header>
 
-      <form
-        action="/api/action-pages/submit"
-        method="post"
-        className="space-y-4"
+      <FormClient
+        slug={page.slug}
+        submitLabel={config.submit_button_label}
+        buttonStyle={{
+          backgroundColor: 'var(--accent)',
+          color: 'var(--accent-fg)',
+        }}
       >
         <input type="hidden" name="slug" value={page.slug} />
         {claims && rawToken && (
@@ -97,18 +101,7 @@ export default function FormRenderer({
         {config.blocks.map((block) => (
           <BlockView key={block.id} block={block} />
         ))}
-
-        <button
-          type="submit"
-          className="w-full rounded-md px-3 py-2 text-[14px] font-semibold"
-          style={{
-            backgroundColor: 'var(--accent)',
-            color: 'var(--accent-fg)',
-          }}
-        >
-          {config.submit_button_label}
-        </button>
-      </form>
+      </FormClient>
     </div>
   )
 }
