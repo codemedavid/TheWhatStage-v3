@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { LeadsQuery } from './_lib/schemas'
 import { seedDefaultStagesIfEmpty } from './_lib/seed'
-import { fetchStages, fetchStagesCached, fetchFieldDefsCached, fetchLeadsTotal, fetchContactLeadsTotal, fetchCampaignOptions } from './_lib/queries'
+import { fetchStages, fetchStagesCached, fetchFieldDefsCached, fetchLeadsTotal, fetchContactLeadsTotal, fetchCampaignOptions, fetchLeadById } from './_lib/queries'
 import { getChatbotConfig } from '@/lib/chatbot/config'
 import { LeadsShell } from './_components/LeadsShell'
 import { LeadsHeader } from './_components/LeadsHeader'
@@ -13,6 +13,10 @@ import { LeadsTable } from './_components/LeadsTable'
 import { ContactList } from './_components/ContactList'
 import { StageRulesTip } from './_components/StageRulesTip'
 import { LeadsContentArea } from './_components/LeadsContentArea'
+import { DeepLinkLeadDrawer } from './_components/DeepLinkLeadDrawer.client'
+
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 export default async function LeadsPage({
   searchParams,
@@ -26,17 +30,28 @@ export default async function LeadsPage({
     contact_filter: sp.contact_filter,
     contact_sort: sp.contact_sort,
   })
+  // Deep link target from "View lead" links elsewhere in the app
+  // (`/dashboard/leads?lead=<id>`). Validated here so a malformed value never
+  // reaches the (uuid-typed) query.
+  const leadId =
+    typeof sp.lead === 'string' && UUID_RE.test(sp.lead) ? sp.lead : undefined
 
   return (
     <LeadsShell>
       <Suspense fallback={<LeadsBodyFallback view={params.view} />}>
-        <LeadsBody params={params} />
+        <LeadsBody params={params} leadId={leadId} />
       </Suspense>
     </LeadsShell>
   )
 }
 
-async function LeadsBody({ params }: { params: ReturnType<typeof LeadsQuery.parse> }) {
+async function LeadsBody({
+  params,
+  leadId,
+}: {
+  params: ReturnType<typeof LeadsQuery.parse>
+  leadId?: string
+}) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
@@ -48,12 +63,13 @@ async function LeadsBody({ params }: { params: ReturnType<typeof LeadsQuery.pars
       ? fetchContactLeadsTotal(supabase, user.id, params)
       : fetchLeadsTotal(supabase, user.id, params)
 
-  const [stages, fieldDefs, total, campaigns, chatbotConfig] = await Promise.all([
+  const [stages, fieldDefs, total, campaigns, chatbotConfig, deepLinkLead] = await Promise.all([
     justSeeded ? fetchStages(supabase, user.id) : fetchStagesCached(user.id),
     fetchFieldDefsCached(user.id),
     totalPromise,
     fetchCampaignOptions(supabase, user.id),
     getChatbotConfig(supabase, user.id),
+    leadId ? fetchLeadById(supabase, user.id, leadId) : Promise.resolve(null),
   ])
 
   return (
@@ -84,6 +100,15 @@ async function LeadsBody({ params }: { params: ReturnType<typeof LeadsQuery.pars
           <LeadsTable userId={user.id} stages={stages} fieldDefs={fieldDefs} campaigns={campaigns} params={params} />
         )}
       </LeadsContentArea>
+
+      {leadId && (
+        <DeepLinkLeadDrawer
+          lead={deepLinkLead}
+          stages={stages}
+          fieldDefs={fieldDefs}
+          campaigns={campaigns}
+        />
+      )}
     </>
   )
 }

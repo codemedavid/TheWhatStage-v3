@@ -190,65 +190,95 @@ export async function fetchLeadsPage(
   if (error) throw error
   const rows = ((data ?? []) as LeadRowWithJoins[]).map(flattenLead)
 
-  // Populate latest_auto_move for each lead from lead_stage_events
+  await populateLatestAutoMove(supabase, rows)
+
+  return { rows, total: count ?? 0 }
+}
+
+// Populate latest_auto_move for each lead from lead_stage_events. Mutates the
+// passed rows in place (server-only, single-use objects from the query above).
+async function populateLatestAutoMove(
+  supabase: SupabaseClient,
+  rows: LeadRow[],
+): Promise<void> {
   const leadIds = rows.map((l) => l.id)
-  if (leadIds.length > 0) {
-    type AutoMoveRaw = {
-      lead_id: string
-      source: 'classifier' | 'deep_classifier'
-      confidence: 'low' | 'medium' | 'high' | null
-      reason: string | null
-      to_stage_id: string | null
-      created_at: string
-    }
-    const autoMoveByLead = new Map<string, AutoMoveRaw>()
-    const { data: events } = await supabase
-      .from('lead_stage_events')
-      .select('lead_id, source, confidence, reason, to_stage_id, created_at')
-      .in('lead_id', leadIds)
-      .in('source', ['classifier', 'deep_classifier'])
-      .order('created_at', { ascending: false })
-      .limit(500)
-    for (const e of (events ?? []) as AutoMoveRaw[]) {
-      if (!autoMoveByLead.has(e.lead_id)) {
-        autoMoveByLead.set(e.lead_id, e)
-      }
-    }
+  if (leadIds.length === 0) return
 
-    // Resolve stage names
-    const stageIds = [
-      ...new Set(
-        [...autoMoveByLead.values()]
-          .map((m) => m.to_stage_id)
-          .filter((id): id is string => id !== null),
-      ),
-    ]
-    const stageNameById = new Map<string, string>()
-    if (stageIds.length > 0) {
-      const { data: stageRows } = await supabase
-        .from('pipeline_stages')
-        .select('id, name')
-        .in('id', stageIds)
-      for (const s of (stageRows ?? []) as Array<{ id: string; name: string }>) {
-        stageNameById.set(s.id, s.name)
-      }
-    }
-
-    for (const l of rows) {
-      const m = autoMoveByLead.get(l.id)
-      l.latest_auto_move = m
-        ? {
-            source: m.source,
-            confidence: m.confidence,
-            reason: m.reason,
-            to_stage_name: m.to_stage_id ? (stageNameById.get(m.to_stage_id) ?? null) : null,
-            created_at: m.created_at,
-          }
-        : null
+  type AutoMoveRaw = {
+    lead_id: string
+    source: 'classifier' | 'deep_classifier'
+    confidence: 'low' | 'medium' | 'high' | null
+    reason: string | null
+    to_stage_id: string | null
+    created_at: string
+  }
+  const autoMoveByLead = new Map<string, AutoMoveRaw>()
+  const { data: events } = await supabase
+    .from('lead_stage_events')
+    .select('lead_id, source, confidence, reason, to_stage_id, created_at')
+    .in('lead_id', leadIds)
+    .in('source', ['classifier', 'deep_classifier'])
+    .order('created_at', { ascending: false })
+    .limit(500)
+  for (const e of (events ?? []) as AutoMoveRaw[]) {
+    if (!autoMoveByLead.has(e.lead_id)) {
+      autoMoveByLead.set(e.lead_id, e)
     }
   }
 
-  return { rows, total: count ?? 0 }
+  // Resolve stage names
+  const stageIds = [
+    ...new Set(
+      [...autoMoveByLead.values()]
+        .map((m) => m.to_stage_id)
+        .filter((id): id is string => id !== null),
+    ),
+  ]
+  const stageNameById = new Map<string, string>()
+  if (stageIds.length > 0) {
+    const { data: stageRows } = await supabase
+      .from('pipeline_stages')
+      .select('id, name')
+      .in('id', stageIds)
+    for (const s of (stageRows ?? []) as Array<{ id: string; name: string }>) {
+      stageNameById.set(s.id, s.name)
+    }
+  }
+
+  for (const l of rows) {
+    const m = autoMoveByLead.get(l.id)
+    l.latest_auto_move = m
+      ? {
+          source: m.source,
+          confidence: m.confidence,
+          reason: m.reason,
+          to_stage_name: m.to_stage_id ? (stageNameById.get(m.to_stage_id) ?? null) : null,
+          created_at: m.created_at,
+        }
+      : null
+  }
+}
+
+// Fetch a single lead by id (scoped to the owning user). Used by the
+// `?lead=<id>` deep link so "View lead" links from other surfaces open the
+// drawer regardless of the active view, filters, or pagination. Returns null
+// when the lead does not exist or is not owned by the user.
+export async function fetchLeadById(
+  supabase: SupabaseClient,
+  userId: string,
+  leadId: string,
+): Promise<LeadRow | null> {
+  const { data, error } = await supabase
+    .from('leads')
+    .select('*, messenger_threads(picture_url), campaigns(name)')
+    .eq('user_id', userId)
+    .eq('id', leadId)
+    .maybeSingle()
+  if (error) throw error
+  if (!data) return null
+  const rows = [flattenLead(data as LeadRowWithJoins)]
+  await populateLatestAutoMove(supabase, rows)
+  return rows[0]
 }
 
 export type CampaignOption = {
