@@ -1,8 +1,13 @@
 import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
-import { fetchActionPage, fetchSubmissions } from '../../_lib/queries'
+import {
+  fetchActionPage,
+  fetchSubmissions,
+  fetchProjectIdsBySubmissionIds,
+} from '../../_lib/queries'
 import type { SubmissionListItem } from '../../_lib/queries'
+import { CreateProjectButton } from './_components/CreateProjectButton.client'
 import BookingSubmissionsView from './BookingSubmissionsView'
 import type { BookingEntry } from './BookingSubmissionsView'
 import PropertySubmissionsView, {
@@ -316,6 +321,11 @@ export default async function SubmissionsPage({
   }
 
   const submissions = await fetchSubmissions(supabase, user.id, id)
+  const projectBySubmission = await fetchProjectIdsBySubmissionIds(
+    supabase,
+    user.id,
+    submissions.map((s) => s.id),
+  )
 
   const kind = page.kind
 
@@ -472,16 +482,21 @@ export default async function SubmissionsPage({
           submissions={submissions}
           monthStart={monthStart}
           weekAgo={weekAgo}
+          projectBySubmission={projectBySubmission}
         />
       )}
       {kind === 'qualification' && (
         <QualificationView
           submissions={submissions}
           weekAgo={weekAgo}
+          projectBySubmission={projectBySubmission}
         />
       )}
       {kind !== 'form' && kind !== 'qualification' && (
-        <GenericView submissions={submissions} />
+        <GenericView
+          submissions={submissions}
+          projectBySubmission={projectBySubmission}
+        />
       )}
     </div>
   )
@@ -495,10 +510,12 @@ function FormView({
   submissions,
   monthStart,
   weekAgo,
+  projectBySubmission,
 }: {
   submissions: SubmissionListItem[]
   monthStart: Date
   weekAgo: Date
+  projectBySubmission: Map<string, string>
 }) {
   const submitted = submissions.filter((s) => s.outcome === 'submitted' || !s.outcome)
   const thisMonth = submitted.filter((s) => new Date(s.created_at) >= monthStart)
@@ -522,7 +539,11 @@ function FormView({
               <DayDivider label={dateLabel} count={items.length} isToday={isToday} />
               <div className="space-y-2.5">
                 {items.map((s) => (
-                  <FormCard key={s.id} submission={s} />
+                  <FormCard
+                    key={s.id}
+                    submission={s}
+                    projectId={projectBySubmission.get(s.id) ?? null}
+                  />
                 ))}
               </div>
             </section>
@@ -533,7 +554,13 @@ function FormView({
   )
 }
 
-function FormCard({ submission: s }: { submission: SubmissionListItem }) {
+function FormCard({
+  submission: s,
+  projectId,
+}: {
+  submission: SubmissionListItem
+  projectId: string | null
+}) {
   const data = s.data as Record<string, unknown>
   const fields = data.fields && typeof data.fields === 'object'
     ? (data.fields as Record<string, unknown>)
@@ -541,7 +568,7 @@ function FormCard({ submission: s }: { submission: SubmissionListItem }) {
 
   return (
     <div className="overflow-hidden rounded-xl border border-[#E5E7EB] bg-white shadow-[0_1px_3px_rgba(0,0,0,0.06)] hover:shadow-[0_2px_8px_rgba(0,0,0,0.08)] transition-shadow">
-      <PersonContent submission={s} fields={fields} />
+      <PersonContent submission={s} fields={fields} projectId={projectId} />
     </div>
   )
 }
@@ -564,9 +591,11 @@ function qualificationStatColor(outcome: string): 'green' | 'red' | 'amber' | 'b
 function QualificationView({
   submissions,
   weekAgo,
+  projectBySubmission,
 }: {
   submissions: SubmissionListItem[]
   weekAgo: Date
+  projectBySubmission: Map<string, string>
 }) {
   const outcomeCounts = Array.from(
     submissions.reduce((map, s) => {
@@ -601,7 +630,11 @@ function QualificationView({
               <DayDivider label={dateLabel} count={items.length} isToday={isToday} />
               <div className="space-y-2.5">
                 {items.map((s) => (
-                  <QualificationCard key={s.id} submission={s} />
+                  <QualificationCard
+                    key={s.id}
+                    submission={s}
+                    projectId={projectBySubmission.get(s.id) ?? null}
+                  />
                 ))}
               </div>
             </section>
@@ -612,7 +645,13 @@ function QualificationView({
   )
 }
 
-function QualificationCard({ submission: s }: { submission: SubmissionListItem }) {
+function QualificationCard({
+  submission: s,
+  projectId,
+}: {
+  submission: SubmissionListItem
+  projectId: string | null
+}) {
   const data = s.data as Record<string, unknown>
   const answers = Array.isArray(data.answers) ? data.answers : []
   const score = typeof data.score === 'number' ? data.score : null
@@ -673,6 +712,11 @@ function QualificationCard({ submission: s }: { submission: SubmissionListItem }
               )}
             </div>
             <span className="text-[11px] text-[#9CA3AF]">{relTime(new Date(s.created_at))}</span>
+            <CreateProjectButton
+              submissionId={s.id}
+              leadId={s.lead_id}
+              existingProjectId={projectId}
+            />
           </div>
         </div>
 
@@ -718,7 +762,13 @@ function countThisWeek(submissions: SubmissionListItem[]): number {
   return submissions.filter((s) => new Date(s.created_at) >= oneWeekAgo).length
 }
 
-function GenericView({ submissions }: { submissions: SubmissionListItem[] }) {
+function GenericView({
+  submissions,
+  projectBySubmission,
+}: {
+  submissions: SubmissionListItem[]
+  projectBySubmission: Map<string, string>
+}) {
   const groups = groupByCreatedDate(submissions)
   return (
     <>
@@ -740,7 +790,11 @@ function GenericView({ submissions }: { submissions: SubmissionListItem[] }) {
               <DayDivider label={dateLabel} count={items.length} isToday={isToday} />
               <div className="space-y-2.5">
                 {items.map((s) => (
-                  <GenericCard key={s.id} submission={s} />
+                  <GenericCard
+                    key={s.id}
+                    submission={s}
+                    projectId={projectBySubmission.get(s.id) ?? null}
+                  />
                 ))}
               </div>
             </section>
@@ -751,7 +805,13 @@ function GenericView({ submissions }: { submissions: SubmissionListItem[] }) {
   )
 }
 
-function GenericCard({ submission: s }: { submission: SubmissionListItem }) {
+function GenericCard({
+  submission: s,
+  projectId,
+}: {
+  submission: SubmissionListItem
+  projectId: string | null
+}) {
   const entries = Object.entries(s.data ?? {})
 
   return (
@@ -788,6 +848,11 @@ function GenericCard({ submission: s }: { submission: SubmissionListItem }) {
               </span>
             )}
             <span className="text-[11px] text-[#9CA3AF]">{relTime(new Date(s.created_at))}</span>
+            <CreateProjectButton
+              submissionId={s.id}
+              leadId={s.lead_id}
+              existingProjectId={projectId}
+            />
           </div>
         </div>
         {entries.length > 0 && (
@@ -809,9 +874,11 @@ function GenericCard({ submission: s }: { submission: SubmissionListItem }) {
 function PersonContent({
   submission: s,
   fields,
+  projectId,
 }: {
   submission: SubmissionListItem
   fields: Record<string, unknown>
+  projectId: string | null
 }) {
   return (
     <div className="flex flex-1 flex-col gap-2 p-4 min-w-0">
@@ -849,9 +916,16 @@ function PersonContent({
             </div>
           </div>
         </div>
-        <span className="shrink-0 text-[11px] text-[#9CA3AF]">
-          {relTime(new Date(s.created_at))}
-        </span>
+        <div className="flex shrink-0 flex-col items-end gap-1.5">
+          <span className="text-[11px] text-[#9CA3AF]">
+            {relTime(new Date(s.created_at))}
+          </span>
+          <CreateProjectButton
+            submissionId={s.id}
+            leadId={s.lead_id}
+            existingProjectId={projectId}
+          />
+        </div>
       </div>
 
       {/* Fields */}

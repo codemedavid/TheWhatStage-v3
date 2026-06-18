@@ -13,9 +13,13 @@ import { SubmissionsPanel } from './SubmissionsPanel'
 import { OrdersPanel } from './OrdersPanel'
 import { CartsPanel } from './CartsPanel'
 import { StageJourney } from './StageJourney'
+import { LeadProjectsPanel } from './LeadProjectsPanel'
+import { LeadSequenceConfig } from './LeadSequenceConfig'
 
 type Tab =
   | 'details'
+  | 'projects'
+  | 'followup'
   | 'conversation'
   | 'comments'
   | 'orders'
@@ -201,12 +205,14 @@ export function LeadDrawer({
         {/* Tabs (edit only) */}
         {mode === 'edit' && (
           <div
-            className="flex gap-4 px-6"
+            className="flex gap-4 overflow-x-auto px-6 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
             style={{ borderBottom: '1px solid var(--lead-line)' }}
           >
             {(
               [
                 'details',
+                'projects',
+                'followup',
                 'conversation',
                 'comments',
                 'orders',
@@ -221,14 +227,18 @@ export function LeadDrawer({
                   key={t}
                   type="button"
                   onClick={() => setTab(t)}
-                  className="lead-focus relative h-9 text-[12.5px] font-medium transition-colors"
+                  className="lead-focus relative h-9 shrink-0 whitespace-nowrap text-[12.5px] font-medium transition-colors"
                   style={{
                     color: active ? 'var(--lead-ink)' : 'var(--lead-muted)',
                   }}
                 >
                   {t === 'details'
                     ? 'Details'
-                    : t === 'conversation'
+                    : t === 'projects'
+                      ? 'Projects'
+                      : t === 'followup'
+                      ? 'Follow-up'
+                      : t === 'conversation'
                       ? 'Conversation'
                       : t === 'comments'
                         ? 'Comments'
@@ -254,7 +264,11 @@ export function LeadDrawer({
 
         {/* Body */}
         <div className="flex-1 overflow-y-auto px-6 py-5">
-          {mode === 'edit' && tab === 'conversation' ? (
+          {mode === 'edit' && tab === 'projects' ? (
+            <LeadProjectsPanel leadId={form.id} />
+          ) : mode === 'edit' && tab === 'followup' ? (
+            <LeadSequenceConfig leadId={form.id} />
+          ) : mode === 'edit' && tab === 'conversation' ? (
             <ConversationPanel leadId={form.id} />
           ) : mode === 'edit' && tab === 'comments' ? (
             <CommentsPanel leadId={form.id} />

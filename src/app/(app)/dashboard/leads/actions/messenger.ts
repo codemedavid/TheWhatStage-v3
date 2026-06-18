@@ -5,7 +5,16 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { decryptToken } from '@/lib/facebook/crypto'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { sendOutbound } from '@/lib/messenger/outbound'
+import { sendOutbound, type OutboundPayload } from '@/lib/messenger/outbound'
+import { deeplinkActionPageUrl } from '@/lib/action-pages/urls'
+import type { MessengerAttachmentType } from '@/lib/facebook/messenger'
+
+export interface ConversationAttachment {
+  type: 'image' | 'video' | 'audio' | 'file' | 'action_page'
+  /** Display URL — freshly signed for storage-backed media, null if unavailable. */
+  url: string | null
+  name: string | null
+}
 
 export interface ConversationMessage {
   id: string
@@ -14,6 +23,7 @@ export interface ConversationMessage {
   body: string
   created_at: string
   error: string | null
+  attachments: ConversationAttachment[]
 }
 
 export interface ConversationComment {
@@ -82,13 +92,15 @@ export async function loadConversation(
     .maybeSingle()
   if (!thread) return null
 
-  const { data: messages, error: msgErr } = await supabase
+  const { data: rawMessages, error: msgErr } = await supabase
     .from('messenger_messages')
-    .select('id, direction, sender, body, created_at, error')
+    .select('id, direction, sender, body, created_at, error, attachments')
     .eq('thread_id', thread.id)
     .order('created_at', { ascending: true })
     .limit(200)
   if (msgErr) throw new Error(`loadConversation: ${msgErr.message}`)
+
+  const messages = await resolveMessageAttachments(supabase, rawMessages ?? [])
 
   const pageName =
     (Array.isArray(thread.facebook_pages)
@@ -142,10 +154,96 @@ export async function loadConversation(
       last_message_at: thread.last_message_at,
       page_name: pageName,
     },
-    messages: (messages ?? []) as ConversationMessage[],
+    messages,
     stageEvents,
     comments: (comments ?? []) as ConversationComment[],
   }
+}
+
+type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>
+
+interface RawMessageRow {
+  id: string
+  direction: 'inbound' | 'outbound'
+  sender: 'user' | 'bot' | 'operator'
+  body: string
+  created_at: string
+  error: string | null
+  attachments: unknown
+}
+
+const DISPLAY_URL_TTL_SECONDS = 60 * 60
+
+/**
+ * Normalize the heterogeneous `attachments` jsonb into display-ready entries.
+ * Outbound operator rows persist re-signable `storage_path`/`media_asset_id`
+ * (signed URLs expire) plus direct `url`s for external/action-page sends;
+ * inbound Meta rows use `{ type, payload: { url } }`. Storage-backed entries are
+ * re-signed in a single batched pass.
+ */
+async function resolveMessageAttachments(
+  supabase: SupabaseServerClient,
+  rows: RawMessageRow[],
+): Promise<ConversationMessage[]> {
+  const storagePaths = new Set<string>()
+  for (const row of rows) {
+    for (const raw of Array.isArray(row.attachments) ? row.attachments : []) {
+      const path = (raw as { storage_path?: unknown }).storage_path
+      if (typeof path === 'string' && path) storagePaths.add(path)
+    }
+  }
+
+  const signedByPath = new Map<string, string>()
+  await Promise.all(
+    [...storagePaths].map(async (path) => {
+      const { data } = await supabase.storage
+        .from('media-assets')
+        .createSignedUrl(path, DISPLAY_URL_TTL_SECONDS)
+      if (data?.signedUrl) signedByPath.set(path, data.signedUrl)
+    }),
+  )
+
+  const normalizeType = (raw: string | undefined): ConversationAttachment['type'] => {
+    switch (raw) {
+      case 'image':
+      case 'video':
+      case 'audio':
+      case 'file':
+      case 'action_page':
+        return raw
+      default:
+        return 'file'
+    }
+  }
+
+  return rows.map((row) => {
+    const attachments: ConversationAttachment[] = (
+      Array.isArray(row.attachments) ? row.attachments : []
+    ).map((raw) => {
+      const a = raw as {
+        type?: string
+        url?: string
+        storage_path?: string
+        name?: string
+        payload?: { url?: string }
+      }
+      const url =
+        (a.storage_path && signedByPath.get(a.storage_path)) ||
+        a.url ||
+        a.payload?.url ||
+        null
+      return { type: normalizeType(a.type), url, name: a.name ?? null }
+    })
+    return {
+      id: row.id,
+      direction: row.direction,
+      sender: row.sender,
+      body: row.body,
+      created_at: row.created_at,
+      error: row.error,
+      attachments,
+    }
+  })
 }
 
 export interface LatestStageRationale {
@@ -362,9 +460,46 @@ export async function setAutoReply(leadId: string, enabled: boolean): Promise<vo
   revalidatePath('/dashboard/leads', 'layout')
 }
 
-export async function replyAsOperator(leadId: string, text: string): Promise<void> {
-  const body = text.trim()
-  if (!body) return
+/**
+ * A stored attachment descriptor on an outbound operator message. The display
+ * URL for storage-backed entries is minted fresh on load (signed URLs expire),
+ * so we persist the re-signable `storage_path`/`media_asset_id` rather than the
+ * short-lived signed URL. `url` is persisted directly only for external-URL and
+ * action-page sends, where there is nothing to re-sign.
+ */
+export interface OperatorAttachment {
+  type: MessengerAttachmentType | 'action_page'
+  storage_path?: string
+  media_asset_id?: string
+  action_page_id?: string
+  url?: string
+  name?: string
+}
+
+/**
+ * Shared dispatch for every operator-initiated send (text, action page, media).
+ * Fetches the thread + page token, sends via the unified outbound pipeline
+ * (HUMAN_AGENT policy), persists an audit row, stamps the bot-pause window, and
+ * releases any workflow run lock — identical side effects regardless of payload.
+ */
+interface OperatorThread {
+  id: string
+  psid: string
+  page_id: string
+}
+
+interface OperatorSendSpec {
+  payload: OutboundPayload
+  body: string
+  attachments?: OperatorAttachment[]
+}
+
+async function dispatchOperatorSend(args: {
+  context: string
+  leadId: string
+  build: (thread: OperatorThread) => OperatorSendSpec | Promise<OperatorSendSpec>
+}): Promise<void> {
+  const { context, leadId, build } = args
   const { supabase, userId } = await requireUser()
 
   const { data: thread, error: threadErr } = await supabase
@@ -372,16 +507,22 @@ export async function replyAsOperator(leadId: string, text: string): Promise<voi
     .select('id, psid, page_id, last_inbound_at, controlled_by_run_id, facebook_pages(page_access_token)')
     .eq('lead_id', leadId)
     .maybeSingle()
-  if (threadErr) throw new Error(`replyAsOperator: ${threadErr.message}`)
-  if (!thread) throw new Error('replyAsOperator: no Messenger thread for lead')
+  if (threadErr) throw new Error(`${context}: ${threadErr.message}`)
+  if (!thread) throw new Error(`${context}: no Messenger thread for lead`)
 
   const pageRow = Array.isArray(thread.facebook_pages)
     ? thread.facebook_pages[0]
     : (thread.facebook_pages as { page_access_token?: string } | null)
   if (!pageRow?.page_access_token) {
-    throw new Error('replyAsOperator: missing page access token')
+    throw new Error(`${context}: missing page access token`)
   }
   const pageToken = decryptToken(pageRow.page_access_token)
+
+  const { payload, body, attachments } = await build({
+    id: thread.id,
+    psid: thread.psid,
+    page_id: thread.page_id,
+  })
 
   // Use service-role client for sendOutbound (needs to read marketing_optins table).
   const admin = createAdminClient()
@@ -397,7 +538,7 @@ export async function replyAsOperator(leadId: string, text: string): Promise<voi
         last_inbound_at: (thread as { last_inbound_at?: string | null }).last_inbound_at ?? null,
       },
       pageToken,
-      payload: { kind: 'text', text: body },
+      payload,
       kind: 'operator',
     })
     if (result.sent) {
@@ -416,6 +557,7 @@ export async function replyAsOperator(leadId: string, text: string): Promise<voi
     sender: 'operator',
     fb_message_id: sentId,
     body,
+    attachments: attachments ?? null,
     error: sendError,
   })
 
@@ -474,8 +616,172 @@ export async function replyAsOperator(leadId: string, text: string): Promise<voi
       .eq('id', thread.id)
   }
 
-  if (sendError) throw new Error(`replyAsOperator: ${sendError}`)
+  if (sendError) throw new Error(`${context}: ${sendError}`)
   revalidatePath('/dashboard/leads', 'layout')
+}
+
+export async function replyAsOperator(leadId: string, text: string): Promise<void> {
+  const body = text.trim()
+  if (!body) return
+  await dispatchOperatorSend({
+    context: 'replyAsOperator',
+    leadId,
+    build: () => ({ payload: { kind: 'text', text: body }, body }),
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Operator-triggered action-page send
+// ---------------------------------------------------------------------------
+const DEEPLINK_TTL_SECONDS = 30 * 24 * 60 * 60
+
+export interface SendableActionPage {
+  id: string
+  title: string
+  kind: string
+  cta_label: string | null
+}
+
+/**
+ * Published action pages the operator can send into a conversation. Drafts and
+ * archived pages are excluded so unfinished pages never reach a lead.
+ */
+export async function listSendableActionPages(): Promise<SendableActionPage[]> {
+  const { supabase, userId } = await requireUser()
+  const { data, error } = await supabase
+    .from('action_pages')
+    .select('id, title, kind, cta_label')
+    .eq('user_id', userId)
+    .eq('status', 'published')
+    .order('updated_at', { ascending: false })
+  if (error) throw new Error(`listSendableActionPages: ${error.message}`)
+  return (data ?? []) as SendableActionPage[]
+}
+
+export async function sendActionPageAsOperator(
+  leadId: string,
+  actionPageId: string,
+): Promise<void> {
+  const { supabase, userId } = await requireUser()
+
+  // Load + authorize the page here (own client / RLS) so the deeplink builder
+  // only deals with already-validated data.
+  const { data: page, error: pageErr } = await supabase
+    .from('action_pages')
+    .select('id, title, description, slug, cta_label, signing_secret, status')
+    .eq('id', actionPageId)
+    .eq('user_id', userId)
+    .maybeSingle<{
+      id: string
+      title: string
+      description: string | null
+      slug: string
+      cta_label: string | null
+      signing_secret: string
+      status: string
+    }>()
+  if (pageErr) throw new Error(`sendActionPageAsOperator: ${pageErr.message}`)
+  if (!page) throw new Error('sendActionPageAsOperator: action page not found')
+  if (page.status !== 'published') {
+    throw new Error('sendActionPageAsOperator: action page is not published')
+  }
+
+  await dispatchOperatorSend({
+    context: 'sendActionPageAsOperator',
+    leadId,
+    build: (thread) => {
+      const exp = Math.floor(Date.now() / 1000) + DEEPLINK_TTL_SECONDS
+      const url = deeplinkActionPageUrl(page.signing_secret, {
+        slug: page.slug,
+        psid: thread.psid,
+        pageId: thread.page_id,
+        exp,
+      })
+      const text = [page.title, page.description?.trim()].filter(Boolean).join('\n\n').slice(0, 640)
+      const ctaLabel = (page.cta_label?.trim() || 'Open').slice(0, 20)
+      return {
+        payload: { kind: 'button', text: text || page.title, url, ctaLabel },
+        body: page.title,
+        attachments: [{ type: 'action_page', action_page_id: page.id, url, name: page.title }],
+      }
+    },
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Operator-triggered attachment send (image / video / audio / file)
+// ---------------------------------------------------------------------------
+const MEDIA_URL_TTL_SECONDS = 60 * 60 // 1h — Meta caches via is_reusable
+
+export type AttachmentSendInput =
+  | { source: 'upload'; attachmentType: MessengerAttachmentType; url: string; name?: string }
+  | { source: 'asset'; attachmentType: MessengerAttachmentType; assetId: string }
+  | { source: 'url'; attachmentType: MessengerAttachmentType; url: string }
+
+function assertHttpsUrl(raw: string, context: string): string {
+  let parsed: URL
+  try {
+    parsed = new URL(raw)
+  } catch {
+    throw new Error(`${context}: invalid URL`)
+  }
+  if (parsed.protocol !== 'https:') {
+    throw new Error(`${context}: only https URLs are allowed`)
+  }
+  return parsed.toString()
+}
+
+export async function sendAttachmentAsOperator(
+  leadId: string,
+  input: AttachmentSendInput,
+): Promise<void> {
+  const { supabase, userId } = await requireUser()
+  const admin = createAdminClient()
+
+  // Resolve a public URL for Meta to fetch, and the re-signable descriptor to
+  // persist for timeline rendering.
+  let url: string
+  const attachment: OperatorAttachment = { type: input.attachmentType }
+
+  if (input.source === 'url' || input.source === 'upload') {
+    // Operator uploads now land on ImageKit and come back as permanent public
+    // URLs, so they share the external-URL path: validate https and persist the
+    // URL directly (nothing to re-sign on timeline load).
+    url = assertHttpsUrl(input.url, 'sendAttachmentAsOperator')
+    attachment.url = url
+    if (input.source === 'upload' && input.name) attachment.name = input.name
+  } else {
+    const { data: asset } = await supabase
+      .from('media_assets')
+      .select('storage_path, is_archived')
+      .eq('id', input.assetId)
+      .eq('user_id', userId)
+      .maybeSingle<{ storage_path: string; is_archived: boolean }>()
+    if (!asset || asset.is_archived) {
+      throw new Error('sendAttachmentAsOperator: media asset not found')
+    }
+    const { data: signed, error: signErr } = await admin.storage
+      .from('media-assets')
+      .createSignedUrl(asset.storage_path, MEDIA_URL_TTL_SECONDS)
+    if (signErr || !signed?.signedUrl) {
+      throw new Error('sendAttachmentAsOperator: could not sign media asset')
+    }
+    url = signed.signedUrl
+    attachment.media_asset_id = input.assetId
+    attachment.storage_path = asset.storage_path
+  }
+
+  const payload: OutboundPayload =
+    input.attachmentType === 'image'
+      ? { kind: 'image', imageUrl: url }
+      : { kind: input.attachmentType, url }
+  const body = attachment.name ? `[${input.attachmentType}] ${attachment.name}` : `[${input.attachmentType}]`
+
+  await dispatchOperatorSend({
+    context: 'sendAttachmentAsOperator',
+    leadId,
+    build: () => ({ payload, body, attachments: [attachment] }),
+  })
 }
 
 export async function resumeBot(leadId: string): Promise<void> {

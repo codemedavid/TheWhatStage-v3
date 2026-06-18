@@ -16,6 +16,7 @@ export async function loadContext(
       otnByThread: new Map(),
       cooldownThreadIds: new Set(),
       dailyCapUsed: 0,
+      projectInstructionsByLead: new Map(),
     }
   }
 
@@ -23,7 +24,7 @@ export async function loadContext(
   const cooldownCutoff = new Date(Date.now() - COOLDOWN_HOURS * 3600_000).toISOString()
   const dailyCutoff = new Date(Date.now() - 24 * 3600_000).toISOString()
 
-  const [messagesRes, optinsRes, otnsRes, cooldownRes, capRes] = await Promise.all([
+  const [messagesRes, optinsRes, otnsRes, cooldownRes, capRes, threadsRes] = await Promise.all([
     // Last inbound message per thread (for personalization in draft generation)
     admin
       .from('messenger_messages')
@@ -60,6 +61,12 @@ export async function loadContext(
       .from('agent_campaigns')
       .select('id')
       .eq('user_id', userId),
+
+    // Thread -> lead mapping, so we can align drafts to each customer's project.
+    admin
+      .from('messenger_threads')
+      .select('id, lead_id')
+      .in('id', threadIds),
   ])
 
   // Last inbound per thread (keep only the newest row per thread_id)
@@ -104,12 +111,51 @@ export async function loadContext(
     dailyCapUsed = count ?? 0
   }
 
+  // Per-customer project instructions. Resolve each thread's lead, then pick
+  // that lead's active (open) project and carry its AI instructions, keyed by
+  // lead_id so generateDraft can look it up via AudienceLead.id.
+  const leadIds = [
+    ...new Set(
+      (threadsRes.data ?? [])
+        .map((r) => (r as { lead_id: string | null }).lead_id)
+        .filter((id): id is string => !!id),
+    ),
+  ]
+  const projectInstructionsByLead = new Map<string, string>()
+  if (leadIds.length > 0) {
+    const { data: projectRows } = await admin
+      .from('projects')
+      .select('lead_id, ai_instructions, updated_at, project_stages(kind)')
+      .in('lead_id', leadIds)
+      .order('updated_at', { ascending: false })
+    for (const row of projectRows ?? []) {
+      const r = row as {
+        lead_id: string
+        ai_instructions: string | null
+        project_stages: { kind: string | null } | { kind: string | null }[] | null
+      }
+      if (projectInstructionsByLead.has(r.lead_id)) continue // newest wins
+      const stage = Array.isArray(r.project_stages) ? r.project_stages[0] : r.project_stages
+      const terminal = stage?.kind === 'won' || stage?.kind === 'lost'
+      if (terminal) continue
+      const instr = r.ai_instructions?.trim()
+      // Mark the lead as resolved (its active project is this one) regardless of
+      // whether it has instructions, so an older project never overrides it.
+      projectInstructionsByLead.set(r.lead_id, instr ?? '')
+    }
+    // Drop empties so consumers can treat "present" as "has instructions".
+    for (const [k, v] of projectInstructionsByLead) {
+      if (v === '') projectInstructionsByLead.delete(k)
+    }
+  }
+
   return {
     lastInboundByThread,
     optinByThread,
     otnByThread,
     cooldownThreadIds,
     dailyCapUsed,
+    projectInstructionsByLead,
   }
 }
 

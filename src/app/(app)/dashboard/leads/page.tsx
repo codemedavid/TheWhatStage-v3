@@ -14,6 +14,7 @@ import { ContactList } from './_components/ContactList'
 import { StageRulesTip } from './_components/StageRulesTip'
 import { LeadsContentArea } from './_components/LeadsContentArea'
 import { DeepLinkLeadDrawer } from './_components/DeepLinkLeadDrawer.client'
+import { resolveDateRange } from './_lib/date-range'
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -26,7 +27,7 @@ export default async function LeadsPage({
   const sp = await searchParams
   const params = LeadsQuery.parse({
     view: sp.view, stage: sp.stage, page: sp.page,
-    q: sp.q, from: sp.from, to: sp.to, sort: sp.sort,
+    q: sp.q, range: sp.range, from: sp.from, to: sp.to, sort: sp.sort,
     contact_filter: sp.contact_filter,
     contact_sort: sp.contact_sort,
   })
@@ -58,10 +59,15 @@ async function LeadsBody({
 
   const justSeeded = await seedDefaultStagesIfEmpty(supabase, user.id)
 
+  // Resolve the `range` preset (today / week / month / all) into concrete
+  // from/to bounds for every data query, while the Toolbar keeps the original
+  // `params` so its preset buttons reflect the user's selection.
+  const queryParams = resolveDateRange(params)
+
   const totalPromise =
     params.view === 'contact'
-      ? fetchContactLeadsTotal(supabase, user.id, params)
-      : fetchLeadsTotal(supabase, user.id, params)
+      ? fetchContactLeadsTotal(supabase, user.id, queryParams)
+      : fetchLeadsTotal(supabase, user.id, queryParams)
 
   const [stages, fieldDefs, total, campaigns, chatbotConfig, deepLinkLead] = await Promise.all([
     justSeeded ? fetchStages(supabase, user.id) : fetchStagesCached(user.id),
@@ -93,11 +99,11 @@ async function LeadsBody({
 
       <LeadsContentArea>
         {params.view === 'kanban' ? (
-          <KanbanBoard userId={user.id} stages={stages} fieldDefs={fieldDefs} campaigns={campaigns} params={params} />
+          <KanbanBoard userId={user.id} stages={stages} fieldDefs={fieldDefs} campaigns={campaigns} params={queryParams} />
         ) : params.view === 'contact' ? (
-          <ContactList userId={user.id} stages={stages} fieldDefs={fieldDefs} campaigns={campaigns} params={params} />
+          <ContactList userId={user.id} stages={stages} fieldDefs={fieldDefs} campaigns={campaigns} params={queryParams} />
         ) : (
-          <LeadsTable userId={user.id} stages={stages} fieldDefs={fieldDefs} campaigns={campaigns} params={params} />
+          <LeadsTable userId={user.id} stages={stages} fieldDefs={fieldDefs} campaigns={campaigns} params={queryParams} />
         )}
       </LeadsContentArea>
 

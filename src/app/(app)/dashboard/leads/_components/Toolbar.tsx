@@ -25,7 +25,7 @@ export function Toolbar({ params }: { params: LeadsQuery }) {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  const hasFilters = !!(params.q || params.from || params.to)
+  const hasFilters = !!(params.q || params.range !== 'today' || params.from || params.to)
 
   return (
     <div
@@ -81,15 +81,20 @@ export function Toolbar({ params }: { params: LeadsQuery }) {
         )}
       </div>
 
+      <RangePicker
+        value={params.range}
+        onChange={(v) => set({ range: v === 'today' ? undefined : v, from: undefined, to: undefined, page: undefined })}
+      />
+
       <DateChip
         label="From"
         value={params.from ?? ''}
-        onChange={(v) => set({ from: v || undefined })}
+        onChange={(v) => set({ range: 'custom', from: v || undefined, page: undefined })}
       />
       <DateChip
         label="To"
         value={params.to ?? ''}
-        onChange={(v) => set({ to: v || undefined })}
+        onChange={(v) => set({ range: 'custom', to: v || undefined, page: undefined })}
       />
 
       {params.view !== 'contact' && (
@@ -152,7 +157,7 @@ export function Toolbar({ params }: { params: LeadsQuery }) {
       {hasFilters && (
         <button
           type="button"
-          onClick={() => set({ q: undefined, from: undefined, to: undefined })}
+          onClick={() => set({ q: undefined, range: undefined, from: undefined, to: undefined, page: undefined })}
           className="lead-focus h-8 cursor-pointer rounded-full px-3 text-[12.5px] font-medium transition-colors"
           style={{ color: 'var(--lead-accent)' }}
           onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--lead-accent-tint)')}
@@ -161,6 +166,49 @@ export function Toolbar({ params }: { params: LeadsQuery }) {
           Clear filters
         </button>
       )}
+    </div>
+  )
+}
+
+const RANGE_OPTIONS: { value: LeadsQuery['range']; label: string }[] = [
+  { value: 'today', label: 'Today' },
+  { value: 'week', label: 'This week' },
+  { value: 'month', label: 'This month' },
+  { value: 'all', label: 'All' },
+]
+
+function RangePicker({
+  value,
+  onChange,
+}: {
+  value: LeadsQuery['range']
+  onChange: (v: LeadsQuery['range']) => void
+}) {
+  // `custom` (set via the From/To chips) is not one of the segments, so no
+  // preset is highlighted while a custom range is active.
+  return (
+    <div
+      className="inline-flex h-8 items-center rounded-full p-0.5"
+      style={{ background: 'var(--lead-surface-2)', border: '1px solid var(--lead-line)' }}
+    >
+      {RANGE_OPTIONS.map(({ value: v, label }) => {
+        const active = value === v
+        return (
+          <button
+            key={v}
+            type="button"
+            onClick={() => onChange(v)}
+            aria-pressed={active}
+            className="lead-focus h-7 cursor-pointer rounded-full px-3 text-[12px] font-medium transition-colors"
+            style={{
+              background: active ? 'var(--lead-accent)' : 'transparent',
+              color: active ? '#fff' : 'var(--lead-ink)',
+            }}
+          >
+            {label}
+          </button>
+        )
+      })}
     </div>
   )
 }

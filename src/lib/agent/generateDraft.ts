@@ -11,6 +11,7 @@ function buildDraftPrompt(
   lead: AudienceLead,
   intent: ParsedIntent,
   lastInbound: string | null,
+  projectInstructions?: string | null,
 ): { system: string; user: string } {
   const toneMap: Record<string, string> = {
     friendly: 'warm and friendly',
@@ -23,9 +24,13 @@ function buildDraftPrompt(
     ? `Their last message to you: "${lastInbound.slice(0, 300)}"`
     : 'No previous conversation.'
 
+  const projectBlock = projectInstructions?.trim()
+    ? `Project context for this customer (follow strictly):\n${projectInstructions.trim()}\n\n`
+    : ''
+
   const system = `${manilaNowBlock()}
 
-You are a sales assistant writing a short Messenger follow-up for ${lead.name ?? 'a lead'}.
+${projectBlock}You are a sales assistant writing a short Messenger follow-up for ${lead.name ?? 'a lead'}.
 Tone: ${toneDesc}.
 Keep it under 3 sentences. Do NOT use emojis excessively. Sound human, not robotic.
 Output ONLY the message text — no quotes, no preamble, no explanation.`
@@ -51,7 +56,8 @@ export async function generateDraft(
     })
 
   const lastInbound = ctx.lastInboundByThread.get(lead.thread_id) ?? null
-  const { system, user } = buildDraftPrompt(lead, intent, lastInbound)
+  const projectInstructions = ctx.projectInstructionsByLead.get(lead.id) ?? null
+  const { system, user } = buildDraftPrompt(lead, intent, lastInbound, projectInstructions)
 
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), DRAFT_TIMEOUT_MS)

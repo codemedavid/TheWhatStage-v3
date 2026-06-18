@@ -166,6 +166,28 @@ export async function fetchSubmissions(
   return rows
 }
 
+// Map submission id → existing project id, for submissions that have already
+// been turned into a project (origin_submission_id link). Lets the submissions
+// view show "View project" instead of creating a duplicate.
+export async function fetchProjectIdsBySubmissionIds(
+  supabase: SupabaseClient,
+  userId: string,
+  submissionIds: string[],
+): Promise<Map<string, string>> {
+  const map = new Map<string, string>()
+  if (submissionIds.length === 0) return map
+  const { data, error } = await supabase
+    .from('projects')
+    .select('id, origin_submission_id')
+    .eq('user_id', userId)
+    .in('origin_submission_id', submissionIds)
+  if (error) throw new Error(`fetchProjectIdsBySubmissionIds: ${error.message}`)
+  for (const row of (data ?? []) as Array<{ id: string; origin_submission_id: string | null }>) {
+    if (row.origin_submission_id) map.set(row.origin_submission_id, row.id)
+  }
+  return map
+}
+
 export interface PipelineStageOption {
   id: string
   name: string

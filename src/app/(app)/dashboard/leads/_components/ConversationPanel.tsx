@@ -6,11 +6,14 @@ import {
   resumeBot,
   setAutoReply,
   undoStageEvent,
+  type ConversationAttachment,
   type ConversationComment,
   type ConversationData,
   type ConversationMessage,
   type ConversationStageEvent,
 } from '../actions/messenger'
+import { AttachmentComposer } from './AttachmentComposer'
+import { ActionPagePicker } from './ActionPagePicker'
 
 type State =
   | { status: 'loading' }
@@ -21,6 +24,7 @@ type State =
 export function ConversationPanel({ leadId }: { leadId: string }) {
   const [state, setState] = useState<State>({ status: 'loading' })
   const [draft, setDraft] = useState('')
+  const [panel, setPanel] = useState<'none' | 'attach' | 'page'>('none')
   const [sending, startSend] = useTransition()
   const [toggling, startToggle] = useTransition()
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -174,6 +178,50 @@ export function ConversationPanel({ leadId }: { leadId: string }) {
             ),
           )
         )}
+      </div>
+
+      {panel === 'attach' && (
+        <AttachmentComposer
+          leadId={leadId}
+          onSent={refresh}
+          onError={(message) => setState({ status: 'error', message })}
+          onClose={() => setPanel('none')}
+        />
+      )}
+      {panel === 'page' && (
+        <ActionPagePicker
+          leadId={leadId}
+          onSent={refresh}
+          onError={(message) => setState({ status: 'error', message })}
+          onClose={() => setPanel('none')}
+        />
+      )}
+
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setPanel((p) => (p === 'attach' ? 'none' : 'attach'))}
+          className="lead-focus inline-flex h-8 items-center gap-1 rounded-full px-3 text-[12px] font-medium"
+          style={
+            panel === 'attach'
+              ? { background: 'var(--lead-accent)', color: '#fff' }
+              : { background: 'var(--lead-surface)', border: '1px solid var(--lead-line)', color: 'var(--lead-body)' }
+          }
+        >
+          ＋ Attach
+        </button>
+        <button
+          type="button"
+          onClick={() => setPanel((p) => (p === 'page' ? 'none' : 'page'))}
+          className="lead-focus inline-flex h-8 items-center gap-1 rounded-full px-3 text-[12px] font-medium"
+          style={
+            panel === 'page'
+              ? { background: 'var(--lead-accent)', color: '#fff' }
+              : { background: 'var(--lead-surface)', border: '1px solid var(--lead-line)', color: 'var(--lead-body)' }
+          }
+        >
+          Send action page
+        </button>
       </div>
 
       <div className="flex items-end gap-2">
@@ -435,10 +483,50 @@ function CommentActivity({ comment }: { comment: ConversationComment }) {
   )
 }
 
+function AttachmentView({ attachment }: { attachment: ConversationAttachment }) {
+  const { type, url, name } = attachment
+
+  if (!url) {
+    return (
+      <div className="text-[11px] italic" style={{ color: 'var(--lead-faint)' }}>
+        {name ?? type} (unavailable)
+      </div>
+    )
+  }
+
+  if (type === 'image') {
+    // eslint-disable-next-line @next/next/no-img-element
+    return <img src={url} alt={name ?? 'image'} className="max-h-48 rounded-lg object-contain" />
+  }
+  if (type === 'video') {
+    return <video src={url} controls className="max-h-48 rounded-lg" />
+  }
+  if (type === 'audio') {
+    return <audio src={url} controls className="w-full" />
+  }
+
+  // file | action_page → link chip
+  const label = type === 'action_page' ? `📄 ${name ?? 'Open action page'}` : `📎 ${name ?? 'Download file'}`
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="lead-focus inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-[12px] font-medium underline"
+      style={{ background: 'var(--lead-surface)', border: '1px solid var(--lead-line)', color: 'var(--lead-accent)' }}
+    >
+      {label}
+    </a>
+  )
+}
+
 function Bubble({ m }: { m: ConversationMessage }) {
   const isInbound = m.direction === 'inbound'
   const senderLabel =
     m.sender === 'bot' ? 'Bot' : m.sender === 'operator' ? 'You' : ''
+  const hasAttachments = m.attachments.length > 0
+  const showBody = Boolean(m.body) && (!hasAttachments || isInbound)
+  const isEmpty = !m.body && !hasAttachments
   return (
     <div
       className={`flex w-full ${isInbound ? 'justify-start' : 'justify-end'}`}
@@ -461,7 +549,18 @@ function Bubble({ m }: { m: ConversationMessage }) {
             {senderLabel}
           </div>
         )}
-        <div className="whitespace-pre-wrap break-words">{m.body || '(empty)'}</div>
+        {m.attachments.length > 0 && (
+          <div className="mb-1 flex flex-col gap-1.5">
+            {m.attachments.map((a, i) => (
+              <AttachmentView key={i} attachment={a} />
+            ))}
+          </div>
+        )}
+        {/* Outbound attachment rows carry a synthetic "[image] name" body purely
+            for the thread-list preview — the attachment itself is already shown,
+            so skip it here. Inbound captions and text bodies still render. */}
+        {showBody && <div className="whitespace-pre-wrap break-words">{m.body}</div>}
+        {isEmpty && <div className="whitespace-pre-wrap break-words">(empty)</div>}
         {m.error && (
           <div className="mt-1 text-[10.5px]" style={{ color: 'var(--lead-danger)' }}>
             Send failed: {m.error}
