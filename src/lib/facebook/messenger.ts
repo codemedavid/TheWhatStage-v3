@@ -174,12 +174,14 @@ export async function sendMessengerButton(args: {
   text: string
   url: string
   ctaLabel: string
+  messagingType?: 'RESPONSE' | 'UPDATE' | 'MESSAGE_TAG'
+  tag?: 'HUMAN_AGENT'
 }): Promise<{ message_id: string }> {
   const url = new URL(`${GRAPH}/me/messages`)
   url.searchParams.set('access_token', args.pageAccessToken)
-  return postJson<{ message_id: string }>(url.toString(), {
+  const body: Record<string, unknown> = {
     recipient: { id: args.recipientPsid },
-    messaging_type: 'RESPONSE',
+    messaging_type: args.messagingType ?? 'RESPONSE',
     message: {
       attachment: {
         type: 'template',
@@ -196,7 +198,9 @@ export async function sendMessengerButton(args: {
         },
       },
     },
-  })
+  }
+  if (args.tag) body.tag = args.tag
+  return postJson<{ message_id: string }>(url.toString(), body)
 }
 
 /**
@@ -263,6 +267,8 @@ export async function sendMessengerGenericTemplate(args: {
   pageAccessToken: string
   recipientPsid: string
   elements: MessengerGenericElement[]
+  messagingType?: 'RESPONSE' | 'UPDATE' | 'MESSAGE_TAG'
+  tag?: 'HUMAN_AGENT'
 }): Promise<{ message_id: string }> {
   const url = new URL(`${GRAPH}/me/messages`)
   url.searchParams.set('access_token', args.pageAccessToken)
@@ -282,16 +288,18 @@ export async function sendMessengerGenericTemplate(args: {
     }
     return out
   })
-  return postJson<{ message_id: string }>(url.toString(), {
+  const body: Record<string, unknown> = {
     recipient: { id: args.recipientPsid },
-    messaging_type: 'RESPONSE',
+    messaging_type: args.messagingType ?? 'RESPONSE',
     message: {
       attachment: {
         type: 'template',
         payload: { template_type: 'generic', elements },
       },
     },
-  })
+  }
+  if (args.tag) body.tag = args.tag
+  return postJson<{ message_id: string }>(url.toString(), body)
 }
 
 /**
@@ -361,25 +369,68 @@ export async function sendMessengerUtilityTemplate(args: {
   return postJson<{ message_id: string }>(url.toString(), body)
 }
 
-export async function sendMessengerImage(args: {
+/**
+ * Messenger media attachment types accepted by the Send API's
+ * `message.attachment.type` field. `image` covers photos, `video`/`audio`
+ * cover playable media (audio is how voice notes are delivered), and `file`
+ * is the catch-all for documents (PDF, etc.).
+ */
+export type MessengerAttachmentType = 'image' | 'video' | 'audio' | 'file'
+
+/**
+ * Send any media attachment (image / video / audio / file) by URL. Meta fetches
+ * the URL server-side, so it must be publicly reachable for the fetch window
+ * (we pass short-lived signed storage URLs). `is_reusable:true` lets Meta cache
+ * the upload so a slow signed-URL expiry doesn't break delivery.
+ *
+ * Accepts `messagingType`/`tag` so operator sends outside the 24h window can
+ * carry the HUMAN_AGENT tag — without it Meta rejects out-of-window attachments.
+ */
+export async function sendMessengerAttachment(args: {
   pageAccessToken: string
   recipientPsid: string
-  imageUrl: string
+  attachmentType: MessengerAttachmentType
+  url: string
+  messagingType?: 'RESPONSE' | 'UPDATE' | 'MESSAGE_TAG'
+  tag?: 'HUMAN_AGENT'
 }): Promise<{ message_id: string }> {
-  const url = new URL(`${GRAPH}/me/messages`)
-  url.searchParams.set('access_token', args.pageAccessToken)
-  return postJson<{ message_id: string }>(url.toString(), {
+  const endpoint = new URL(`${GRAPH}/me/messages`)
+  endpoint.searchParams.set('access_token', args.pageAccessToken)
+  const body: Record<string, unknown> = {
     recipient: { id: args.recipientPsid },
-    messaging_type: 'RESPONSE',
+    messaging_type: args.messagingType ?? 'RESPONSE',
     message: {
       attachment: {
-        type: 'image',
+        type: args.attachmentType,
         payload: {
-          url: args.imageUrl,
+          url: args.url,
           is_reusable: true,
         },
       },
     },
+  }
+  if (args.tag) body.tag = args.tag
+  return postJson<{ message_id: string }>(endpoint.toString(), body)
+}
+
+/**
+ * Thin wrapper preserving the existing image-send call sites. New code should
+ * prefer {@link sendMessengerAttachment}.
+ */
+export async function sendMessengerImage(args: {
+  pageAccessToken: string
+  recipientPsid: string
+  imageUrl: string
+  messagingType?: 'RESPONSE' | 'UPDATE' | 'MESSAGE_TAG'
+  tag?: 'HUMAN_AGENT'
+}): Promise<{ message_id: string }> {
+  return sendMessengerAttachment({
+    pageAccessToken: args.pageAccessToken,
+    recipientPsid: args.recipientPsid,
+    attachmentType: 'image',
+    url: args.imageUrl,
+    messagingType: args.messagingType,
+    tag: args.tag,
   })
 }
 

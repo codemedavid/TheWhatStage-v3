@@ -1,10 +1,12 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import {
+  sendMessengerAttachment,
   sendMessengerButton,
   sendMessengerGenericTemplate,
   sendMessengerImage,
   sendMessengerText,
   sendMessengerUtilityTemplate,
+  type MessengerAttachmentType,
   type MessengerGenericElement,
 } from '@/lib/facebook/messenger'
 import { deeplinkActionPageUrl } from '@/lib/action-pages/urls'
@@ -18,6 +20,10 @@ export type OutboundPayload =
   | { kind: 'text'; text: string }
   | { kind: 'button'; text: string; url: string; ctaLabel: string }
   | { kind: 'image'; imageUrl: string }
+  // Media attachment by URL — video/audio (voice notes)/file (documents).
+  // Images use the dedicated 'image' kind above. The URL must be reachable by
+  // Meta's fetcher (we pass short-lived signed storage URLs).
+  | { kind: 'video' | 'audio' | 'file'; url: string }
   | { kind: 'generic_template'; elements: MessengerGenericElement[] }
   // Approved Meta utility-message template. Used for sends outside the 24h
   // window (e.g. agent campaigns to leads who haven't replied recently).
@@ -216,6 +222,7 @@ export async function sendOutbound(args: {
         text: payload.text,
         url: payload.url,
         ctaLabel: payload.ctaLabel,
+        ...(useHumanAgent ? { messagingType: 'MESSAGE_TAG', tag: 'HUMAN_AGENT' } : {}),
       })
       messageId = result.message_id
     } else if (payload.kind === 'generic_template') {
@@ -223,13 +230,26 @@ export async function sendOutbound(args: {
         pageAccessToken: pageToken,
         recipientPsid: thread.psid,
         elements: payload.elements,
+        ...(useHumanAgent ? { messagingType: 'MESSAGE_TAG', tag: 'HUMAN_AGENT' } : {}),
       })
       messageId = result.message_id
-    } else {
+    } else if (payload.kind === 'image') {
       const result = await sendMessengerImage({
         pageAccessToken: pageToken,
         recipientPsid: thread.psid,
         imageUrl: payload.imageUrl,
+        ...(useHumanAgent ? { messagingType: 'MESSAGE_TAG', tag: 'HUMAN_AGENT' } : {}),
+      })
+      messageId = result.message_id
+    } else {
+      // video | audio | file — generic media attachment by URL.
+      const attachmentType: MessengerAttachmentType = payload.kind
+      const result = await sendMessengerAttachment({
+        pageAccessToken: pageToken,
+        recipientPsid: thread.psid,
+        attachmentType,
+        url: payload.url,
+        ...(useHumanAgent ? { messagingType: 'MESSAGE_TAG', tag: 'HUMAN_AGENT' } : {}),
       })
       messageId = result.message_id
     }

@@ -89,8 +89,8 @@ export function LeadCard({ lead, onClick }: { lead: LeadRow; onClick: () => void
               {lead.latest_auto_move.source === 'deep_classifier' ? 'AI audit' : 'AI per-turn'} →{' '}
               {lead.latest_auto_move.to_stage_name ?? 'stage'}
             </div>
-            <div className="mt-1" style={{ color: 'var(--lead-faint)' }}>
-              {new Date(lead.latest_auto_move.created_at).toLocaleString(undefined, {
+            <div className="mt-1" style={{ color: 'var(--lead-faint)' }} suppressHydrationWarning>
+              {new Date(lead.latest_auto_move.created_at).toLocaleString('en-US', {
                 month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
               })}
               {lead.latest_auto_move.confidence ? ` · ${lead.latest_auto_move.confidence}` : ''}

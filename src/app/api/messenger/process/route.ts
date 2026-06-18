@@ -19,6 +19,8 @@ import { handleCampaignSend } from '@/lib/messenger/campaignSend'
 import { handleReminderFire } from '@/lib/reminders/fire'
 import { maybeScheduleFollowup } from '@/lib/followups/seed'
 import { handleFollowupSendJob } from '@/lib/followups/fire'
+import { handleProjectSequenceSendJob } from '@/lib/projects/sequences/fire'
+import { handleLeadSequenceSendJob } from '@/lib/leads/sequences/fire'
 import { extractReminder, type ExtractedReminder } from '@/lib/reminders/extract'
 import { resolveTopics, type PendingReminder } from '@/lib/reminders/resolve'
 import { seedReminderSequence } from '@/lib/reminders/sequence-seed'
@@ -44,6 +46,7 @@ import {
 } from '@/lib/chatbot/classify'
 import { getChatbotConfig, type ChatbotConfig } from '@/lib/chatbot/config'
 import { loadLeadContext } from '@/lib/chatbot/leadContext'
+import { resolveActiveProjectContext, renderProjectContextBlock } from '@/lib/projects/active-project'
 import { interruptWorkflowRun } from '@/lib/workflow/trigger'
 import { runDeepReclassify } from '@/lib/chatbot/deep-reclassify'
 import { isBotPaused } from '@/lib/chatbot/takeover'
@@ -390,6 +393,22 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
     await handleFollowupSendJob(admin, {
       id: job.id,
       payload: job.payload as { schedule_id: string } | null,
+    })
+    return
+  }
+
+  if (job.kind === 'project_sequence_send') {
+    await handleProjectSequenceSendJob(admin, {
+      id: job.id,
+      payload: job.payload as { run_id: string } | null,
+    })
+    return
+  }
+
+  if (job.kind === 'lead_sequence_send') {
+    await handleLeadSequenceSendJob(admin, {
+      id: job.id,
+      payload: job.payload as { run_id: string } | null,
     })
     return
   }
@@ -1591,8 +1610,9 @@ async function loadReplyContext(
     stages,
     leadRow,
     history,
-    leadContextBlock,
+    rawLeadContextBlock,
     allSendablePages,
+    projectContextBlock,
   ] = await Promise.all([
     getChatbotConfig(admin, userId),
     fetchPipelineStages(admin, userId),
@@ -1611,7 +1631,25 @@ async function loadReplyContext(
     thread.auto_reply_enabled
       ? loadSendableActionPages(admin, userId, null)
       : Promise.resolve([] as SendableActionPage[]),
+    // Active-project alignment: inject the customer's open-project AI
+    // instructions so the live reply stays on-message for that deal.
+    thread.auto_reply_enabled && leadId
+      ? resolveActiveProjectContext(admin, leadId)
+          .then((p) => renderProjectContextBlock(p))
+          .catch((e) => {
+            console.warn('[messenger.worker] resolveActiveProject failed', {
+              err: e instanceof Error ? e.message : String(e),
+            })
+            return ''
+          })
+      : Promise.resolve(''),
   ])
+
+  // Fold the project block into the lead-context block so it reaches the system
+  // prompt at the existing injection point with no downstream changes.
+  const leadContextBlock = [rawLeadContextBlock, projectContextBlock]
+    .filter((b) => b && b.trim())
+    .join('\n\n')
 
   const currentStageId = leadRow?.stage_id ?? null
   const campaignId = leadRow?.campaign_id ?? null

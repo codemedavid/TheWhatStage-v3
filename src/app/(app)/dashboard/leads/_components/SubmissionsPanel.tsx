@@ -1,11 +1,13 @@
 'use client'
 
 import { useEffect, useState, useTransition } from 'react'
+import { useRouter } from 'next/navigation'
 import {
   loadLeadSubmissions,
   type LeadSubmission,
 } from '../actions/submissions'
 import { SubmissionView } from '../../_components/SubmissionView'
+import { createProjectFromSubmission } from '../../projects/actions/projects'
 
 type State =
   | { kind: 'loading' }
@@ -86,12 +88,27 @@ export function SubmissionsPanel({
 
 function SubmissionCard({ submission }: { submission: LeadSubmission }) {
   const [open, setOpen] = useState(false)
+  const router = useRouter()
+  const [marking, startMark] = useTransition()
+  const [markError, setMarkError] = useState<string | null>(null)
   const when = new Date(submission.created_at).toLocaleString(undefined, {
     month: 'short',
     day: 'numeric',
     hour: 'numeric',
     minute: '2-digit',
   })
+
+  const markAsProject = () => {
+    setMarkError(null)
+    startMark(async () => {
+      try {
+        const id = await createProjectFromSubmission(submission.id)
+        router.push(`/dashboard/projects?project=${id}`)
+      } catch (e) {
+        setMarkError(e instanceof Error ? e.message : 'Failed to create project')
+      }
+    })
+  }
   return (
     <div
       className="rounded-lg"
@@ -149,6 +166,20 @@ function SubmissionCard({ submission }: { submission: LeadSubmission }) {
             data={submission.data}
             theme="panel"
           />
+          <div className="mt-3 flex items-center justify-between gap-2">
+            {markError && (
+              <span className="text-[11.5px]" style={{ color: 'var(--lead-danger)' }}>{markError}</span>
+            )}
+            <button
+              type="button"
+              onClick={markAsProject}
+              disabled={marking}
+              className="ml-auto rounded-md px-2.5 py-1.5 text-[12px] font-medium text-white disabled:opacity-50"
+              style={{ background: 'var(--lead-accent)' }}
+            >
+              {marking ? 'Creating…' : 'Mark as project'}
+            </button>
+          </div>
         </div>
       )}
     </div>

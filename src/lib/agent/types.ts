@@ -28,6 +28,9 @@ export interface BulkContext {
   otnByThread: Map<string, { token: string; requested_at: string }>
   cooldownThreadIds: Set<string>
   dailyCapUsed: number
+  // Per-customer (lead_id) project AI-instructions, used to align the draft to
+  // the active project for that customer. Empty when the lead has no project.
+  projectInstructionsByLead: Map<string, string>
 }
 
 export type PolicyResult =

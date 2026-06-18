@@ -33,6 +33,14 @@ interface Props {
  * `action`/`method` stay on the <form> so submission still works with JS
  * disabled (progressive enhancement); the handler enhances the JS path.
  */
+/**
+ * Submit lifecycle. `submitted` is a terminal latched state held while the
+ * browser navigates to the thank-you screen, so on a slow network the lead
+ * sees an unambiguous "✓ Submitted" confirmation instead of a button stuck on
+ * "Submitting…" that invites another tap.
+ */
+type SubmitState = 'idle' | 'submitting' | 'submitted' | 'error'
+
 export default function FormClient({
   slug,
   submitLabel,
@@ -40,13 +48,15 @@ export default function FormClient({
   buttonStyle,
   children,
 }: Props) {
-  const [submitting, setSubmitting] = useState(false)
-  const [hasError, setHasError] = useState(false)
+  const [state, setState] = useState<SubmitState>('idle')
   const inFlightRef = useRef(false)
+
+  // `submitted` keeps the lead locked out of re-submitting while we redirect.
+  const isBusy = state === 'submitting' || state === 'submitted'
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
-    if (inFlightRef.current || submitting) return
+    if (inFlightRef.current || isBusy) return
 
     const form = e.currentTarget
     // Respect native required-field validation before sending.
@@ -61,8 +71,7 @@ export default function FormClient({
     // dedupes to one row (set, not append, to collapse any stray duplicate).
     fd.set('idempotency_key', idempotencyKey)
 
-    setSubmitting(true)
-    setHasError(false)
+    setState('submitting')
     try {
       const res = await fetch('/api/action-pages/submit', {
         method: 'POST',
@@ -76,19 +85,20 @@ export default function FormClient({
       const body = (await res.json().catch(() => null)) as
         | { submission_id?: string | null }
         | null
-      // Mirror the server's native 303 redirect to the thank-you screen. Keep
-      // the button latched (no reset) while we navigate away.
+      // Latch the success state so the button reads "✓ Submitted" and stays
+      // locked while we mirror the server's native 303 redirect to the
+      // thank-you screen.
+      setState('submitted')
       const url = new URL(`/a/${slug}`, window.location.href)
       url.searchParams.set('submitted', '1')
       if (body?.submission_id) url.searchParams.set('submission', body.submission_id)
       window.location.assign(url.toString())
-      // Keep the button latched (submitting stays true) while navigating away,
-      // but release the ref so the guard isn't left dirty if navigation is
-      // blocked (e.g. a beforeunload handler) and the user must retry.
+      // Release the ref so the guard isn't left dirty if navigation is blocked
+      // (e.g. a beforeunload handler); the latched `submitted` state still
+      // blocks re-entry via isBusy.
       inFlightRef.current = false
     } catch {
-      setHasError(true)
-      setSubmitting(false)
+      setState('error')
       inFlightRef.current = false
     }
   }
@@ -98,23 +108,71 @@ export default function FormClient({
       action="/api/action-pages/submit"
       method="post"
       onSubmit={handleSubmit}
+      aria-busy={isBusy}
       className="space-y-4"
     >
       <input type="hidden" name="idempotency_key" value={idempotencyKey} />
-      {children}
-      {hasError && (
+      {/* Disable every field while in flight so the lead can't edit answers
+          mid-submit and gets clear visual feedback the form is locked. */}
+      <fieldset
+        disabled={isBusy}
+        className="m-0 min-w-0 space-y-4 border-0 p-0 transition-opacity disabled:opacity-60"
+      >
+        {children}
+      </fieldset>
+      {/* Polite live region so screen readers announce the status change. */}
+      <p className="sr-only" role="status" aria-live="polite">
+        {state === 'submitting'
+          ? 'Submitting your response…'
+          : state === 'submitted'
+            ? 'Response submitted. Redirecting…'
+            : ''}
+      </p>
+      {state === 'error' && (
         <p className="text-[13px] text-red-600" role="alert">
           Something went wrong. Please try again.
         </p>
       )}
       <button
         type="submit"
-        disabled={submitting}
-        className="w-full rounded-md px-3 py-2 text-[14px] font-semibold transition-opacity disabled:cursor-not-allowed disabled:opacity-60"
+        disabled={isBusy}
+        aria-disabled={isBusy}
+        className="flex w-full items-center justify-center gap-2 rounded-md px-3 py-2 text-[14px] font-semibold transition-opacity disabled:cursor-not-allowed disabled:opacity-60"
         style={buttonStyle}
       >
-        {submitting ? 'Submitting…' : submitLabel}
+        {state === 'submitting' && <Spinner />}
+        {state === 'submitting'
+          ? 'Submitting…'
+          : state === 'submitted'
+            ? '✓ Submitted'
+            : submitLabel}
       </button>
     </form>
+  )
+}
+
+/** Inline spinner shown inside the submit button while the POST is in flight. */
+function Spinner() {
+  return (
+    <svg
+      className="h-4 w-4 animate-spin"
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden="true"
+    >
+      <circle
+        className="opacity-25"
+        cx="12"
+        cy="12"
+        r="10"
+        stroke="currentColor"
+        strokeWidth="4"
+      />
+      <path
+        className="opacity-75"
+        fill="currentColor"
+        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+      />
+    </svg>
   )
 }

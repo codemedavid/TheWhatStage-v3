@@ -186,6 +186,7 @@ function buildHref(params: LeadsQuery, page: number) {
   const u = new URLSearchParams()
   u.set('view', 'contact')
   if (params.q) u.set('q', params.q)
+  u.set('range', params.range)
   if (params.from) u.set('from', params.from)
   if (params.to) u.set('to', params.to)
   u.set('contact_filter', params.contact_filter)

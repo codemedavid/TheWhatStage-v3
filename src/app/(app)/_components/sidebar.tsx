@@ -7,6 +7,7 @@ import { useState, useEffect, useTransition } from 'react'
 type IconName =
   | 'overview'
   | 'leads'
+  | 'projects'
   | 'knowledge'
   | 'chatbot'
   | 'funnels'
@@ -38,6 +39,7 @@ type NavItem = {
 const items: NavItem[] = [
   { href: '/dashboard', label: 'Overview', icon: 'overview' },
   { href: '/dashboard/leads', label: 'Leads', icon: 'leads' },
+  { href: '/dashboard/projects', label: 'Projects', icon: 'projects' },
   { href: '/dashboard/knowledge', label: 'Knowledge', icon: 'knowledge' },
   { href: '/dashboard/chatbot', label: 'Chatbot', icon: 'chatbot' },
   { href: '/dashboard/action-pages', label: 'Action Pages', icon: 'actions' },
@@ -53,6 +55,7 @@ const items: NavItem[] = [
 const mobileItems: { href: string; label: string; icon: IconName }[] = [
   { href: '/dashboard', label: 'Overview', icon: 'overview' },
   { href: '/dashboard/leads', label: 'Leads', icon: 'leads' },
+  { href: '/dashboard/projects', label: 'Projects', icon: 'projects' },
   { href: '/dashboard/chatbot', label: 'Chatbot', icon: 'chatbot' },
   { href: '/dashboard/action-pages', label: 'Actions', icon: 'actions' },
   { href: '/dashboard/settings', label: 'Settings', icon: 'settings' },
@@ -72,6 +75,13 @@ function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
         <path d="M2.5 20c0-3.5 3-6 6.5-6s6.5 2.5 6.5 6" />
         <circle cx="17" cy="9" r="2.5" />
         <path d="M16 14c2.5 0 5 1.5 5 5" />
+      </>
+    ),
+    projects: (
+      <>
+        <rect x="3" y="7" width="18" height="13" rx="2" />
+        <path d="M8 7V5a2 2 0 012-2h4a2 2 0 012 2v2" />
+        <path d="M3 13h18" />
       </>
     ),
     knowledge: (

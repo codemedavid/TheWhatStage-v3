@@ -134,8 +134,8 @@ export function LeadsTableClient({
                   <td className="px-3 py-2.5 text-right tabular-nums" style={{ color: 'var(--lead-ink)' }}>
                     {r.estimated_value !== null ? formatValue(r.estimated_value) : <Em />}
                   </td>
-                  <td className="px-3 py-2.5 text-right tabular-nums" style={{ color: 'var(--lead-muted)' }}>
-                    {new Date(r.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                  <td className="px-3 py-2.5 text-right tabular-nums" style={{ color: 'var(--lead-muted)' }} suppressHydrationWarning>
+                    {new Date(r.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                   </td>
                 </tr>
               )

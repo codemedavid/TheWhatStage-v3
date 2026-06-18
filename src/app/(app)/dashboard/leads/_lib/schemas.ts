@@ -41,6 +41,10 @@ export const LeadsQuery = z.object({
   stage: z.string().uuid().optional(),
   page: z.coerce.number().int().min(1).default(1),
   q: z.string().trim().max(120).optional(),
+  // Quick date-range preset. Defaults to `today` so the board only renders the
+  // current day's leads unless the user widens the window. `custom` means the
+  // explicit `from`/`to` bounds below take over; `all` clears the date filter.
+  range: z.enum(['today', 'week', 'month', 'all', 'custom']).default('today'),
   from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   sort: z.enum(['recent', 'oldest', 'name_asc', 'value_desc']).default('recent'),

@@ -1,0 +1,100 @@
+'use client'
+
+import { useState, useTransition } from 'react'
+import Link from 'next/link'
+import { useRouter } from 'next/navigation'
+import { createProjectFromSubmission } from '../../../../projects/actions/projects'
+
+interface Props {
+  submissionId: string
+  leadId: string | null
+  existingProjectId?: string | null
+}
+
+// Inline action on a submission card: turn the submission into a project so the
+// deal can be tracked on the Projects board. Mirrors LeadProjectsPanel's
+// useTransition + router.push pattern. Hidden when the submission has no lead,
+// since createProjectFromSubmission requires one.
+export function CreateProjectButton({ submissionId, leadId, existingProjectId }: Props) {
+  const router = useRouter()
+  const [pending, start] = useTransition()
+  const [error, setError] = useState<string | null>(null)
+
+  if (existingProjectId) {
+    return (
+      <Link
+        href={`/dashboard/projects?project=${existingProjectId}`}
+        className="inline-flex items-center gap-1.5 rounded-full border border-[#BBF7D0] bg-[#F0FDF4] px-2.5 py-1 text-[11px] font-medium text-[#15803D] transition-colors hover:bg-[#DCFCE7]"
+        title="This submission is already assigned to a project"
+      >
+        <CheckIcon size={11} />
+        Project assigned
+      </Link>
+    )
+  }
+
+  if (!leadId) return null
+
+  const create = () => {
+    setError(null)
+    start(async () => {
+      try {
+        const id = await createProjectFromSubmission(submissionId)
+        router.push(`/dashboard/projects?project=${id}`)
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Failed to create project')
+      }
+    })
+  }
+
+  return (
+    <div className="flex flex-col items-end gap-0.5">
+      <button
+        type="button"
+        onClick={create}
+        disabled={pending}
+        className="inline-flex items-center gap-1 rounded-md border border-[#E5E7EB] bg-white px-2 py-1 text-[11px] font-medium text-[#374151] transition-colors hover:bg-[#F9FAFB] disabled:opacity-50"
+      >
+        <ProjectIcon size={11} />
+        {pending ? 'Creating…' : 'Create project'}
+      </button>
+      {error && <span className="text-[10.5px] text-[#E11D48]">{error}</span>}
+    </div>
+  )
+}
+
+function CheckIcon({ size = 12 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2.2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M20 6L9 17l-5-5" />
+    </svg>
+  )
+}
+
+function ProjectIcon({ size = 12 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.9}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
+    </svg>
+  )
+}
