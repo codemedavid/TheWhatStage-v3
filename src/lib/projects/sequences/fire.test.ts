@@ -5,18 +5,22 @@
 
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 
-const { draftMock, loadMock, sendMock, advanceMock } = vi.hoisted(() => ({
+const { draftMock, batchMock, loadMock, sendMock, advanceMock, knowledgeMock } = vi.hoisted(() => ({
   draftMock: vi.fn(),
+  batchMock: vi.fn(),
   loadMock: vi.fn(),
   sendMock: vi.fn(),
   advanceMock: vi.fn(),
+  knowledgeMock: vi.fn(),
 }))
 
 vi.mock('@/lib/sequences/shared', () => ({
   draftSequenceStep: draftMock,
+  draftSequenceBatch: batchMock,
   loadSequenceSendContext: loadMock,
   sendAndRecordStep: sendMock,
   nextSequenceState: advanceMock,
+  retrieveKnowledge: knowledgeMock,
 }))
 vi.mock('@sentry/nextjs', () => ({ captureException: vi.fn() }))
 
@@ -28,6 +32,7 @@ function makeAdmin(seed: {
   run: Record<string, unknown> | null
   project: Record<string, unknown> | null
   steps: Step[]
+  sequence?: Record<string, unknown> | null
 }) {
   const runUpdates: Array<Record<string, unknown>> = []
   const jobUpdates: Array<Record<string, unknown>> = []
@@ -57,6 +62,7 @@ function makeAdmin(seed: {
         maybeSingle: async () => {
           if (table === 'project_sequence_runs') return { data: seed.run, error: null }
           if (table === 'projects') return { data: seed.project, error: null }
+          if (table === 'project_stage_sequences') return { data: seed.sequence ?? null, error: null }
           return { data: null, error: null }
         },
       }
@@ -74,9 +80,13 @@ const baseProject = { id: 'p1', stage_id: 'st-1', title: 'Roof repair', ai_instr
 
 beforeEach(() => {
   vi.clearAllMocks()
-  loadMock.mockResolvedValue({ ok: true, ctx: { thread: { id: 't1', psid: 'x', last_inbound_at: null, full_name: null, page_id: 'pg' }, pageToken: 'tok', persona: null, leadName: 'Ana', recentMessages: [] } })
+  loadMock.mockResolvedValue({ ok: true, ctx: { thread: { id: 't1', psid: 'x', last_inbound_at: null, full_name: null, page_id: 'pg' }, pageToken: 'tok', persona: null, instructions: null, doRules: [], dontRules: [], leadName: 'Ana', recentMessages: [] } })
   sendMock.mockResolvedValue({ sent: true, messageId: 'm1' })
   advanceMock.mockReturnValue({ done: true })
+  knowledgeMock.mockResolvedValue('')
+  // Default: batch produces nothing → existing tests exercise the single-step
+  // fallback chain. Batch-specific tests override this.
+  batchMock.mockResolvedValue([])
 })
 
 describe('handleProjectSequenceRun fallback behaviour', () => {
@@ -119,6 +129,75 @@ describe('handleProjectSequenceRun fallback behaviour', () => {
     await handleProjectSequenceSendJob(admin, { id: 'job-3', payload: { run_id: 'run-1' } })
 
     expect(sendMock.mock.calls[0][1].text).toMatch(/^Hi! Just following up/)
+  })
+
+  it('generates the whole batch ONCE when the run has no stored drafts, stores it, and sends step 0', async () => {
+    batchMock.mockResolvedValue([
+      { position: 0, text: 'Batch touch zero' },
+      { position: 1, text: 'Batch touch one' },
+    ])
+    const { admin, runUpdates } = makeAdmin({
+      run: { ...baseRun, drafts: null }, project: baseProject,
+      sequence: { id: 'seq-1', stage_instructions: 'Be gentle', do_rules: ['Smile'], dont_rules: [] },
+      steps: [
+        { position: 0, delay_minutes: 5, instruction: 'Ask if they decided', fallback_message: 'fb0' },
+        { position: 1, delay_minutes: 1440, instruction: 'Share value', fallback_message: 'fb1' },
+      ],
+    })
+
+    await handleProjectSequenceSendJob(admin, { id: 'job-b1', payload: { run_id: 'run-1' } })
+
+    expect(batchMock).toHaveBeenCalledTimes(1)
+    expect(draftMock).not.toHaveBeenCalled() // no per-step draft when batch succeeds
+    expect(sendMock.mock.calls[0][1].text).toBe('Batch touch zero')
+    // The generated batch was persisted onto the run for later steps to reuse.
+    const persisted = runUpdates.find((u) => Array.isArray(u.drafts))
+    expect(persisted?.drafts).toEqual([
+      { position: 0, text: 'Batch touch zero' },
+      { position: 1, text: 'Batch touch one' },
+    ])
+  })
+
+  it('reuses stored drafts WITHOUT calling the LLM again on a later step', async () => {
+    const { admin } = makeAdmin({
+      run: {
+        ...baseRun, next_step_idx: 1,
+        drafts: [
+          { position: 0, text: 'Batch touch zero' },
+          { position: 1, text: 'Batch touch one' },
+        ],
+      },
+      project: baseProject,
+      sequence: { id: 'seq-1', stage_instructions: null, do_rules: [], dont_rules: [] },
+      steps: [
+        { position: 0, delay_minutes: 5, instruction: 'Ask', fallback_message: 'fb0' },
+        { position: 1, delay_minutes: 1440, instruction: 'Share', fallback_message: 'fb1' },
+      ],
+    })
+
+    await handleProjectSequenceSendJob(admin, { id: 'job-b2', payload: { run_id: 'run-1' } })
+
+    expect(batchMock).not.toHaveBeenCalled()
+    expect(draftMock).not.toHaveBeenCalled()
+    expect(sendMock.mock.calls[0][1].text).toBe('Batch touch one')
+  })
+
+  it('falls back to the single-step draft when the batch lacks this position', async () => {
+    batchMock.mockResolvedValue([{ position: 0, text: 'only zero' }]) // step 1 missing
+    draftMock.mockResolvedValue('Live single-step draft for step 1')
+    const { admin } = makeAdmin({
+      run: { ...baseRun, next_step_idx: 1, drafts: null }, project: baseProject,
+      sequence: { id: 'seq-1', stage_instructions: null, do_rules: [], dont_rules: [] },
+      steps: [
+        { position: 0, delay_minutes: 5, instruction: 'Ask', fallback_message: 'fb0' },
+        { position: 1, delay_minutes: 1440, instruction: 'Share', fallback_message: 'fb1' },
+      ],
+    })
+
+    await handleProjectSequenceSendJob(admin, { id: 'job-b3', payload: { run_id: 'run-1' } })
+
+    expect(draftMock).toHaveBeenCalledTimes(1)
+    expect(sendMock.mock.calls[0][1].text).toBe('Live single-step draft for step 1')
   })
 
   it('marks the run AND job failed when the send is blocked (no masking)', async () => {

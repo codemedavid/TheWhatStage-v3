@@ -233,6 +233,9 @@ export type StageSequenceStep = {
 export type StageSequence = {
   id: string | null
   enabled: boolean
+  stage_instructions: string | null
+  do_rules: string[]
+  dont_rules: string[]
   steps: StageSequenceStep[]
 }
 
@@ -243,10 +246,10 @@ export async function fetchStageSequence(
 ): Promise<StageSequence> {
   const { data: seq, error } = await supabase
     .from('project_stage_sequences')
-    .select('id, enabled')
+    .select('id, enabled, stage_instructions, do_rules, dont_rules')
     .eq('user_id', userId).eq('stage_id', stageId).maybeSingle()
   if (error) throw error
-  if (!seq) return { id: null, enabled: false, steps: [] }
+  if (!seq) return { id: null, enabled: false, stage_instructions: null, do_rules: [], dont_rules: [], steps: [] }
 
   const { data: steps, error: stepErr } = await supabase
     .from('project_stage_sequence_steps')
@@ -257,6 +260,33 @@ export async function fetchStageSequence(
   return {
     id: seq.id as string,
     enabled: seq.enabled as boolean,
+    stage_instructions: (seq.stage_instructions as string | null) ?? null,
+    do_rules: (seq.do_rules as string[] | null) ?? [],
+    dont_rules: (seq.dont_rules as string[] | null) ?? [],
     steps: (steps ?? []) as StageSequenceStep[],
   }
+}
+
+// Lightweight project list for the per-stage preview picker: pick one card
+// (lead) to test the follow-up sequence against. Owner-scoped.
+export type StagePreviewProject = { id: string; title: string; lead_name: string | null }
+
+export async function fetchStageProjectsForPreview(
+  supabase: SupabaseClient,
+  userId: string,
+  stageId: string,
+): Promise<StagePreviewProject[]> {
+  const { data, error } = await supabase
+    .from('projects')
+    .select('id, title, leads(name)')
+    .eq('user_id', userId).eq('stage_id', stageId)
+    .order('updated_at', { ascending: false })
+    .limit(100)
+  if (error) throw error
+  type Row = { id: string; title: string; leads: { name: string | null } | { name: string | null }[] | null }
+  return ((data ?? []) as Row[]).map((r) => ({
+    id: r.id,
+    title: r.title,
+    lead_name: first(r.leads)?.name ?? null,
+  }))
 }

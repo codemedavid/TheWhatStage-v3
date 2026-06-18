@@ -12,6 +12,7 @@ import {
   loadSequenceSendContext,
   sendAndRecordStep,
   nextSequenceState,
+  retrieveKnowledge,
 } from '@/lib/sequences/shared'
 import { resolveActiveProjectContext } from '@/lib/projects/active-project'
 
@@ -71,11 +72,22 @@ export async function handleLeadSequenceRun(
   // reuses the same context the live chatbot and project follow-ups use.
   const project = await resolveActiveProjectContext(admin, run.lead_id).catch(() => null)
 
+  // Knowledge relevant to this touch (best-effort — never blocks the send).
+  const knowledge = await retrieveKnowledge(
+    admin,
+    run.user_id,
+    [step.instruction, project?.title, project?.ai_instructions].filter(Boolean).join(' — '),
+  )
+
   let text: string
   try {
     text = await draftSequenceStep({
       leadName: ctx.leadName,
       persona: ctx.persona,
+      instructions: ctx.instructions,
+      doRules: ctx.doRules,
+      dontRules: ctx.dontRules,
+      knowledge,
       contextTitle: project?.title ?? null,
       aiInstructions: project?.ai_instructions ?? null,
       stepInstruction: step.instruction,

@@ -12,10 +12,14 @@ import * as Sentry from '@sentry/nextjs'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import {
   draftSequenceStep,
+  draftSequenceBatch,
   loadSequenceSendContext,
   sendAndRecordStep,
   nextSequenceState,
+  retrieveKnowledge,
+  type BatchDraft,
 } from '@/lib/sequences/shared'
+import type { SequenceSendContext } from '@/lib/sequences/shared'
 
 // Last-resort line when a step has no fallback_message and the LLM draft is
 // empty/errors. Generic and safe in any context so a touch still goes out.
@@ -28,6 +32,11 @@ const DEFAULT_FALLBACK =
 // fallback, whereas the lead worker has none and must keep the model's full
 // retry budget rather than fail a run on a transient slowdown.
 const DRAFT_TIMEOUT_MS = 8_000
+
+// The one-shot batch drafts the WHOLE sequence in a single call, so it gets a
+// larger budget than a single step — it still runs at most once per lead (on
+// the first touch), then every later touch reads the stored result.
+const BATCH_TIMEOUT_MS = 20_000
 
 function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -50,6 +59,9 @@ interface RunRow {
   started_at: string
   next_step_idx: number
   status: string
+  // The one-shot batch drafts, generated on the first touch and reused for the
+  // rest of the sequence. Null until generated.
+  drafts: BatchDraft[] | null
 }
 
 interface StepRow {
@@ -64,6 +76,14 @@ interface ProjectRow {
   stage_id: string
   title: string
   ai_instructions: string | null
+}
+
+// Per-stage follow-up guidance + rules, layered on top of the global chatbot
+// brain. Null fields when the stage has no extra guidance.
+interface SequenceRulesRow {
+  stage_instructions: string | null
+  do_rules: string[] | null
+  dont_rules: string[] | null
 }
 
 export interface ProjectSequenceSendJob {
@@ -86,7 +106,7 @@ export async function handleProjectSequenceRun(
 ): Promise<RunResult> {
   const { data: run } = await admin
     .from('project_sequence_runs')
-    .select('id, user_id, project_id, sequence_id, stage_id, lead_id, thread_id, started_at, next_step_idx, status')
+    .select('id, user_id, project_id, sequence_id, stage_id, lead_id, thread_id, started_at, next_step_idx, status, drafts')
     .eq('id', args.runId)
     .maybeSingle<RunRow>()
 
@@ -126,22 +146,39 @@ export async function handleProjectSequenceRun(
   if (!loaded.ok) { await markFailed(admin, run.id, loaded.reason); return { outcome: 'failed', reason: loaded.reason } }
   const { ctx } = loaded
 
-  // Draft the touch. An empty completion or a thrown draft error must NOT kill
-  // the run — fall back to the step's fallback_message (or the default) so the
-  // touch still sends. This is the only in-engine cause of non-delivery today
-  // (small model returns empty for some instructions, e.g. Tagalog).
-  let text = ''
-  try {
-    text = await withTimeout(draftSequenceStep({
-      leadName: ctx.leadName,
-      persona: ctx.persona,
-      contextTitle: project.title,
-      aiInstructions: project.ai_instructions,
-      stepInstruction: step.instruction,
-      recentMessages: ctx.recentMessages,
-    }), DRAFT_TIMEOUT_MS)
-  } catch (e) {
-    console.warn('[project.sequence] draft failed, using fallback', run.id, e instanceof Error ? e.message : String(e))
+  // Pull knowledge relevant to THIS project + sequence (best-effort,
+  // time-bounded). Shared by the one-shot batch and the per-step fallback so we
+  // never retrieve twice in the same run.
+  const knowledge = await withTimeout(
+    retrieveKnowledge(admin, run.user_id, knowledgeQuery(stepRows, project)),
+    DRAFT_TIMEOUT_MS,
+  ).catch(() => '')
+
+  // Resolve the touch text. Preference order (a touch is NEVER dropped):
+  //   1. the ONE-SHOT batch draft for this position (generated once per lead);
+  //   2. a live single-step draft (only if the batch lacks this position);
+  //   3. the step's fallback_message;
+  //   4. the built-in default.
+  const drafts = await resolveBatchDrafts(admin, run, stepRows, ctx, project, knowledge)
+  let text = drafts.find((d) => d.position === run.next_step_idx)?.text ?? ''
+
+  if (!text) {
+    try {
+      text = await withTimeout(draftSequenceStep({
+        leadName: ctx.leadName,
+        persona: ctx.persona,
+        instructions: ctx.instructions,
+        doRules: ctx.doRules,
+        dontRules: ctx.dontRules,
+        knowledge,
+        contextTitle: project.title,
+        aiInstructions: project.ai_instructions,
+        stepInstruction: step.instruction,
+        recentMessages: ctx.recentMessages,
+      }), DRAFT_TIMEOUT_MS)
+    } catch (e) {
+      console.warn('[project.sequence] draft failed, using fallback', run.id, e instanceof Error ? e.message : String(e))
+    }
   }
   if (!text) {
     text = step.fallback_message?.trim() || DEFAULT_FALLBACK
@@ -154,6 +191,63 @@ export async function handleProjectSequenceRun(
 
   await advanceRun(admin, run, stepRows)
   return { outcome: 'sent' }
+}
+
+// Build the knowledge-retrieval query for the whole sequence: every step goal
+// plus the project title + facts, deduped of empties.
+function knowledgeQuery(steps: StepRow[], project: ProjectRow): string {
+  return [...steps.map((s) => s.instruction), project.title, project.ai_instructions]
+    .filter(Boolean)
+    .join(' — ')
+}
+
+// Return the run's per-touch drafts. Reuses the stored batch when present;
+// otherwise generates the WHOLE sequence in ONE LLM call (grounded in the full
+// chatbot brain + per-stage rules + this project's facts) and persists it so
+// every later touch is a zero-LLM read. A failed/empty batch returns [] — the
+// caller then drafts the single step live and/or uses the fallback message, so
+// a touch is never dropped.
+async function resolveBatchDrafts(
+  admin: SupabaseClient,
+  run: RunRow,
+  steps: StepRow[],
+  ctx: SequenceSendContext,
+  project: ProjectRow,
+  knowledge: string,
+): Promise<BatchDraft[]> {
+  if (Array.isArray(run.drafts) && run.drafts.length > 0) return run.drafts
+
+  const { data: rules } = await admin
+    .from('project_stage_sequences')
+    .select('stage_instructions, do_rules, dont_rules')
+    .eq('id', run.sequence_id)
+    .maybeSingle<SequenceRulesRow>()
+
+  let drafts: BatchDraft[] = []
+  try {
+    drafts = await withTimeout(draftSequenceBatch({
+      leadName: ctx.leadName,
+      persona: ctx.persona,
+      instructions: ctx.instructions,
+      doRules: ctx.doRules,
+      dontRules: ctx.dontRules,
+      knowledge,
+      contextTitle: project.title,
+      aiInstructions: project.ai_instructions,
+      stageInstructions: rules?.stage_instructions ?? null,
+      stageDoRules: rules?.do_rules ?? [],
+      stageDontRules: rules?.dont_rules ?? [],
+      steps: steps.map((s) => ({ position: s.position, delayMinutes: s.delay_minutes, instruction: s.instruction })),
+      recentMessages: ctx.recentMessages,
+    }), BATCH_TIMEOUT_MS)
+  } catch (e) {
+    console.warn('[project.sequence] batch draft failed', run.id, e instanceof Error ? e.message : String(e))
+  }
+
+  if (drafts.length > 0) {
+    await admin.from('project_sequence_runs').update({ drafts }).eq('id', run.id)
+  }
+  return drafts
 }
 
 async function advanceRun(admin: SupabaseClient, run: RunRow, steps: StepRow[]): Promise<void> {

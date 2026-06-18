@@ -10,13 +10,16 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { decryptToken } from '@/lib/facebook/crypto'
 import { sendOutbound } from '@/lib/messenger/outbound'
 import { isInsideWindow } from '@/lib/agent/classifyPolicy'
-import { HfRouterLlm } from '@/lib/rag/llm'
-import { ragConfig } from '@/lib/rag/config'
-import { manilaNowBlock } from '@/lib/time/manilaNow'
+import { getChatbotConfig } from '@/lib/chatbot/config'
+import { createEmbedder } from '@/lib/rag/factory'
+import { retrieve } from '@/lib/rag/retriever'
 
 // Re-exported so workers can import the whole sequence core from one module.
 // Defined in advance.ts (no side-effectful imports) so it stays unit-testable.
 export { nextSequenceState } from './advance'
+// LLM draft wrappers live in ./draft (no Supabase/crypto/RAG imports) so they
+// stay unit-testable; re-exported here so workers keep one import surface.
+export { draftSequenceStep, draftSequenceBatch, type BatchDraft } from './draft'
 
 export type ChatMessage = { role: 'user' | 'assistant'; content: string }
 
@@ -31,49 +34,42 @@ export interface SequenceThread {
 export interface SequenceSendContext {
   thread: SequenceThread
   pageToken: string
+  // Full chatbot brain so a follow-up obeys the same voice + policy as the live
+  // reply (previously only `persona` was loaded — rules and instructions were
+  // silently dropped from every touch).
   persona: string | null
+  instructions: string | null
+  doRules: string[]
+  dontRules: string[]
   leadName: string | null
   recentMessages: ChatMessage[]
 }
 
-// Draft one follow-up step. Combines the chatbot persona, the customer/project
-// AI instructions (when present), the step instruction, and recent history.
-// `contextTitle` is the project title the message relates to (may be null for a
-// lead with no active project).
-export async function draftSequenceStep(args: {
-  leadName: string | null
-  persona: string | null
-  contextTitle: string | null
-  aiInstructions: string | null
-  stepInstruction: string
-  recentMessages: ChatMessage[]
-}): Promise<string> {
-  const { leadName, persona, contextTitle, aiInstructions, stepInstruction, recentMessages } = args
-  const llm = new HfRouterLlm({ model: process.env.AGENT_DRAFT_MODEL ?? ragConfig.classifierModel })
-
-  const personaBlock = persona?.trim() ? `${persona.trim()}\n\n` : ''
-  const projectBlock = aiInstructions?.trim()
-    ? `What you know about this customer${contextTitle ? ` / project "${contextTitle}"` : ''} (follow strictly):\n${aiInstructions.trim()}\n\n`
-    : contextTitle
-      ? `This message relates to the project "${contextTitle}".\n\n`
-      : ''
-
-  const system = `${manilaNowBlock()}
-
-${personaBlock}${projectBlock}You are a sales assistant writing a short, proactive Messenger follow-up for ${leadName ?? 'a customer'}.
-Keep it under 3 sentences. Sound human, not robotic. Do NOT use emojis excessively.
-Output ONLY the message text — no quotes, no preamble, no explanation.`
-
-  const convo = recentMessages.length > 0
-    ? `Recent conversation:\n${recentMessages.map((m) => `${m.role === 'assistant' ? 'You' : 'Them'}: ${m.content}`).join('\n')}\n\n`
-    : ''
-  const user = `${convo}Follow up about: ${stepInstruction}`
-
-  const draft = await llm.complete(
-    [{ role: 'system', content: system }, { role: 'user', content: user }],
-    { temperature: 0.6, maxTokens: 200 },
-  )
-  return draft.trim()
+// Best-effort knowledge-base retrieval for a follow-up touch, mirroring what the
+// live chatbot pulls in. Runs with the service-role admin client (no auth
+// context) so it uses the `_service` hybrid-search RPC. Returns a rendered
+// context block, or '' on no results / any error — knowledge must never block or
+// fail a touch.
+export async function retrieveKnowledge(
+  admin: SupabaseClient,
+  userId: string,
+  query: string,
+): Promise<string> {
+  const q = query.trim()
+  if (!q) return ''
+  try {
+    const embedder = createEmbedder()
+    const ctx = await retrieve(
+      { client: admin, embedder, rpcName: 'match_knowledge_hybrid_service' },
+      { userId, query: q },
+    )
+    const chunks = [...ctx.buckets.useful, ...ctx.buckets.ambiguous]
+    if (chunks.length === 0) return ''
+    return chunks.map((c, i) => `[${i + 1}] ${c.content.trim()}`).join('\n\n')
+  } catch (e) {
+    console.warn('[sequence] knowledge retrieval failed', e instanceof Error ? e.message : String(e))
+    return ''
+  }
 }
 
 // Load everything needed to send a sequence step on a thread: the thread, the
@@ -98,8 +94,10 @@ export async function loadSequenceSendContext(
     .maybeSingle<{ id: string; page_access_token: string }>()
   if (!page) return { ok: false, reason: 'page missing' }
 
-  const [{ data: chatbot }, { data: leadRow }, { data: msgs }] = await Promise.all([
-    admin.from('chatbot_configs').select('persona').eq('user_id', args.userId).maybeSingle<{ persona: string | null }>(),
+  const [config, { data: leadRow }, { data: msgs }] = await Promise.all([
+    // Full chatbot config — so the touch honours the operator's instructions and
+    // Do/Don't rules, not just the persona.
+    getChatbotConfig(admin, args.userId),
     admin.from('leads').select('name').eq('id', args.leadId).maybeSingle<{ name: string | null }>(),
     admin.from('messenger_messages').select('direction, body, created_at')
       .eq('thread_id', thread.id).order('created_at', { ascending: false }).limit(12),
@@ -115,7 +113,10 @@ export async function loadSequenceSendContext(
     ctx: {
       thread,
       pageToken: decryptToken(page.page_access_token),
-      persona: chatbot?.persona ?? null,
+      persona: config.persona ?? null,
+      instructions: config.instructions ?? null,
+      doRules: config.doRules ?? [],
+      dontRules: config.dontRules ?? [],
       leadName: leadRow?.name ?? thread.full_name ?? null,
       recentMessages,
     },
