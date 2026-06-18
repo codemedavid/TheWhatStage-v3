@@ -28,6 +28,36 @@ function mimeToAttachmentType(mime: string): AttachmentSendInput['attachmentType
   return 'file'
 }
 
+type UploadOk = { url: string; attachmentType: AttachmentSendInput['attachmentType']; name: string }
+type UploadResult = UploadOk | { error: string }
+
+/**
+ * Read the operator-upload response without assuming JSON. Proxies/tunnels
+ * (ngrok, Vercel) reject oversized bodies with a 413 whose body is plain text
+ * ("Request Entity Too Large"), so a naive res.json() throws an opaque parse
+ * error. Map known statuses to clear, actionable messages.
+ */
+async function parseUploadResponse(res: Response): Promise<UploadResult> {
+  if (res.status === 413) {
+    return { error: 'That clip is too large to send. Trim it to a shorter selection and try again.' }
+  }
+
+  const text = await res.text()
+  let json: unknown
+  try {
+    json = JSON.parse(text)
+  } catch {
+    // Non-JSON body (HTML error page, proxy message, etc.).
+    return { error: res.ok ? 'Upload failed: unexpected server response' : `Upload failed (${res.status})` }
+  }
+
+  if (json && typeof json === 'object' && 'error' in json) {
+    return { error: String((json as { error: unknown }).error) }
+  }
+  if (!res.ok) return { error: `Upload failed (${res.status})` }
+  return json as UploadOk
+}
+
 export function AttachmentComposer({ leadId, onSent, onError, onClose }: Props) {
   const [tab, setTab] = useState<Tab>('upload')
   const [sending, startSend] = useTransition()
@@ -115,18 +145,20 @@ function UploadTab({
       const form = new FormData()
       form.append('file', file)
       const res = await fetch('/api/messenger/operator-upload', { method: 'POST', body: form })
-      const json = (await res.json()) as
-        | { url: string; attachmentType: AttachmentSendInput['attachmentType']; name: string }
-        | { error: string }
-      if (!res.ok || 'error' in json) {
-        onError('error' in json ? json.error : 'Upload failed')
+
+      // A 413 from the proxy/tunnel (e.g. ngrok) comes back as plain text, not
+      // JSON, so we must not blindly res.json() — that throws the cryptic
+      // "Unexpected token 'R', \"Request En\"…" error. Read defensively.
+      const upload = await parseUploadResponse(res)
+      if ('error' in upload) {
+        onError(upload.error)
         return
       }
       onSend({
         source: 'upload',
-        attachmentType: json.attachmentType,
-        url: json.url,
-        name: json.name,
+        attachmentType: upload.attachmentType,
+        url: upload.url,
+        name: upload.name,
       })
     } catch (e) {
       onError(e instanceof Error ? e.message : 'Upload failed')

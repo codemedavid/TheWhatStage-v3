@@ -65,6 +65,23 @@ export function sliceChannels(
 }
 
 /**
+ * Average multi-channel audio down to a single mono channel. Pure. Halves (or
+ * better) the encoded size of a voice clip, which keeps trimmed uploads under
+ * proxy/tunnel body limits. A single channel is returned unchanged.
+ */
+export function downmixToMono(channels: Float32Array[]): Float32Array[] {
+  if (channels.length <= 1) return channels
+  const frameCount = channels[0]?.length ?? 0
+  const mono = new Float32Array(frameCount)
+  for (let frame = 0; frame < frameCount; frame++) {
+    let sum = 0
+    for (let ch = 0; ch < channels.length; ch++) sum += channels[ch][frame] ?? 0
+    mono[frame] = sum / channels.length
+  }
+  return [mono]
+}
+
+/**
  * Decode `file`, trim to [startSec, endSec], and return a new WAV File. Browser
  * only — uses Web Audio API to decode. The output name reuses the source name
  * with a `.wav` extension.
@@ -86,7 +103,9 @@ export async function trimAudioFile(
     if ((channels[0]?.length ?? 0) === 0) {
       throw new Error('Selected range is empty')
     }
-    const blob = encodeWav(channels, decoded.sampleRate)
+    // Voice clips don't need stereo — mono roughly halves the WAV payload so
+    // trimmed uploads stay under proxy/tunnel request-body limits.
+    const blob = encodeWav(downmixToMono(channels), decoded.sampleRate)
     const baseName = file.name.replace(/\.[^.]+$/, '') || 'audio'
     return new File([blob], `${baseName}.wav`, { type: WAV_MIME })
   } finally {

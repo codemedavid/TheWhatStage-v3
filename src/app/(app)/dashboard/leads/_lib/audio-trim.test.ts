@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { encodeWav, sliceChannels } from './audio-trim'
+import { downmixToMono, encodeWav, sliceChannels } from './audio-trim'
 
 describe('encodeWav', () => {
   it('writes a valid 44-byte WAV header for mono PCM', async () => {
@@ -30,6 +30,21 @@ describe('encodeWav', () => {
     expect(view.getInt16(44, true)).toBe(0x7fff)
     expect(view.getInt16(46, true)).toBe(-0x8000)
     expect(view.getUint16(32, true)).toBe(4) // block align = 2ch * 2 bytes
+  })
+})
+
+describe('downmixToMono', () => {
+  it('returns a single mono channel unchanged', () => {
+    const mono = [Float32Array.from([0.1, 0.2, 0.3])]
+    expect(downmixToMono(mono)).toBe(mono)
+  })
+
+  it('averages stereo channels frame-by-frame into one channel', () => {
+    const left = Float32Array.from([1, 0, -1])
+    const right = Float32Array.from([-1, 0.5, 1])
+    const result = downmixToMono([left, right])
+    expect(result).toHaveLength(1)
+    expect(Array.from(result[0])).toEqual([0, 0.25, 0])
   })
 })
 
