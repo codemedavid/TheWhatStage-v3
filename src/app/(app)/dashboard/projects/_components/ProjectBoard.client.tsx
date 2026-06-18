@@ -6,23 +6,37 @@ import {
   KeyboardSensor,
   useSensor,
   useSensors,
-  useDroppable,
   type DragEndEvent,
 } from '@dnd-kit/core'
 import {
   SortableContext,
   sortableKeyboardCoordinates,
   verticalListSortingStrategy,
+  horizontalListSortingStrategy,
+  arrayMove,
   useSortable,
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { moveProject } from '../actions/projects'
-import { createProjectStage } from '../actions/stages'
+import { createProjectStage, reorderProjectStages } from '../actions/stages'
 import { ProjectDrawer } from './ProjectDrawer'
+import { StageSettingsDrawer } from './StageSettingsDrawer'
 import type { ProjectCardRow } from '../_lib/queries'
 import type { ProjectStageRow } from '@/lib/projects/types'
 
 type Column = { stage: ProjectStageRow; projects: ProjectCardRow[] }
+
+// Stage columns and project cards share one DndContext. Column sortable ids are
+// prefixed so onDragEnd can tell a column drag from a card drag, and the same
+// prefixed id doubles as the card drop target for an empty column.
+const STAGE_PREFIX = 'stage:'
+const stageDragId = (stageId: string) => `${STAGE_PREFIX}${stageId}`
+const stageIdFromDrag = (dragId: string) =>
+  dragId.startsWith(STAGE_PREFIX) ? dragId.slice(STAGE_PREFIX.length) : null
+
+type BoardAction =
+  | { type: 'moveProject'; id: string; toStageId: string; toIndex: number }
+  | { type: 'reorderStages'; orderedIds: string[] }
 
 export function formatMoney(value: number | null, currency: string): string {
   if (value == null) return ''
@@ -45,9 +59,16 @@ export function ProjectBoardClient({
   // `router.push(?project=)` round-trip — the server refetch was what made the
   // drawer feel laggy. Mirrors the leads board's local `editing` state.
   const [selected, setSelected] = useState<ProjectCardRow | null>(null)
+  const [settingsStage, setSettingsStage] = useState<ProjectStageRow | null>(null)
   const [optimistic, setOptimistic] = useOptimistic(
     columns,
-    (state, action: { id: string; toStageId: string; toIndex: number }) => {
+    (state, action: BoardAction) => {
+      if (action.type === 'reorderStages') {
+        const byId = new Map(state.map((c) => [c.stage.id, c]))
+        return action.orderedIds
+          .map((id) => byId.get(id))
+          .filter((c): c is Column => Boolean(c))
+      }
       const next = state.map((c) => ({ ...c, projects: [...c.projects] }))
       let moved: ProjectCardRow | undefined
       for (const c of next) {
@@ -73,9 +94,31 @@ export function ProjectBoardClient({
     const activeId = String(active.id)
     const overId = String(over.id)
 
+    // Column drag: active id is prefixed. Resolve the target column whether the
+    // pointer is over another column or over a card inside one.
+    const activeStageId = stageIdFromDrag(activeId)
+    if (activeStageId) {
+      const targetStageId =
+        stageIdFromDrag(overId) ??
+        optimistic.find((c) => c.projects.some((p) => p.id === overId))?.stage.id
+      if (!targetStageId || targetStageId === activeStageId) return
+      const ids = optimistic.map((c) => c.stage.id)
+      const from = ids.indexOf(activeStageId)
+      const to = ids.indexOf(targetStageId)
+      if (from < 0 || to < 0) return
+      const orderedIds = arrayMove(ids, from, to)
+      startTransition(async () => {
+        setOptimistic({ type: 'reorderStages', orderedIds })
+        await reorderProjectStages(orderedIds)
+      })
+      return
+    }
+
+    // Card drag: over id is either a prefixed (empty) column or another card.
     let toStageId: string | undefined
     let toIndex = 0
-    const overCol = optimistic.find((c) => c.stage.id === overId)
+    const overColId = stageIdFromDrag(overId)
+    const overCol = overColId ? optimistic.find((c) => c.stage.id === overColId) : undefined
     if (overCol) {
       toStageId = overCol.stage.id
       toIndex = overCol.projects.length
@@ -88,7 +131,7 @@ export function ProjectBoardClient({
     if (!toStageId) return
     const finalStageId = toStageId
     startTransition(async () => {
-      setOptimistic({ id: activeId, toStageId: finalStageId, toIndex })
+      setOptimistic({ type: 'moveProject', id: activeId, toStageId: finalStageId, toIndex })
       await moveProject(activeId, finalStageId, toIndex)
     })
   }
@@ -110,18 +153,23 @@ export function ProjectBoardClient({
       </div>
 
       <DndContext id="project-board" sensors={sensors} onDragEnd={onDragEnd}>
-        <div className="lead-scroll lead-edge-fade flex gap-3 overflow-x-auto pb-4">
-          {optimistic.map((c) => (
-            <SortableContext
-              key={c.stage.id}
-              items={c.projects.map((p) => p.id)}
-              strategy={verticalListSortingStrategy}
-            >
-              <StageColumn stage={c.stage} projects={c.projects} onOpen={setSelected} />
-            </SortableContext>
-          ))}
-          <AddStageColumn />
-        </div>
+        <SortableContext
+          items={optimistic.map((c) => stageDragId(c.stage.id))}
+          strategy={horizontalListSortingStrategy}
+        >
+          <div className="lead-scroll lead-edge-fade flex gap-3 overflow-x-auto pb-4">
+            {optimistic.map((c) => (
+              <StageColumn
+                key={c.stage.id}
+                stage={c.stage}
+                projects={c.projects}
+                onOpen={setSelected}
+                onSettings={setSettingsStage}
+              />
+            ))}
+            <AddStageColumn />
+          </div>
+        </SortableContext>
       </DndContext>
 
       {creating && defaultStageId && (
@@ -142,6 +190,14 @@ export function ProjectBoardClient({
           onClose={() => setSelected(null)}
         />
       )}
+
+      {settingsStage && (
+        <StageSettingsDrawer
+          key={settingsStage.id}
+          stage={settingsStage}
+          onClose={() => setSettingsStage(null)}
+        />
+      )}
     </>
   )
 }
@@ -150,27 +206,68 @@ function StageColumn({
   stage,
   projects,
   onOpen,
+  onSettings,
 }: {
   stage: ProjectStageRow
   projects: ProjectCardRow[]
   onOpen: (project: ProjectCardRow) => void
+  onSettings: (stage: ProjectStageRow) => void
 }) {
-  const { setNodeRef, isOver } = useDroppable({ id: stage.id })
+  // The column is a sortable item (for left/right reorder) AND the drop target
+  // for cards landing in an empty column. Dragging is bound to the header grip
+  // only, so clicking cards / the ⋯ button never starts a column drag.
+  const {
+    setNodeRef,
+    setActivatorNodeRef,
+    attributes,
+    listeners,
+    transform,
+    transition,
+    isDragging,
+    isOver,
+  } = useSortable({ id: stageDragId(stage.id) })
+
+  // Gate dnd-kit wiring until mount so the aria ids match the server HTML.
+  // Mirrors ProjectCard.
+  const [mounted, setMounted] = useState(false)
+  const [, startMountTransition] = useTransition()
+  useEffect(() => startMountTransition(() => setMounted(true)), [])
+
   const subtotal = projects.reduce((sum, p) => sum + (p.value ?? 0), 0)
   const currency = projects[0]?.currency ?? 'PHP'
 
+  const style: React.CSSProperties = {
+    transform: mounted ? CSS.Transform.toString(transform) : undefined,
+    transition: mounted ? transition : undefined,
+    opacity: mounted && isDragging ? 0.5 : 1,
+    background: mounted && isOver ? 'var(--lead-accent-tint)' : 'var(--lead-surface-2)',
+    border: '1px solid var(--lead-line)',
+    minHeight: 320,
+  }
+
   return (
     <div
-      ref={setNodeRef}
+      ref={mounted ? setNodeRef : undefined}
+      style={style}
       className="flex w-[296px] shrink-0 flex-col rounded-2xl p-3"
-      style={{
-        background: isOver ? 'var(--lead-accent-tint)' : 'var(--lead-surface-2)',
-        border: '1px solid var(--lead-line)',
-        minHeight: 320,
-      }}
     >
       <div className="mb-2 flex items-center justify-between">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            ref={mounted ? setActivatorNodeRef : undefined}
+            {...(mounted ? attributes : {})}
+            {...(mounted ? listeners : {})}
+            aria-label={`Reorder ${stage.name} stage`}
+            className="lead-focus -ml-1 cursor-grab rounded p-0.5 active:cursor-grabbing"
+            style={{ color: 'var(--lead-muted)', touchAction: 'none' }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+              <circle cx="9" cy="6" r="1.6" /><circle cx="15" cy="6" r="1.6" />
+              <circle cx="9" cy="12" r="1.6" /><circle cx="15" cy="12" r="1.6" />
+              <circle cx="9" cy="18" r="1.6" /><circle cx="15" cy="18" r="1.6" />
+            </svg>
+          </button>
           {stage.color && (
             <span className="h-2.5 w-2.5 rounded-full" style={{ background: stage.color }} />
           )}
@@ -179,18 +276,33 @@ function StageColumn({
           </span>
           <span className="text-[11px]" style={{ color: 'var(--lead-muted)' }}>{projects.length}</span>
         </div>
-        {subtotal > 0 && (
-          <span className="text-[11px] font-medium" style={{ color: 'var(--lead-muted)' }}>
-            {formatMoney(subtotal, currency)}
-          </span>
-        )}
+        <div className="flex items-center gap-1.5">
+          {subtotal > 0 && (
+            <span className="text-[11px] font-medium" style={{ color: 'var(--lead-muted)' }}>
+              {formatMoney(subtotal, currency)}
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={() => onSettings(stage)}
+            aria-label={`${stage.name} stage settings`}
+            className="lead-focus rounded p-0.5"
+            style={{ color: 'var(--lead-muted)' }}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+              <circle cx="5" cy="12" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="19" cy="12" r="1.8" />
+            </svg>
+          </button>
+        </div>
       </div>
 
-      <div className="flex flex-col gap-2">
-        {projects.map((p) => (
-          <ProjectCard key={p.id} project={p} onOpen={onOpen} />
-        ))}
-      </div>
+      <SortableContext items={projects.map((p) => p.id)} strategy={verticalListSortingStrategy}>
+        <div className="flex flex-1 flex-col gap-2">
+          {projects.map((p) => (
+            <ProjectCard key={p.id} project={p} onOpen={onOpen} />
+          ))}
+        </div>
+      </SortableContext>
     </div>
   )
 }

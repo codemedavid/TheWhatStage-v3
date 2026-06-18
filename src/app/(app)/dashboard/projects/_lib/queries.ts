@@ -226,6 +226,7 @@ export type StageSequenceStep = {
   position: number
   delay_minutes: number
   instruction: string
+  fallback_message: string | null
   channel: 'messenger'
 }
 
@@ -249,7 +250,7 @@ export async function fetchStageSequence(
 
   const { data: steps, error: stepErr } = await supabase
     .from('project_stage_sequence_steps')
-    .select('id, position, delay_minutes, instruction, channel')
+    .select('id, position, delay_minutes, instruction, fallback_message, channel')
     .eq('sequence_id', seq.id).order('position', { ascending: true })
   if (stepErr) throw stepErr
 

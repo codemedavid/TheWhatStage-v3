@@ -34,6 +34,9 @@ export type ProjectUpdateInput = z.infer<typeof ProjectUpdateInput>
 export const SequenceStepInput = z.object({
   delay_minutes: z.number().int().min(0).max(525600),
   instruction: z.string().min(1).max(2000),
+  // Sent verbatim when the AI draft for this step is empty or errors, so a
+  // follow-up touch is never silently dropped. Blank => engine uses a default.
+  fallback_message: z.string().max(2000).optional().nullable(),
   channel: z.literal('messenger').default('messenger'),
 })
 export type SequenceStepInput = z.infer<typeof SequenceStepInput>

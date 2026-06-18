@@ -41,7 +41,10 @@ export async function GET(req: Request): Promise<NextResponse> {
 
   if (error) {
     console.error('[cron.project-sequences] query failed', error.message)
-    return NextResponse.json({ enqueued: 0, error: error.message }, { status: 200 })
+    // Non-200 so a failing tick is visible in cron.job_run_details / net._http_response
+    // instead of masquerading as a successful run. Body stays generic — the raw
+    // DB message is logged server-side, not echoed.
+    return NextResponse.json({ enqueued: 0, error: 'query failed' }, { status: 500 })
   }
 
   const rows = (due ?? []) as DueRun[]

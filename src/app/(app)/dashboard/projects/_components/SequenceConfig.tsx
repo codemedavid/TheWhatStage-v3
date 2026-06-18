@@ -2,7 +2,7 @@
 import { useEffect, useState, useTransition } from 'react'
 import { saveStageSequence, loadStageSequence } from '../actions/sequences'
 
-type Step = { delay_minutes: number; instruction: string }
+type Step = { delay_minutes: number; instruction: string; fallback_message: string }
 
 const PRESETS: { label: string; minutes: number }[] = [
   { label: '5 min', minutes: 5 },
@@ -22,6 +22,7 @@ export function SequenceConfig({ stageId, stageName }: { stageId: string; stageN
   const [steps, setSteps] = useState<Step[]>([])
   const [loading, setLoading] = useState(true)
   const [saved, setSaved] = useState(false)
+  const [seeded, setSeeded] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [pending, start] = useTransition()
 
@@ -31,29 +32,39 @@ export function SequenceConfig({ stageId, stageName }: { stageId: string; stageN
       .then((seq) => {
         if (cancelled) return
         setEnabled(seq.enabled)
-        setSteps(seq.steps.map((s) => ({ delay_minutes: s.delay_minutes, instruction: s.instruction })))
+        setSteps(seq.steps.map((s) => ({
+          delay_minutes: s.delay_minutes,
+          instruction: s.instruction,
+          fallback_message: s.fallback_message ?? '',
+        })))
       })
       .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : 'Failed to load') })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
   }, [stageId])
 
-  const addStep = () => setSteps((s) => [...s, { delay_minutes: 1440, instruction: '' }])
+  const addStep = () => setSteps((s) => [...s, { delay_minutes: 1440, instruction: '', fallback_message: '' }])
   const removeStep = (i: number) => setSteps((s) => s.filter((_, idx) => idx !== i))
   const updateStep = (i: number, patch: Partial<Step>) =>
     setSteps((s) => s.map((st, idx) => (idx === i ? { ...st, ...patch } : st)))
 
   const save = () => {
-    setError(null); setSaved(false)
+    setError(null); setSaved(false); setSeeded(null)
     const clean = steps.filter((s) => s.instruction.trim() !== '')
     start(async () => {
       try {
-        await saveStageSequence({
+        const result = await saveStageSequence({
           stage_id: stageId,
           enabled,
-          steps: clean.map((s) => ({ delay_minutes: s.delay_minutes, instruction: s.instruction.trim(), channel: 'messenger' as const })),
+          steps: clean.map((s) => ({
+            delay_minutes: s.delay_minutes,
+            instruction: s.instruction.trim(),
+            fallback_message: s.fallback_message.trim() || null,
+            channel: 'messenger' as const,
+          })),
         })
         setSaved(true)
+        setSeeded(result.seeded)
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Failed to save')
       }
@@ -65,9 +76,10 @@ export function SequenceConfig({ stageId, stageName }: { stageId: string; stageN
   return (
     <div className="space-y-3">
       <p className="text-[12.5px]" style={{ color: 'var(--lead-muted)' }}>
-        Follow-up sequence for the <strong>{stageName}</strong> stage. Applies to every project that enters this
-        stage — each step the assistant sends is timed from when the project arrives, guided by your instruction
-        plus the project&apos;s AI instructions.
+        Follow-up sequence for the <strong>{stageName}</strong> stage. Each step is timed from when a project enters
+        the stage and is written by the assistant from your instruction plus the project&apos;s AI instructions.
+        Saving also enrolls projects already in this stage. If the assistant can&apos;t draft a step, its fallback
+        message is sent instead.
       </p>
 
       <label className="flex items-center gap-2 text-[13px]" style={{ color: 'var(--lead-ink)' }}>
@@ -106,6 +118,14 @@ export function SequenceConfig({ stageId, stageName }: { stageId: string; stageN
               className="w-full rounded-md border px-2.5 py-1.5 text-[13px]"
               style={{ borderColor: 'var(--lead-line)', background: 'var(--lead-surface)', color: 'var(--lead-ink)' }}
             />
+            <textarea
+              value={s.fallback_message}
+              onChange={(e) => updateStep(i, { fallback_message: e.target.value })}
+              rows={2}
+              placeholder="Fallback message — sent as-is if the AI can't draft this step (optional)"
+              className="mt-1.5 w-full rounded-md border px-2.5 py-1.5 text-[13px]"
+              style={{ borderColor: 'var(--lead-line)', background: 'var(--lead-surface)', color: 'var(--lead-ink)' }}
+            />
           </div>
         ))}
       </div>
@@ -113,7 +133,13 @@ export function SequenceConfig({ stageId, stageName }: { stageId: string; stageN
       <button type="button" onClick={addStep} className="text-[12.5px] font-medium" style={{ color: 'var(--lead-accent)' }}>+ Add follow-up step</button>
 
       {error && <div className="text-[12px]" style={{ color: '#dc2626' }}>{error}</div>}
-      {saved && <div className="text-[12px]" style={{ color: '#16a34a' }}>Saved.</div>}
+      {saved && (
+        <div className="text-[12px]" style={{ color: '#16a34a' }}>
+          Saved.{seeded && seeded > 0
+            ? ` Enrolled ${seeded} project${seeded === 1 ? '' : 's'} already in this stage — first follow-up sends within a minute.`
+            : ''}
+        </div>
+      )}
 
       <div className="flex justify-end">
         <button type="button" onClick={save} disabled={pending} className="rounded-md px-4 py-1.5 text-[13px] font-medium text-white disabled:opacity-50" style={{ background: 'var(--lead-accent)' }}>

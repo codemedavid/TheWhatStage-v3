@@ -18,8 +18,6 @@ import { manilaNowBlock } from '@/lib/time/manilaNow'
 // Defined in advance.ts (no side-effectful imports) so it stays unit-testable.
 export { nextSequenceState } from './advance'
 
-const DRAFT_TIMEOUT_MS = 8_000
-
 export type ChatMessage = { role: 'user' | 'assistant'; content: string }
 
 export interface SequenceThread {
@@ -71,17 +69,11 @@ Output ONLY the message text — no quotes, no preamble, no explanation.`
     : ''
   const user = `${convo}Follow up about: ${stepInstruction}`
 
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), DRAFT_TIMEOUT_MS)
-  try {
-    const draft = await llm.complete(
-      [{ role: 'system', content: system }, { role: 'user', content: user }],
-      { temperature: 0.6, maxTokens: 200 },
-    )
-    return draft.trim()
-  } finally {
-    clearTimeout(timeout)
-  }
+  const draft = await llm.complete(
+    [{ role: 'system', content: system }, { role: 'user', content: user }],
+    { temperature: 0.6, maxTokens: 200 },
+  )
+  return draft.trim()
 }
 
 // Load everything needed to send a sequence step on a thread: the thread, the
