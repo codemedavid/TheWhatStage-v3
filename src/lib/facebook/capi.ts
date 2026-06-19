@@ -217,11 +217,7 @@ export async function dispatchCapiEvent(input: DispatchInput): Promise<DispatchR
     log.response_body = parsed
     log.status = res.ok ? 'sent' : 'error'
     if (!res.ok) {
-      const errMsg =
-        parsed && typeof parsed === 'object' && (parsed as Record<string, unknown>).error
-          ? ((parsed as Record<string, unknown>).error as Record<string, unknown>).message
-          : `HTTP ${res.status}`
-      log.error_message = typeof errMsg === 'string' ? errMsg : `HTTP ${res.status}`
+      log.error_message = extractErrorMessage(parsed, res.status)
     }
   } catch (e) {
     log.status = 'error'
@@ -232,6 +228,37 @@ export async function dispatchCapiEvent(input: DispatchInput): Promise<DispatchR
 
   await writeLog(input.admin, log)
   return { status: log.status, error_message: log.error_message }
+}
+
+function asNonEmptyString(v: unknown): string | null {
+  return typeof v === 'string' && v.trim().length > 0 ? v.trim() : null
+}
+
+/**
+ * Build an operator-facing error string from a Graph API error response.
+ *
+ * Meta's actionable detail lives in `error_user_title` / `error_user_msg`
+ * (e.g. subcode 2804065 "Messaging Event Mismatching Page and Dataset"),
+ * not in the generic `message` ("Invalid parameter"). Prefer the rich
+ * fields and append the subcode so misconfigurations are diagnosable from
+ * the settings UI without digging into the raw response body.
+ */
+function extractErrorMessage(parsed: unknown, httpStatus: number): string {
+  const fallback = `HTTP ${httpStatus}`
+  if (!parsed || typeof parsed !== 'object') return fallback
+  const error = (parsed as Record<string, unknown>).error
+  if (!error || typeof error !== 'object') return fallback
+
+  const e = error as Record<string, unknown>
+  const title = asNonEmptyString(e.error_user_title)
+  const userMsg = asNonEmptyString(e.error_user_msg)
+  const message = asNonEmptyString(e.message)
+  const subcode =
+    typeof e.error_subcode === 'number' ? e.error_subcode : asNonEmptyString(e.error_subcode)
+
+  const detail = title && userMsg ? `${title}: ${userMsg}` : userMsg ?? title ?? message
+  if (!detail) return fallback
+  return subcode ? `${detail} (subcode ${subcode})` : detail
 }
 
 function computeHasPayment(input: DispatchInput): boolean {

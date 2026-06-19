@@ -192,6 +192,36 @@ describe('dispatchCapiEvent — network paths', () => {
     expect(inserts[0].row.error_message).toBe('bad event_id')
   })
 
+  it('surfaces Meta error_user_title + error_user_msg in error_message', async () => {
+    const { admin, inserts } = makeAdmin({ page: enabledPage, actionPage: noOverride })
+    mocks.fetch.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          error: {
+            code: 100,
+            message: 'Invalid parameter',
+            error_subcode: 2804065,
+            error_user_title: 'Messaging Event Mismatching Page and Dataset',
+            error_user_msg:
+              "For CTM and CTWA events, the dataset id used to send events to CAPI and the parameter 'page_id' should be matched, which means the dataset must have permission to log events for the page.",
+            fbtrace_id: 'trace-MISMATCH',
+          },
+        }),
+        { status: 400, headers: { 'content-type': 'application/json' } },
+      ),
+    )
+    await dispatchCapiEvent({ ...baseInput({ admin }) })
+    expect(inserts[0].row).toMatchObject({
+      status: 'error',
+      http_status: 400,
+      fb_trace_id: 'trace-MISMATCH',
+    })
+    const errMsg = inserts[0].row.error_message as string
+    expect(errMsg).toContain('Messaging Event Mismatching Page and Dataset')
+    expect(errMsg).toContain('dataset must have permission to log events for the page')
+    expect(errMsg).toContain('2804065')
+  })
+
   it('logs error on network failure', async () => {
     const { admin, inserts } = makeAdmin({ page: enabledPage, actionPage: noOverride })
     mocks.fetch.mockRejectedValueOnce(new Error('ENOTFOUND'))
