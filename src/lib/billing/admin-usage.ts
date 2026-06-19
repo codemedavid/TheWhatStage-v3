@@ -59,6 +59,24 @@ export interface TenantUsageRow {
 
 const n = (v: unknown): number => Number(v ?? 0)
 
+/**
+ * Surface RPC failures instead of silently degrading to zeros. The analytics
+ * RPCs are gated (`forbidden: superadmin only`) — when that gate fails, an empty
+ * result is indistinguishable from genuinely-zero usage, which is exactly how the
+ * admin dashboard showed "no usage" despite a full ledger. Throw so the caller
+ * can render an error state, and log server-side for diagnosis.
+ */
+function unwrapRpc<T>(
+  fn: string,
+  result: { data: T | null; error: { message: string } | null },
+): T {
+  if (result.error) {
+    console.error(`[admin-usage] ${fn} failed`, result.error)
+    throw new Error(`admin-usage.${fn}: ${result.error.message}`)
+  }
+  return (result.data ?? ([] as unknown as T))
+}
+
 /** Today's date as YYYY-MM-DD in Asia/Manila (matches usage_daily.day). */
 export function manilaToday(): string {
   return new Intl.DateTimeFormat('en-CA', {
@@ -89,12 +107,11 @@ export async function getUsageTotals(
   userId?: string,
 ): Promise<UsageTotals> {
   const supabase = await createClient()
-  const { data } = await supabase.rpc('admin_usage_totals', {
-    p_from: from,
-    p_to: to,
-    p_user: userId ?? null,
-  })
-  const r = (data as Record<string, unknown>[] | null)?.[0] ?? {}
+  const data = unwrapRpc<Record<string, unknown>[]>(
+    'getUsageTotals',
+    await supabase.rpc('admin_usage_totals', { p_from: from, p_to: to, p_user: userId ?? null }),
+  )
+  const r = data[0] ?? {}
   return {
     totalTokens: n(r.total_tokens),
     promptTokens: n(r.prompt_tokens),
@@ -112,12 +129,11 @@ export async function getUsageTrend(
   userId?: string,
 ): Promise<UsageTrendPoint[]> {
   const supabase = await createClient()
-  const { data } = await supabase.rpc('admin_usage_trend', {
-    p_from: from,
-    p_to: to,
-    p_user: userId ?? null,
-  })
-  return ((data as Record<string, unknown>[] | null) ?? []).map((r) => ({
+  const data = unwrapRpc<Record<string, unknown>[]>(
+    'getUsageTrend',
+    await supabase.rpc('admin_usage_trend', { p_from: from, p_to: to, p_user: userId ?? null }),
+  )
+  return data.map((r) => ({
     day: String(r.day),
     totalTokens: n(r.total_tokens),
     cachedPromptTokens: n(r.cached_prompt_tokens),
@@ -134,12 +150,11 @@ export async function getUsageByScopeModel(
   userId?: string,
 ): Promise<ScopeModelRow[]> {
   const supabase = await createClient()
-  const { data } = await supabase.rpc('admin_usage_by_scope_model', {
-    p_from: from,
-    p_to: to,
-    p_user: userId ?? null,
-  })
-  return ((data as Record<string, unknown>[] | null) ?? []).map((r) => ({
+  const data = unwrapRpc<Record<string, unknown>[]>(
+    'getUsageByScopeModel',
+    await supabase.rpc('admin_usage_by_scope_model', { p_from: from, p_to: to, p_user: userId ?? null }),
+  )
+  return data.map((r) => ({
     scope: String(r.scope),
     model: String(r.model),
     totalTokens: n(r.total_tokens),
@@ -152,8 +167,11 @@ export async function getUsageByScopeModel(
 
 export async function getUsageByTenant(from: string, to: string): Promise<TenantUsageRow[]> {
   const supabase = await createClient()
-  const { data } = await supabase.rpc('admin_usage_by_tenant', { p_from: from, p_to: to })
-  return ((data as Record<string, unknown>[] | null) ?? []).map((r) => ({
+  const data = unwrapRpc<Record<string, unknown>[]>(
+    'getUsageByTenant',
+    await supabase.rpc('admin_usage_by_tenant', { p_from: from, p_to: to }),
+  )
+  return data.map((r) => ({
     userId: String(r.user_id),
     email: (r.email as string | null) ?? null,
     fullName: (r.full_name as string | null) ?? null,

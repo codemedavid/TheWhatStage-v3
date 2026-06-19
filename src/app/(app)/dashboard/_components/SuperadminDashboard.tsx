@@ -12,6 +12,7 @@ import {
   manilaMonthLabel,
   type TenantUsageRow,
 } from '@/lib/billing/admin-usage'
+import { formatUsd } from '@/lib/billing/format-usage'
 import { UserRowActions } from './UserRowActions'
 import { UserTierToggle } from './UserTierToggle'
 import UsageAnalyticsPanel from './UsageAnalyticsPanel'
@@ -61,22 +62,51 @@ function UsageCell({ usage }: { usage: TenantUsageRow | undefined }) {
   )
 }
 
+function CostCell({ usage }: { usage: TenantUsageRow | undefined }) {
+  if (!usage || usage.costMicros === 0) return <span className="text-neutral-300">—</span>
+  return <>{formatUsd(usage.costMicros)}</>
+}
+
 export default async function SuperadminDashboard({ userName }: { userName: string }) {
   const session = await getSession()
   const admin = createAdminClient()
   const from = manilaMonthStart()
   const to = manilaToday()
 
-  const [profilesRes, totals, trend, scopeModel, tenantUsage] = await Promise.all([
-    admin
-      .from('profiles')
-      .select('id, email, full_name, role, status, subscription_tier, created_at')
-      .order('created_at', { ascending: false }),
-    getUsageTotals(from, to),
-    getUsageTrend(from, to),
-    getUsageByScopeModel(from, to),
-    getUsageByTenant(from, to),
-  ])
+  // Usage analytics come from the gated RPCs, which now THROW on failure (rather
+  // than silently returning zeros). Isolate them in their own try/catch so a
+  // usage-layer failure renders an inline error instead of crashing the whole
+  // superadmin page (and hiding the users table with it).
+  const profilesRes = await admin
+    .from('profiles')
+    .select('id, email, full_name, role, status, subscription_tier, created_at')
+    .order('created_at', { ascending: false })
+
+  let usageError: string | null = null
+  let totals = await getUsageTotals(from, to).catch((e: unknown) => {
+    usageError = e instanceof Error ? e.message : 'Failed to load usage'
+    return null
+  })
+  let trend: Awaited<ReturnType<typeof getUsageTrend>> = []
+  let scopeModel: Awaited<ReturnType<typeof getUsageByScopeModel>> = []
+  let tenantUsage: Awaited<ReturnType<typeof getUsageByTenant>> = []
+  if (totals) {
+    ;[trend, scopeModel, tenantUsage] = await Promise.all([
+      getUsageTrend(from, to),
+      getUsageByScopeModel(from, to),
+      getUsageByTenant(from, to),
+    ])
+  } else {
+    totals = {
+      totalTokens: 0,
+      promptTokens: 0,
+      cachedPromptTokens: 0,
+      completionTokens: 0,
+      costMicros: 0,
+      eventCount: 0,
+      activeTenants: 0,
+    }
+  }
 
   const { data, error } = profilesRes
   const usageByUser = new Map(tenantUsage.map((u) => [u.userId, u]))
@@ -112,7 +142,13 @@ export default async function SuperadminDashboard({ userName }: { userName: stri
             Export CSV
           </a>
         </div>
-        <UsageAnalyticsPanel totals={totals} trend={trend} scopeModel={scopeModel} periodLabel={manilaMonthLabel()} isFleet />
+        {usageError ? (
+          <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            Failed to load usage analytics: {usageError}
+          </div>
+        ) : (
+          <UsageAnalyticsPanel totals={totals} trend={trend} scopeModel={scopeModel} periodLabel={manilaMonthLabel()} isFleet showCost />
+        )}
       </section>
 
       {/* ── Users ── */}
@@ -132,6 +168,7 @@ export default async function SuperadminDashboard({ userName }: { userName: stri
                   <th className="px-4 py-3 font-medium">Role</th>
                   <th className="px-4 py-3 font-medium">Tier</th>
                   <th className="px-4 py-3 font-medium">Usage (mo)</th>
+                  <th className="px-4 py-3 font-medium">Cost (mo)</th>
                   <th className="px-4 py-3 font-medium">Status</th>
                   <th className="px-4 py-3 font-medium text-right">Actions</th>
                 </tr>
@@ -177,6 +214,9 @@ export default async function SuperadminDashboard({ userName }: { userName: stri
                       <td className="px-4 py-3">
                         {p.role === 'user' ? <UsageCell usage={usageByUser.get(p.id)} /> : <span className="text-neutral-300">—</span>}
                       </td>
+                      <td className="px-4 py-3 tabular-nums text-neutral-700">
+                        {p.role === 'user' ? <CostCell usage={usageByUser.get(p.id)} /> : <span className="text-neutral-300">—</span>}
+                      </td>
                       <td className="px-4 py-3">
                         <span className={statusBadgeClass[p.status]}>{p.status}</span>
                       </td>
@@ -192,7 +232,7 @@ export default async function SuperadminDashboard({ userName }: { userName: stri
                 })}
                 {profiles.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="px-4 py-8 text-center text-neutral-500">
+                    <td colSpan={8} className="px-4 py-8 text-center text-neutral-500">
                       No users found.
                     </td>
                   </tr>

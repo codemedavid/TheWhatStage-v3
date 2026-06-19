@@ -100,7 +100,7 @@ export default async function AdminUserDetailPage({
 
       <section className="mb-8">
         <h2 className="mb-3 text-lg font-semibold tracking-tight">Usage · {manilaMonthLabel()}</h2>
-        <UsageAnalyticsPanel totals={totals} trend={trend} scopeModel={scopeModel} periodLabel={manilaMonthLabel()} />
+        <UsageAnalyticsPanel totals={totals} trend={trend} scopeModel={scopeModel} periodLabel={manilaMonthLabel()} showCost />
       </section>
 
       <section className="mb-8 grid gap-4 lg:grid-cols-2">

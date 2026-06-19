@@ -1,6 +1,7 @@
 import UsageTrendChart from './charts/UsageTrendChart'
 import UsageBarList, { type BarDatum } from './charts/UsageBarList'
 import type { UsageTotals, UsageTrendPoint, ScopeModelRow } from '@/lib/billing/admin-usage'
+import { formatUsd } from '@/lib/billing/format-usage'
 
 // Friendly labels for the usage scopes (the raw enum is developer-facing).
 const SCOPE_LABEL: Record<string, string> = {
@@ -26,8 +27,9 @@ function Kpi({ label, value, hint }: { label: string; value: string; hint?: stri
 
 /**
  * Reusable usage analytics block (KPI cards + SSR trend + scope/model
- * breakdowns). Tokens-primary; cost is deliberately not shown until provider
- * rates are verified. Used for the whole fleet and for a single tenant.
+ * breakdowns). Tokens-primary. Cost (USD) is shown in the admin console only
+ * (`showCost`) — provider-reported per-row cost is authoritative; tenant-facing
+ * views stay tokens-only. Used for the whole fleet and for a single tenant.
  */
 export default function UsageAnalyticsPanel({
   totals,
@@ -35,16 +37,28 @@ export default function UsageAnalyticsPanel({
   scopeModel,
   periodLabel,
   isFleet = false,
+  showCost = false,
 }: {
   totals: UsageTotals
   trend: UsageTrendPoint[]
   scopeModel: ScopeModelRow[]
   periodLabel: string
   isFleet?: boolean
+  showCost?: boolean
 }) {
   const trendPoints = trend.map((p) => ({ label: p.day.slice(5), value: p.totalTokens }))
   const cachePct =
     totals.promptTokens > 0 ? Math.round((totals.cachedPromptTokens / totals.promptTokens) * 100) : 0
+
+  // KPI count = base (tokens/cache/calls) + active-tenants (fleet) + cost (admin).
+  // Static class strings — Tailwind JIT cannot see interpolated class names.
+  const kpiCount = 3 + (isFleet ? 1 : 0) + (showCost ? 1 : 0)
+  const KPI_GRID_COLS: Record<number, string> = {
+    3: 'grid-cols-2 sm:grid-cols-3',
+    4: 'grid-cols-2 sm:grid-cols-4',
+    5: 'grid-cols-2 sm:grid-cols-5',
+  }
+  const kpiGridCols = KPI_GRID_COLS[kpiCount] ?? 'grid-cols-2 sm:grid-cols-4'
 
   const byScope = new Map<string, number>()
   const byModel = new Map<string, number>()
@@ -61,7 +75,7 @@ export default function UsageAnalyticsPanel({
 
   return (
     <div className="space-y-5">
-      <div className={`grid gap-3 ${isFleet ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-2 sm:grid-cols-3'}`}>
+      <div className={`grid gap-3 ${kpiGridCols}`}>
         {isFleet && <Kpi label="Active tenants" value={totals.activeTenants.toLocaleString('en-US')} />}
         <Kpi label="Tokens" value={totals.totalTokens.toLocaleString('en-US')} hint={periodLabel} />
         <Kpi
@@ -70,6 +84,13 @@ export default function UsageAnalyticsPanel({
           hint={`${cachePct}% of prompt tokens served from cache`}
         />
         <Kpi label="Model calls" value={totals.eventCount.toLocaleString('en-US')} />
+        {showCost && (
+          <Kpi
+            label="Est. cost"
+            value={formatUsd(totals.costMicros)}
+            hint="provider-reported, USD"
+          />
+        )}
       </div>
 
       <div className="rounded-xl border border-neutral-200 bg-white p-5">

@@ -6,6 +6,7 @@ import {
   manilaMonthStart,
   manilaToday,
 } from '@/lib/billing/admin-usage'
+import { usdFromMicros } from '@/lib/billing/format-usage'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -49,15 +50,15 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   if (user) {
     const rows = await getUsageByScopeModel(from, to, user)
     csv = toCsv(
-      ['scope', 'model', 'total_tokens', 'cached_prompt_tokens', 'completion_tokens', 'cost_micros', 'event_count'],
-      rows.map((r) => [r.scope, r.model, r.totalTokens, r.cachedPromptTokens, r.completionTokens, r.costMicros, r.eventCount]),
+      ['scope', 'model', 'total_tokens', 'cached_prompt_tokens', 'completion_tokens', 'cost_micros', 'cost_usd', 'event_count'],
+      rows.map((r) => [r.scope, r.model, r.totalTokens, r.cachedPromptTokens, r.completionTokens, r.costMicros, usdFromMicros(r.costMicros).toFixed(6), r.eventCount]),
     )
     filename = `usage_${user}_${from}_${to}.csv`
   } else {
     const rows = await getUsageByTenant(from, to)
     csv = toCsv(
-      ['user_id', 'email', 'full_name', 'tier', 'included_tokens', 'total_tokens', 'adj_tokens', 'effective_tokens', 'cost_micros', 'event_count', 'last_active_day'],
-      rows.map((r) => [r.userId, r.email, r.fullName, r.tier, r.includedTokens, r.totalTokens, r.adjTokens, r.effectiveTokens, r.costMicros, r.eventCount, r.lastActiveDay]),
+      ['user_id', 'email', 'full_name', 'tier', 'included_tokens', 'total_tokens', 'adj_tokens', 'effective_tokens', 'cost_micros', 'cost_usd', 'event_count', 'last_active_day'],
+      rows.map((r) => [r.userId, r.email, r.fullName, r.tier, r.includedTokens, r.totalTokens, r.adjTokens, r.effectiveTokens, r.costMicros, usdFromMicros(r.costMicros).toFixed(6), r.eventCount, r.lastActiveDay]),
     )
     filename = `usage_fleet_${from}_${to}.csv`
   }
