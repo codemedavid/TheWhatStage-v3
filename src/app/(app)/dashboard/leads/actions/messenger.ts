@@ -103,6 +103,9 @@ export async function loadConversation(
   const missedAtOpen = (thread as { missed_count?: number | null }).missed_count ?? 0
   if (unreadAtOpen > 0) {
     await resetThreadCountersByLead(supabase, leadId, { resetMissed: false })
+    // Refresh the badge surfaces (nav counter, project/lead cards) now that this
+    // conversation's unread has cleared.
+    revalidatePath('/dashboard', 'layout')
   }
 
   const { data: rawMessages, error: msgErr } = await supabase

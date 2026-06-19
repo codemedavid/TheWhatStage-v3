@@ -38,6 +38,9 @@ as $$
   where id = p_thread_id;
 $$;
 
+-- Functions are EXECUTE-able by PUBLIC by default; anon inherits that. Lock the
+-- write-path RPC to service_role only.
+revoke all on function public.increment_thread_counters(uuid, text) from public;
 grant execute on function public.increment_thread_counters(uuid, text) to service_role;
 
 -- Sum of unread across the caller's threads whose lead has at least one project.
@@ -54,8 +57,12 @@ as $$
   from public.messenger_threads t
   where t.lead_id is not null
     and exists (
-      select 1 from public.projects p where p.lead_id = t.lead_id
+      -- Match owner explicitly so the scope holds even if projects RLS is later
+      -- loosened (e.g. team sharing); does not rely on RLS alone.
+      select 1 from public.projects p
+      where p.lead_id = t.lead_id and p.user_id = t.user_id
     );
 $$;
 
+revoke all on function public.count_project_unread() from public;
 grant execute on function public.count_project_unread() to authenticated;
