@@ -20,24 +20,52 @@ describe('fetchProjectInfoBySubmissionIds', () => {
 
   it('maps submission id to project info, normalizing an object-shaped stage join', async () => {
     const data = [
-      { id: 'p1', origin_submission_id: 's1', project_stages: { name: 'Scoping', kind: 'open' } },
+      {
+        id: 'p1',
+        origin_submission_id: 's1',
+        project_stages: { name: 'Scoping', kind: 'open' },
+        leads: { messenger_threads: { unread_count: 4, missed_count: 9 } },
+      },
     ]
     const map = await fetchProjectInfoBySubmissionIds(fakeSupabase({ data, error: null }), 'u1', ['s1'])
-    expect(map.get('s1')).toEqual({ id: 'p1', stageName: 'Scoping', stageKind: 'open' })
+    expect(map.get('s1')).toEqual({
+      id: 'p1',
+      stageName: 'Scoping',
+      stageKind: 'open',
+      unreadCount: 4,
+      missedCount: 9,
+    })
   })
 
-  it('normalizes an array-shaped stage join to its first element', async () => {
+  it('normalizes array-shaped stage and thread joins to their first element', async () => {
     const data = [
-      { id: 'p2', origin_submission_id: 's2', project_stages: [{ name: 'Won', kind: 'won' }] },
+      {
+        id: 'p2',
+        origin_submission_id: 's2',
+        project_stages: [{ name: 'Won', kind: 'won' }],
+        leads: [{ messenger_threads: [{ unread_count: 1, missed_count: 2 }] }],
+      },
     ]
     const map = await fetchProjectInfoBySubmissionIds(fakeSupabase({ data, error: null }), 'u1', ['s2'])
-    expect(map.get('s2')).toEqual({ id: 'p2', stageName: 'Won', stageKind: 'won' })
+    expect(map.get('s2')).toEqual({
+      id: 'p2',
+      stageName: 'Won',
+      stageKind: 'won',
+      unreadCount: 1,
+      missedCount: 2,
+    })
   })
 
-  it('falls back to null stage fields when the stage join is missing', async () => {
-    const data = [{ id: 'p3', origin_submission_id: 's3', project_stages: null }]
+  it('falls back to null stage fields and zero counts when joins are missing', async () => {
+    const data = [{ id: 'p3', origin_submission_id: 's3', project_stages: null, leads: null }]
     const map = await fetchProjectInfoBySubmissionIds(fakeSupabase({ data, error: null }), 'u1', ['s3'])
-    expect(map.get('s3')).toEqual({ id: 'p3', stageName: null, stageKind: null })
+    expect(map.get('s3')).toEqual({
+      id: 'p3',
+      stageName: null,
+      stageKind: null,
+      unreadCount: 0,
+      missedCount: 0,
+    })
   })
 
   it('skips rows with a null origin submission id', async () => {

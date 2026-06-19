@@ -3,6 +3,7 @@ import type { ActionPageKind } from '@/lib/action-pages/kinds'
 import type { ProjectStageKind } from '@/lib/projects/types'
 import type { PipelineRule } from './schemas'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { normalizeThreadCounts } from '@/lib/messenger/unread'
 
 export interface ActionPageRow {
   id: string
@@ -174,12 +175,29 @@ export interface SubmissionProjectInfo {
   id: string
   stageName: string | null
   stageKind: ProjectStageKind | null
+  /** Unread inbound messages waiting on the project's lead (Messenger thread). */
+  unreadCount: number
+  /** Running "messages we missed" tally; resets only on explicit mark-as-read. */
+  missedCount: number
 }
 
+type ThreadCountJoin =
+  | { unread_count: number | null; missed_count: number | null }
+  | { unread_count: number | null; missed_count: number | null }[]
+  | null
+type LeadThreadJoin =
+  | { messenger_threads: ThreadCountJoin }
+  | { messenger_threads: ThreadCountJoin }[]
+  | null
 type SubmissionProjectJoin = {
   id: string
   origin_submission_id: string | null
   project_stages: { name: string; kind: ProjectStageKind | null } | { name: string; kind: ProjectStageKind | null }[] | null
+  leads: LeadThreadJoin
+}
+
+function firstOf<T>(v: T | T[] | null | undefined): T | null {
+  return Array.isArray(v) ? (v[0] ?? null) : (v ?? null)
 }
 
 // Map submission id → existing project info, for submissions that have already
@@ -193,17 +211,21 @@ export async function fetchProjectInfoBySubmissionIds(
   if (submissionIds.length === 0) return map
   const { data, error } = await supabase
     .from('projects')
-    .select('id, origin_submission_id, project_stages(name, kind)')
+    .select('id, origin_submission_id, project_stages(name, kind), leads(messenger_threads(unread_count, missed_count))')
     .eq('user_id', userId)
     .in('origin_submission_id', submissionIds)
   if (error) throw new Error(`fetchProjectInfoBySubmissionIds: ${error.message}`)
   for (const row of (data ?? []) as SubmissionProjectJoin[]) {
     if (!row.origin_submission_id) continue
-    const stage = Array.isArray(row.project_stages) ? row.project_stages[0] ?? null : row.project_stages
+    const stage = firstOf(row.project_stages)
+    const thread = firstOf(firstOf(row.leads)?.messenger_threads)
+    const counts = normalizeThreadCounts(thread)
     map.set(row.origin_submission_id, {
       id: row.id,
       stageName: stage?.name ?? null,
       stageKind: stage?.kind ?? null,
+      unreadCount: counts.unread_count,
+      missedCount: counts.missed_count,
     })
   }
   return map

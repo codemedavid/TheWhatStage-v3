@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { unstable_cache } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/admin'
 import type { ProjectRow, ProjectStageRow, ProjectStageKind } from '@/lib/projects/types'
+import { normalizeThreadCounts } from '@/lib/messenger/unread'
 import { type ProjectsQuery, PAGE_SIZE } from './schemas'
 
 export type { ProjectStageRow, ProjectStageKind } from '@/lib/projects/types'
@@ -25,14 +26,19 @@ export type ProjectCardRow = ProjectRow & {
   stage_name: string | null
   stage_kind: ProjectStageKind | null
   origin_submission_kind: string | null
+  /** Unread inbound messages waiting on this project's lead. */
+  unread_count: number
+  /** Running "messages we missed" tally; resets only on explicit mark-as-read. */
+  missed_count: number
 }
 
+type ThreadJoinRow = { picture_url: string | null; unread_count: number | null; missed_count: number | null }
 type LeadJoin = {
   name: string | null
   email: string | null
   phone: string | null
   company: string | null
-  messenger_threads: { picture_url: string | null }[] | { picture_url: string | null } | null
+  messenger_threads: ThreadJoinRow[] | ThreadJoinRow | null
 }
 type StageJoin = { name: string; kind: ProjectStageKind | null }
 
@@ -50,6 +56,7 @@ function flattenProject(row: ProjectRowWithJoins): ProjectCardRow {
   const lead = first(leads)
   const stage = first(project_stages)
   const thread = lead ? first(lead.messenger_threads) : null
+  const counts = normalizeThreadCounts(thread)
   return {
     ...rest,
     lead_name: lead?.name ?? null,
@@ -60,11 +67,13 @@ function flattenProject(row: ProjectRowWithJoins): ProjectCardRow {
     stage_name: stage?.name ?? null,
     stage_kind: stage?.kind ?? null,
     origin_submission_kind: null,
+    unread_count: counts.unread_count,
+    missed_count: counts.missed_count,
   }
 }
 
 const PROJECT_SELECT =
-  '*, leads(name, email, phone, company, messenger_threads(picture_url)), project_stages(name, kind)'
+  '*, leads(name, email, phone, company, messenger_threads(picture_url, unread_count, missed_count)), project_stages(name, kind)'
 
 function normalizeStageRow(row: Record<string, unknown>): ProjectStageRow {
   return {

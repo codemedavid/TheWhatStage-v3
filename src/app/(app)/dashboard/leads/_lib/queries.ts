@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { unstable_cache } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { normalizeThreadCounts } from '@/lib/messenger/unread'
 import { type LeadsQuery, PAGE_SIZE } from './schemas'
 
 export const stagesTag = (userId: string) => `leads:stages:${userId}`
@@ -31,6 +32,10 @@ export type LeadRow = {
   created_at: string
   updated_at: string
   picture_url: string | null
+  /** Unread inbound messages waiting on this lead's Messenger thread. */
+  unread_count: number
+  /** Running "messages we missed" tally; resets only on explicit mark-as-read. */
+  missed_count: number
   campaign_id: string | null
   campaign_name: string | null
   /** Set when the most recent AI-driven stage event for this lead exists.
@@ -44,20 +49,31 @@ export type LeadRow = {
   } | null
 }
 
-type LeadRowWithJoins = Omit<LeadRow, 'picture_url' | 'campaign_name' | 'latest_auto_move'> & {
-  messenger_threads: { picture_url: string | null }[] | { picture_url: string | null } | null
+type ThreadJoinRow = { picture_url: string | null; unread_count: number | null; missed_count: number | null }
+type LeadRowWithJoins = Omit<
+  LeadRow,
+  'picture_url' | 'unread_count' | 'missed_count' | 'campaign_name' | 'latest_auto_move'
+> & {
+  messenger_threads: ThreadJoinRow[] | ThreadJoinRow | null
   campaigns: { name: string } | { name: string }[] | null
 }
 
 function flattenLead(row: LeadRowWithJoins): LeadRow {
   const { messenger_threads: t, campaigns: c, ...rest } = row
-  const picture_url = Array.isArray(t)
-    ? (t[0]?.picture_url ?? null)
-    : (t?.picture_url ?? null)
+  const thread = Array.isArray(t) ? (t[0] ?? null) : t
+  const picture_url = thread?.picture_url ?? null
+  const counts = normalizeThreadCounts(thread)
   const campaign_name = Array.isArray(c)
     ? (c[0]?.name ?? null)
     : (c?.name ?? null)
-  return { ...rest, picture_url, campaign_name, latest_auto_move: null }
+  return {
+    ...rest,
+    picture_url,
+    unread_count: counts.unread_count,
+    missed_count: counts.missed_count,
+    campaign_name,
+    latest_auto_move: null,
+  }
 }
 
 export type StageRow = {
@@ -169,7 +185,7 @@ export async function fetchLeadsPage(
   const sort = SORT_MAP[params.sort]
   let query = supabase
     .from('leads')
-    .select('*, messenger_threads(picture_url), campaigns(name)', { count: 'exact' })
+    .select('*, messenger_threads(picture_url, unread_count, missed_count), campaigns(name)', { count: 'exact' })
     .eq('user_id', userId)
   if (stageId) query = query.eq('stage_id', stageId)
 
@@ -270,7 +286,7 @@ export async function fetchLeadById(
 ): Promise<LeadRow | null> {
   const { data, error } = await supabase
     .from('leads')
-    .select('*, messenger_threads(picture_url), campaigns(name)')
+    .select('*, messenger_threads(picture_url, unread_count, missed_count), campaigns(name)')
     .eq('user_id', userId)
     .eq('id', leadId)
     .maybeSingle()
@@ -353,7 +369,7 @@ export async function fetchContactLeadsPage(
 ): Promise<{ rows: ContactLeadRow[]; total: number }> {
   let query = supabase
     .from('leads')
-    .select('*, messenger_threads(picture_url), campaigns(name)', { count: 'exact' })
+    .select('*, messenger_threads(picture_url, unread_count, missed_count), campaigns(name)', { count: 'exact' })
     .eq('user_id', userId)
 
   if (params.contact_filter === 'phone') query = query.not('phones', 'eq', '{}')
