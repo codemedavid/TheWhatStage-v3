@@ -1,7 +1,12 @@
 const GRAPH = 'https://graph.facebook.com/v24.0'
 const DIALOG = 'https://www.facebook.com/v24.0/dialog/oauth'
+// `pages_utility_messaging` is required for the Message Templates API (creating
+// & sending UTILITY templates). Without it in the granted scope, template
+// creation fails with Meta error code 200 even when the app holds standard
+// access — the token simply doesn't carry the permission. Pages connected
+// before this scope was added must re-connect to mint a token that includes it.
 const SCOPES =
-  'pages_show_list,pages_read_engagement,pages_manage_metadata,pages_messaging,pages_manage_engagement'
+  'pages_show_list,pages_read_engagement,pages_manage_metadata,pages_messaging,pages_manage_engagement,pages_utility_messaging'
 
 export type FacebookPage = {
   id: string

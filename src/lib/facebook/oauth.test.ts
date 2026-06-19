@@ -22,7 +22,7 @@ describe('facebook/oauth', () => {
     expect(url.searchParams.get('state')).toBe('signed-state')
     expect(url.searchParams.get('response_type')).toBe('code')
     expect(url.searchParams.get('scope')).toBe(
-      'pages_show_list,pages_read_engagement,pages_manage_metadata,pages_messaging,pages_manage_engagement',
+      'pages_show_list,pages_read_engagement,pages_manage_metadata,pages_messaging,pages_manage_engagement,pages_utility_messaging',
     )
   })
 

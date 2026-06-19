@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { ProjectInput, ProjectUpdateInput } from '../_lib/schemas'
 import { seedProjectSequenceRun, cancelActiveProjectSequenceRuns } from '@/lib/projects/sequences/seed'
+import { resetThreadCountersByLead } from '@/lib/messenger/reset-counters'
 
 async function requireUser() {
   const supabase = await createClient()
@@ -52,6 +53,11 @@ export async function createProject(raw: unknown): Promise<string> {
   await seedProjectSequenceRun(createAdminClient(), {
     userId, projectId: data.id, leadId: input.lead_id, stageId: input.stage_id,
   })
+
+  // Baseline the unread/missed counters to zero: the "messages we missed" tally
+  // counts forward from the moment the lead becomes a project. RLS-scoped via
+  // the user client (lead ownership already verified above).
+  await resetThreadCountersByLead(supabase, input.lead_id, { resetMissed: true })
 
   revalidatePath('/dashboard/projects', 'layout')
   return data.id as string

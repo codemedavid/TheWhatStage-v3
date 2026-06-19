@@ -8,6 +8,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { sendOutbound, type OutboundPayload } from '@/lib/messenger/outbound'
 import { deeplinkActionPageUrl } from '@/lib/action-pages/urls'
 import type { MessengerAttachmentType } from '@/lib/facebook/messenger'
+import { resetThreadCountersByLead } from '@/lib/messenger/reset-counters'
 
 export interface ConversationAttachment {
   type: 'image' | 'video' | 'audio' | 'file' | 'action_page'
@@ -59,6 +60,9 @@ export interface ConversationData {
     bot_paused_until: string | null
     last_message_at: string | null
     page_name: string | null
+    /** Counts captured at load time (before the view clears unread). */
+    unread_count: number
+    missed_count: number
   }
   messages: ConversationMessage[]
   stageEvents: ConversationStageEvent[]
@@ -86,11 +90,20 @@ export async function loadConversation(
   const { data: thread } = await supabase
     .from('messenger_threads')
     .select(
-      'id, psid, full_name, picture_url, auto_reply_enabled, bot_paused_until, last_message_at, page_id, facebook_pages(name)',
+      'id, psid, full_name, picture_url, auto_reply_enabled, bot_paused_until, last_message_at, unread_count, missed_count, page_id, facebook_pages(name)',
     )
     .eq('lead_id', leadId)
     .maybeSingle()
   if (!thread) return null
+
+  // Opening the conversation marks it read: clear the unread badge but keep the
+  // missed tally (only an explicit "Mark as read" / markThreadRead clears that).
+  // Capture the counts first so the panel can still show what was waiting.
+  const unreadAtOpen = (thread as { unread_count?: number | null }).unread_count ?? 0
+  const missedAtOpen = (thread as { missed_count?: number | null }).missed_count ?? 0
+  if (unreadAtOpen > 0) {
+    await resetThreadCountersByLead(supabase, leadId, { resetMissed: false })
+  }
 
   const { data: rawMessages, error: msgErr } = await supabase
     .from('messenger_messages')
@@ -153,11 +166,25 @@ export async function loadConversation(
       bot_paused_until: (thread as { bot_paused_until?: string | null }).bot_paused_until ?? null,
       last_message_at: thread.last_message_at,
       page_name: pageName,
+      unread_count: unreadAtOpen,
+      missed_count: missedAtOpen,
     },
     messages,
     stageEvents,
     comments: (comments ?? []) as ConversationComment[],
   }
+}
+
+/**
+ * Explicit "Mark as read": clears BOTH the unread badge and the missed tally for
+ * the lead's thread. Unlike opening the conversation (which clears unread only),
+ * this resets the running "messages we missed" count to zero.
+ */
+export async function markThreadRead(leadId: string): Promise<void> {
+  const { supabase } = await requireUser()
+  await resetThreadCountersByLead(supabase, leadId, { resetMissed: true })
+  // Refresh the badge surfaces (projects board, leads, submissions, nav counter).
+  revalidatePath('/dashboard', 'layout')
 }
 
 type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>
