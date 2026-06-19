@@ -22,6 +22,7 @@ import { createProjectStage, reorderProjectStages } from '../actions/stages'
 import { ProjectDrawer } from './ProjectDrawer'
 import { StageSettingsDrawer } from './StageSettingsDrawer'
 import type { ProjectCardRow } from '../_lib/queries'
+import { UnreadBadge } from '../../_components/UnreadBadge'
 import type { ProjectStageRow } from '@/lib/projects/types'
 
 type Column = { stage: ProjectStageRow; projects: ProjectCardRow[] }
@@ -342,8 +343,12 @@ function ProjectCard({ project, onOpen }: { project: ProjectCardRow; onOpen: (pr
       className="lead-focus cursor-grab rounded-xl p-2.5 transition-shadow active:cursor-grabbing"
     >
       <div className="flex items-start justify-between gap-2">
-        <span className="text-[13px] font-medium leading-snug" style={{ color: 'var(--lead-ink)' }}>
-          {project.title}
+        <span className="flex min-w-0 items-center gap-1.5 text-[13px] font-medium leading-snug" style={{ color: 'var(--lead-ink)' }}>
+          <span className="truncate">{project.title}</span>
+          <UnreadBadge count={project.unread_count} title={`${project.unread_count} unread message(s) from this client`} />
+          {project.unread_count === 0 && (
+            <UnreadBadge count={project.missed_count} variant="missed" title={`${project.missed_count} missed message(s)`} />
+          )}
         </span>
         {project.value != null && (
           <span className="shrink-0 text-[12px] font-semibold" style={{ color: 'var(--lead-accent)' }}>

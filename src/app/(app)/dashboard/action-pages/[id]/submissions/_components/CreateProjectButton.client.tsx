@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { createProjectFromSubmission } from '../../../../projects/actions/projects'
 import type { SubmissionProjectInfo } from '../../../_lib/queries'
+import { UnreadBadge } from '../../../../_components/UnreadBadge'
 
 interface Props {
   submissionId: string
@@ -33,14 +34,20 @@ export function CreateProjectButton({ submissionId, leadId, existingProject }: P
     const badgeStyle = STAGE_BADGE_STYLES[existingProject.stageKind ?? 'open']
     const label = existingProject.stageName ?? 'Project'
     return (
-      <Link
-        href={`/dashboard/projects?project=${existingProject.id}`}
-        className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors ${badgeStyle}`}
-        title={`Project stage: ${label}`}
-      >
-        <CheckIcon size={11} />
-        {label}
-      </Link>
+      <span className="inline-flex items-center gap-1.5">
+        <Link
+          href={`/dashboard/projects?project=${existingProject.id}`}
+          className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors ${badgeStyle}`}
+          title={`Project stage: ${label}`}
+        >
+          <CheckIcon size={11} />
+          {label}
+        </Link>
+        <UnreadBadge count={existingProject.unreadCount} title={`${existingProject.unreadCount} unread message(s) from this client`} />
+        {existingProject.unreadCount === 0 && (
+          <UnreadBadge count={existingProject.missedCount} variant="missed" title={`${existingProject.missedCount} missed message(s)`} />
+        )}
+      </span>
     )
   }
 

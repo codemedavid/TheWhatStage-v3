@@ -52,6 +52,13 @@ async function SidebarWithSession() {
   } catch {
     // transient failure — leave count at 0
   }
+  let projectUnreadCount = 0
+  try {
+    const { data } = await supabase.rpc('count_project_unread')
+    projectUnreadCount = typeof data === 'number' ? data : 0
+  } catch {
+    // transient failure — leave count at 0
+  }
   return (
     <Sidebar
       userInitial={initial}
@@ -59,6 +66,7 @@ async function SidebarWithSession() {
       hasFacebookPage={hasFacebookPage}
       isSuperadmin={session.role === 'superadmin'}
       pendingSuggestionCount={pendingSuggestionCount}
+      projectUnreadCount={projectUnreadCount}
     />
   )
 }

@@ -4,6 +4,7 @@ import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import type { LeadRow } from '../_lib/queries'
 import { parseMatchedSignals } from '../_lib/signals'
+import { UnreadBadge } from '../../_components/UnreadBadge'
 
 const STALE_AFTER_DAYS = 7
 
@@ -125,11 +126,17 @@ export function LeadCard({ lead, onClick }: { lead: LeadRow; onClick: () => void
           </div>
         )}
         <div className="min-w-0 flex-1">
-          <div
-            className="truncate text-[13px] font-medium leading-snug"
-            style={{ color: 'var(--lead-ink)' }}
-          >
-            {lead.name}
+          <div className="flex items-center gap-1.5">
+            <div
+              className="truncate text-[13px] font-medium leading-snug"
+              style={{ color: 'var(--lead-ink)' }}
+            >
+              {lead.name}
+            </div>
+            <UnreadBadge count={lead.unread_count} title={`${lead.unread_count} unread message(s)`} />
+            {lead.unread_count === 0 && (
+              <UnreadBadge count={lead.missed_count} variant="missed" title={`${lead.missed_count} missed`} />
+            )}
           </div>
           {lead.company && (
             <div

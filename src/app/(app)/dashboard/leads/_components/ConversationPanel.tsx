@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState, useTransition } from 'react'
 import {
   loadConversation,
+  markThreadRead,
   replyAsOperator,
   resumeBot,
   setAutoReply,
@@ -27,7 +28,14 @@ export function ConversationPanel({ leadId }: { leadId: string }) {
   const [panel, setPanel] = useState<'none' | 'attach' | 'page'>('none')
   const [sending, startSend] = useTransition()
   const [toggling, startToggle] = useTransition()
+  const [marking, startMark] = useTransition()
   const scrollRef = useRef<HTMLDivElement>(null)
+
+  const onMarkRead = () =>
+    startMark(async () => {
+      await markThreadRead(leadId)
+      refresh()
+    })
 
   const refresh = () => {
     loadConversation(leadId)
@@ -145,7 +153,7 @@ export function ConversationPanel({ leadId }: { leadId: string }) {
 
   return (
     <div className="flex flex-col gap-3">
-      <Header thread={thread} toggling={toggling} onToggleAuto={onToggleAuto} onResume={onResume} now={now} />
+      <Header thread={thread} toggling={toggling} onToggleAuto={onToggleAuto} onResume={onResume} now={now} marking={marking} onMarkRead={onMarkRead} />
 
       <div
         ref={scrollRef}
@@ -268,12 +276,16 @@ function Header({
   onToggleAuto,
   onResume,
   now,
+  marking,
+  onMarkRead,
 }: {
   thread: ConversationData['thread']
   toggling: boolean
   onToggleAuto: () => void
   onResume: () => void
   now: number
+  marking: boolean
+  onMarkRead: () => void
 }) {
   const pausedUntilMs = thread.bot_paused_until
     ? Date.parse(thread.bot_paused_until)
@@ -347,6 +359,18 @@ function Header({
           via {thread.page_name ?? 'Facebook page'}
         </div>
       </div>
+      {thread.missed_count > 0 && (
+        <button
+          type="button"
+          onClick={onMarkRead}
+          disabled={marking}
+          title={`${thread.missed_count} message(s) we missed — click to mark as read`}
+          className="lead-focus inline-flex h-7 items-center gap-1.5 rounded-full px-2.5 text-[11.5px] font-medium transition-colors disabled:opacity-50"
+          style={{ color: '#b45309', background: '#fffbeb', border: '1px solid #fcd34d' }}
+        >
+          {marking ? 'Marking…' : `Mark ${thread.missed_count} read`}
+        </button>
+      )}
       <button
         type="button"
         onClick={onClick}

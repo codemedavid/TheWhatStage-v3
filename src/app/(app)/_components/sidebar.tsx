@@ -216,12 +216,14 @@ export function Sidebar({
   hasFacebookPage = false,
   isSuperadmin = false,
   pendingSuggestionCount = 0,
+  projectUnreadCount = 0,
 }: {
   userInitial?: string
   userName?: string
   hasFacebookPage?: boolean
   isSuperadmin?: boolean
   pendingSuggestionCount?: number
+  projectUnreadCount?: number
 } = {}) {
   const visibleItems = items.filter(
     (item) =>
@@ -301,6 +303,14 @@ export function Sidebar({
                   {item.href === '/dashboard/leads' && pendingSuggestionCount > 0 && (
                     <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-blue-600 px-1 text-[10px] font-semibold text-white">
                       {pendingSuggestionCount}
+                    </span>
+                  )}
+                  {item.href === '/dashboard/projects' && projectUnreadCount > 0 && (
+                    <span
+                      title={`${projectUnreadCount} unread client message(s) across your projects`}
+                      className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-semibold text-white"
+                    >
+                      {projectUnreadCount > 99 ? '99+' : projectUnreadCount}
                     </span>
                   )}
                 </span>
