@@ -4,31 +4,42 @@ import { useState, useTransition } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { createProjectFromSubmission } from '../../../../projects/actions/projects'
+import type { SubmissionProjectInfo } from '../../../_lib/queries'
 
 interface Props {
   submissionId: string
   leadId: string | null
-  existingProjectId?: string | null
+  existingProject?: SubmissionProjectInfo | null
+}
+
+// Color palette for the stage badge, keyed by stage kind. Won → green,
+// lost → red, open (and unknown) → neutral slate.
+const STAGE_BADGE_STYLES: Record<'open' | 'won' | 'lost', string> = {
+  won: 'border-[#BBF7D0] bg-[#F0FDF4] text-[#15803D] hover:bg-[#DCFCE7]',
+  lost: 'border-[#FECACA] bg-[#FEF2F2] text-[#B91C1C] hover:bg-[#FEE2E2]',
+  open: 'border-[#E2E8F0] bg-[#F8FAFC] text-[#334155] hover:bg-[#F1F5F9]',
 }
 
 // Inline action on a submission card: turn the submission into a project so the
 // deal can be tracked on the Projects board. Mirrors LeadProjectsPanel's
 // useTransition + router.push pattern. Hidden when the submission has no lead,
 // since createProjectFromSubmission requires one.
-export function CreateProjectButton({ submissionId, leadId, existingProjectId }: Props) {
+export function CreateProjectButton({ submissionId, leadId, existingProject }: Props) {
   const router = useRouter()
   const [pending, start] = useTransition()
   const [error, setError] = useState<string | null>(null)
 
-  if (existingProjectId) {
+  if (existingProject) {
+    const badgeStyle = STAGE_BADGE_STYLES[existingProject.stageKind ?? 'open']
+    const label = existingProject.stageName ?? 'Project'
     return (
       <Link
-        href={`/dashboard/projects?project=${existingProjectId}`}
-        className="inline-flex items-center gap-1.5 rounded-full border border-[#BBF7D0] bg-[#F0FDF4] px-2.5 py-1 text-[11px] font-medium text-[#15803D] transition-colors hover:bg-[#DCFCE7]"
-        title="This submission is already assigned to a project"
+        href={`/dashboard/projects?project=${existingProject.id}`}
+        className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors ${badgeStyle}`}
+        title={`Project stage: ${label}`}
       >
         <CheckIcon size={11} />
-        Project assigned
+        {label}
       </Link>
     )
   }

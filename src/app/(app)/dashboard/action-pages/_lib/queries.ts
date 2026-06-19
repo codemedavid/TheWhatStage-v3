@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { ActionPageKind } from '@/lib/action-pages/kinds'
+import type { ProjectStageKind } from '@/lib/projects/types'
 import type { PipelineRule } from './schemas'
 import { createAdminClient } from '@/lib/supabase/admin'
 
@@ -166,24 +167,44 @@ export async function fetchSubmissions(
   return rows
 }
 
-// Map submission id → existing project id, for submissions that have already
-// been turned into a project (origin_submission_id link). Lets the submissions
-// view show "View project" instead of creating a duplicate.
-export async function fetchProjectIdsBySubmissionIds(
+// The project a submission was turned into, plus its current stage. Lets the
+// submissions view show the live deal stage (e.g. "Scoping", "Won") instead of
+// a static "Project assigned" badge, while still linking to the project.
+export interface SubmissionProjectInfo {
+  id: string
+  stageName: string | null
+  stageKind: ProjectStageKind | null
+}
+
+type SubmissionProjectJoin = {
+  id: string
+  origin_submission_id: string | null
+  project_stages: { name: string; kind: ProjectStageKind | null } | { name: string; kind: ProjectStageKind | null }[] | null
+}
+
+// Map submission id → existing project info, for submissions that have already
+// been turned into a project (origin_submission_id link).
+export async function fetchProjectInfoBySubmissionIds(
   supabase: SupabaseClient,
   userId: string,
   submissionIds: string[],
-): Promise<Map<string, string>> {
-  const map = new Map<string, string>()
+): Promise<Map<string, SubmissionProjectInfo>> {
+  const map = new Map<string, SubmissionProjectInfo>()
   if (submissionIds.length === 0) return map
   const { data, error } = await supabase
     .from('projects')
-    .select('id, origin_submission_id')
+    .select('id, origin_submission_id, project_stages(name, kind)')
     .eq('user_id', userId)
     .in('origin_submission_id', submissionIds)
-  if (error) throw new Error(`fetchProjectIdsBySubmissionIds: ${error.message}`)
-  for (const row of (data ?? []) as Array<{ id: string; origin_submission_id: string | null }>) {
-    if (row.origin_submission_id) map.set(row.origin_submission_id, row.id)
+  if (error) throw new Error(`fetchProjectInfoBySubmissionIds: ${error.message}`)
+  for (const row of (data ?? []) as SubmissionProjectJoin[]) {
+    if (!row.origin_submission_id) continue
+    const stage = Array.isArray(row.project_stages) ? row.project_stages[0] ?? null : row.project_stages
+    map.set(row.origin_submission_id, {
+      id: row.id,
+      stageName: stage?.name ?? null,
+      stageKind: stage?.kind ?? null,
+    })
   }
   return map
 }

@@ -4,9 +4,9 @@ import { createClient } from '@/lib/supabase/server'
 import {
   fetchActionPage,
   fetchSubmissions,
-  fetchProjectIdsBySubmissionIds,
+  fetchProjectInfoBySubmissionIds,
 } from '../../_lib/queries'
-import type { SubmissionListItem } from '../../_lib/queries'
+import type { SubmissionListItem, SubmissionProjectInfo } from '../../_lib/queries'
 import { CreateProjectButton } from './_components/CreateProjectButton.client'
 import BookingSubmissionsView from './BookingSubmissionsView'
 import type { BookingEntry } from './BookingSubmissionsView'
@@ -321,7 +321,7 @@ export default async function SubmissionsPage({
   }
 
   const submissions = await fetchSubmissions(supabase, user.id, id)
-  const projectBySubmission = await fetchProjectIdsBySubmissionIds(
+  const projectBySubmission = await fetchProjectInfoBySubmissionIds(
     supabase,
     user.id,
     submissions.map((s) => s.id),
@@ -515,7 +515,7 @@ function FormView({
   submissions: SubmissionListItem[]
   monthStart: Date
   weekAgo: Date
-  projectBySubmission: Map<string, string>
+  projectBySubmission: Map<string, SubmissionProjectInfo>
 }) {
   const submitted = submissions.filter((s) => s.outcome === 'submitted' || !s.outcome)
   const thisMonth = submitted.filter((s) => new Date(s.created_at) >= monthStart)
@@ -542,7 +542,7 @@ function FormView({
                   <FormCard
                     key={s.id}
                     submission={s}
-                    projectId={projectBySubmission.get(s.id) ?? null}
+                    project={projectBySubmission.get(s.id) ?? null}
                   />
                 ))}
               </div>
@@ -556,10 +556,10 @@ function FormView({
 
 function FormCard({
   submission: s,
-  projectId,
+  project,
 }: {
   submission: SubmissionListItem
-  projectId: string | null
+  project: SubmissionProjectInfo | null
 }) {
   const data = s.data as Record<string, unknown>
   const fields = data.fields && typeof data.fields === 'object'
@@ -568,7 +568,7 @@ function FormCard({
 
   return (
     <div className="overflow-hidden rounded-xl border border-[#E5E7EB] bg-white shadow-[0_1px_3px_rgba(0,0,0,0.06)] hover:shadow-[0_2px_8px_rgba(0,0,0,0.08)] transition-shadow">
-      <PersonContent submission={s} fields={fields} projectId={projectId} />
+      <PersonContent submission={s} fields={fields} project={project} />
     </div>
   )
 }
@@ -595,7 +595,7 @@ function QualificationView({
 }: {
   submissions: SubmissionListItem[]
   weekAgo: Date
-  projectBySubmission: Map<string, string>
+  projectBySubmission: Map<string, SubmissionProjectInfo>
 }) {
   const outcomeCounts = Array.from(
     submissions.reduce((map, s) => {
@@ -633,7 +633,7 @@ function QualificationView({
                   <QualificationCard
                     key={s.id}
                     submission={s}
-                    projectId={projectBySubmission.get(s.id) ?? null}
+                    project={projectBySubmission.get(s.id) ?? null}
                   />
                 ))}
               </div>
@@ -647,10 +647,10 @@ function QualificationView({
 
 function QualificationCard({
   submission: s,
-  projectId,
+  project,
 }: {
   submission: SubmissionListItem
-  projectId: string | null
+  project: SubmissionProjectInfo | null
 }) {
   const data = s.data as Record<string, unknown>
   const answers = Array.isArray(data.answers) ? data.answers : []
@@ -715,7 +715,7 @@ function QualificationCard({
             <CreateProjectButton
               submissionId={s.id}
               leadId={s.lead_id}
-              existingProjectId={projectId}
+              existingProject={project}
             />
           </div>
         </div>
@@ -767,7 +767,7 @@ function GenericView({
   projectBySubmission,
 }: {
   submissions: SubmissionListItem[]
-  projectBySubmission: Map<string, string>
+  projectBySubmission: Map<string, SubmissionProjectInfo>
 }) {
   const groups = groupByCreatedDate(submissions)
   return (
@@ -793,7 +793,7 @@ function GenericView({
                   <GenericCard
                     key={s.id}
                     submission={s}
-                    projectId={projectBySubmission.get(s.id) ?? null}
+                    project={projectBySubmission.get(s.id) ?? null}
                   />
                 ))}
               </div>
@@ -807,10 +807,10 @@ function GenericView({
 
 function GenericCard({
   submission: s,
-  projectId,
+  project,
 }: {
   submission: SubmissionListItem
-  projectId: string | null
+  project: SubmissionProjectInfo | null
 }) {
   const entries = Object.entries(s.data ?? {})
 
@@ -851,7 +851,7 @@ function GenericCard({
             <CreateProjectButton
               submissionId={s.id}
               leadId={s.lead_id}
-              existingProjectId={projectId}
+              existingProject={project}
             />
           </div>
         </div>
@@ -874,11 +874,11 @@ function GenericCard({
 function PersonContent({
   submission: s,
   fields,
-  projectId,
+  project,
 }: {
   submission: SubmissionListItem
   fields: Record<string, unknown>
-  projectId: string | null
+  project: SubmissionProjectInfo | null
 }) {
   return (
     <div className="flex flex-1 flex-col gap-2 p-4 min-w-0">
@@ -923,7 +923,7 @@ function PersonContent({
           <CreateProjectButton
             submissionId={s.id}
             leadId={s.lead_id}
-            existingProjectId={projectId}
+            existingProject={project}
           />
         </div>
       </div>
