@@ -5,6 +5,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { mapMetaStatusStrict, buildStatusUpdate } from '@/lib/messenger-templates/statusFlip'
 import { interruptWorkflowRun } from '@/lib/workflow/trigger'
 import { isBotPaused } from '@/lib/chatbot/takeover'
+import { bumpThreadOnInbound } from '@/lib/messenger/inbound-counters'
 import { handlePostback } from './_postback'
 import { isUserActive } from './_status'
 
@@ -463,15 +464,11 @@ async function handleEvent(
   }
   if (!inserted) return null
 
-  // Update thread tail.
-  await admin
-    .from('messenger_threads')
-    .update({
-      last_message_at: new Date().toISOString(),
-      last_message_preview: text.slice(0, 200) || '[attachment]',
-      unread_count: thread.lead_id ? undefined : 1, // first-touch threads start at 1
-    })
-    .eq('id', thread.id)
+  // Bump unread + missed counters and refresh the thread tail. Atomic
+  // (col = col + 1) via RPC; best-effort so a transient failure never blocks
+  // the inbound pipeline. Runs once per unique message — a redelivery dedups on
+  // fb_message_id and returns above before reaching here.
+  await bumpThreadOnInbound(admin, thread.id, text)
 
   // Enqueue if the bot is on for this thread, OR if global auto-classify is
   // enabled for this user (the worker will skip the reply step and only
