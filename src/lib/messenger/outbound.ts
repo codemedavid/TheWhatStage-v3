@@ -6,6 +6,7 @@ import {
   sendMessengerImage,
   sendMessengerText,
   sendMessengerUtilityTemplate,
+  isHumanAgentUnapprovedError,
   type MessengerAttachmentType,
   type MessengerGenericElement,
 } from '@/lib/facebook/messenger'
@@ -262,6 +263,19 @@ export async function sendOutbound(args: {
         .eq('thread_id', thread.id)
         .eq('token', policy.token)
       if (relErr) console.error('[outbound] OTN token release failed', relErr.message)
+    }
+    // Meta hasn't approved the Human Agent feature for this page, so the
+    // HUMAN_AGENT tag is rejected (Graph code 100, subcode 2018276). This is a
+    // PERMANENT policy block — retrying never helps — so degrade it to a clean
+    // `sent: false` like the other out-of-window blocks instead of throwing.
+    // Otherwise it surfaces as a noisy "handler threw" + Sentry alert on every
+    // sequence tick and leaves the run re-firing forever.
+    if (policy.mode === 'HUMAN_AGENT' && isHumanAgentUnapprovedError(e)) {
+      console.warn('[outbound] HUMAN_AGENT tag not approved by Meta — send blocked', {
+        threadId: thread.id,
+        kind,
+      })
+      return { sent: false, reason: 'human_agent_unapproved' }
     }
     throw e
   }

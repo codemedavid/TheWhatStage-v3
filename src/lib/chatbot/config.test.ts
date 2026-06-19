@@ -1,6 +1,8 @@
 import { describe, it, expect, vi } from 'vitest'
 import {
   MAX_PAUSE_AI_INSTRUCTIONS_LENGTH,
+  REPLY_MAX_TOKENS,
+  REPLY_WITH_STRUCTURE_MAX_TOKENS,
   rowToConfig,
   upsertChatbotConfig,
   type ChatbotConfigRow,
@@ -27,6 +29,22 @@ const baseRow = (overrides: Partial<ChatbotConfigRow> = {}): ChatbotConfigRow =>
   created_at: '',
   updated_at: '',
   ...overrides,
+})
+
+// Regression guard: the reply token budget was once cut from 1600 -> 600/400
+// as a cost optimization, which truncated longer replies mid-sentence (Graph
+// delivers the cut text to the customer). You only pay for tokens actually
+// generated, so a generous ceiling costs nothing on short replies. These floors
+// stop a future cost pass from silently re-introducing the truncation.
+describe('reply token budgets', () => {
+  it('keeps the plain reply budget above the truncation floor', () => {
+    expect(REPLY_MAX_TOKENS).toBeGreaterThanOrEqual(700)
+  })
+
+  it('gives the combined reply+structure call more headroom than the plain reply', () => {
+    expect(REPLY_WITH_STRUCTURE_MAX_TOKENS).toBeGreaterThanOrEqual(900)
+    expect(REPLY_WITH_STRUCTURE_MAX_TOKENS).toBeGreaterThan(REPLY_MAX_TOKENS)
+  })
 })
 
 describe('rowToConfig — pause + takeover fields', () => {

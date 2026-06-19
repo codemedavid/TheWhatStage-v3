@@ -21,6 +21,26 @@ export interface RecommendationRulesMap {
  *  Pause rules are short by nature; this is a generous ceiling, not a target. */
 export const MAX_PAUSE_AI_INSTRUCTIONS_LENGTH = 2000
 
+/**
+ * Output-token ceilings for customer-reply generation.
+ *
+ * These were once cut to 600/400 as a cost optimization ("the old 1600 ceiling
+ * was 4× what we ever actually emit"), which truncated longer replies
+ * mid-sentence — and Graph delivers the cut text to the customer, so the lead
+ * sees a message that stops abruptly. Output is billed per token actually
+ * generated, so a generous ceiling costs nothing on the common short reply and
+ * only spends more on the exact turns that need the room. The send layer chunks
+ * anything past Messenger's 2000-char limit, so a fuller reply still arrives.
+ *
+ * REPLY_MAX_TOKENS               — plain reply generation (answer() + fallback).
+ * REPLY_WITH_STRUCTURE_MAX_TOKENS — combined call whose JSON also carries
+ *   stage_change / action_page / recommend_* fields, so it needs more headroom
+ *   than the reply text alone (and a truncated JSON here fails to parse, costing
+ *   a second fallback LLM call).
+ */
+export const REPLY_MAX_TOKENS = 800
+export const REPLY_WITH_STRUCTURE_MAX_TOKENS = 1024
+
 export const DEFAULT_RECOMMENDATION_RULES: RecommendationRulesMap = {
   defaultConfidenceThreshold: 0.55,
   perActionPage: {},

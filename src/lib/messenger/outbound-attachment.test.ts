@@ -15,6 +15,8 @@ vi.mock('@/lib/facebook/messenger', () => ({
   sendMessengerAttachment: (a: Args) => sendMessengerAttachment(a),
   sendMessengerGenericTemplate: (a: Args) => sendMessengerGenericTemplate(a),
   sendMessengerUtilityTemplate: (a: Args) => sendMessengerUtilityTemplate(a),
+  isHumanAgentUnapprovedError: (e: unknown) =>
+    e instanceof Error && e.message.includes('2018276'),
 }))
 
 import { sendOutbound } from './outbound'
@@ -84,6 +86,22 @@ describe('sendOutbound — operator media/button HUMAN_AGENT tagging', () => {
     expect(sendMessengerButton).toHaveBeenCalledWith(
       expect.objectContaining({ messagingType: 'MESSAGE_TAG', tag: 'HUMAN_AGENT' }),
     )
+  })
+
+  it('degrades to sent:false when Meta has not approved the HUMAN_AGENT tag', async () => {
+    sendMessengerText.mockRejectedValueOnce(
+      new Error(
+        "Graph 400 (code 100): {\"error\":{\"message\":\"(#100) Cannot tag messages with 'HUMAN_AGENT' without prior approval.\",\"code\":100,\"error_subcode\":2018276}}",
+      ),
+    )
+    const r = await sendOutbound({
+      admin: adminStub(),
+      thread: { ...baseThread, last_inbound_at: OUT_OF_WINDOW },
+      pageToken: 'tok',
+      payload: { kind: 'text', text: 'hi' },
+      kind: 'operator',
+    })
+    expect(r).toEqual({ sent: false, reason: 'human_agent_unapproved' })
   })
 
   it('does NOT tag an in-window operator image send (RESPONSE window suffices)', async () => {

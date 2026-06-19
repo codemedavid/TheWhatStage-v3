@@ -5,7 +5,7 @@ import {
   createEmbedder,
   retrieve,
 } from '@/lib/rag'
-import { getChatbotConfig, type ChatbotConfig } from './config'
+import { getChatbotConfig, REPLY_MAX_TOKENS, type ChatbotConfig } from './config'
 import { loadPrimaryGoalInstruction } from './primary-goal'
 import { selectMediaForReply, type SelectedMediaAsset } from '@/lib/media/selector'
 import { buildMediaContextBlock } from '@/lib/media/prompt'
@@ -183,7 +183,7 @@ export async function answer(
       ...redactedHistory,
       { role: 'user', content: redactedUser },
     ],
-    { temperature: config.temperature, maxTokens: 400 },
+    { temperature: config.temperature, maxTokens: REPLY_MAX_TOKENS },
   )
   logChatbotUsage('chatbot.answer', {
     model: completion.model,

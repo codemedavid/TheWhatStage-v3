@@ -67,6 +67,23 @@ export function sanitizeDashes(raw: string): string {
 }
 
 /**
+ * Guarantee the bot never goes silent. Reply generation can return an empty
+ * string — the model emitted nothing, the structured JSON failed to parse AND
+ * the plain fallback completion also came back empty, a content filter fired,
+ * etc. When that happens the worker would skip the turn and the customer
+ * receives NOTHING (one of the "no message at all" symptoms). Substitute the
+ * operator-configured fallback message so something always goes out.
+ *
+ * Returns the trimmed reply when present, otherwise the trimmed fallback, and
+ * only '' when BOTH are empty (the caller still guards that final case).
+ */
+export function ensureNonEmptyReply(reply: string, fallbackMessage: string): string {
+  const trimmedReply = reply.trim()
+  if (trimmedReply) return trimmedReply
+  return fallbackMessage.trim()
+}
+
+/**
  * Run the full reply guard pipeline:
  * 1. Sanitize dashes in the reply text.
  * 2. Check for ungrounded contact details (phone, URL, email).

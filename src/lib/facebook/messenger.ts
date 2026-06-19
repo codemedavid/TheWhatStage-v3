@@ -1,3 +1,5 @@
+import { splitMessengerText } from './messenger-split'
+
 const GRAPH = 'https://graph.facebook.com/v24.0'
 
 const SUBSCRIBED_FIELDS = [
@@ -59,6 +61,24 @@ function parseGraphErrorCode(text: string): number | null {
 function graphError(status: number, text: string): Error {
   const code = parseGraphErrorCode(text)
   return new Error(`Graph ${status}${code !== null ? ` (code ${code})` : ''}: ${text}`)
+}
+
+// Graph error_subcode for "Cannot tag messages with 'HUMAN_AGENT' without prior
+// approval" — returned when the page/app hasn't been granted the Human Agent
+// messaging feature by Meta. This is a PERMANENT policy block, not a transient
+// failure: retrying never succeeds until the feature is approved. Callers detect
+// it to degrade an out-of-window HUMAN_AGENT send to a clean "blocked" outcome
+// instead of a thrown error that pages on every sequence tick.
+const HUMAN_AGENT_UNAPPROVED_SUBCODE = 2018276
+
+export function isHumanAgentUnapprovedError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false
+  // graphError() embeds the raw Graph response body in the message; match the
+  // structured subcode (robust to wording changes) with a message fallback.
+  return (
+    error.message.includes(String(HUMAN_AGENT_UNAPPROVED_SUBCODE)) ||
+    error.message.includes("tag messages with 'HUMAN_AGENT' without prior approval")
+  )
 }
 
 function graphRetryDelayMs(attempt: number, retryAfter: string | null): number {
@@ -143,22 +163,52 @@ export async function subscribePageToWebhook(pageAccessToken: string): Promise<v
  * Uses MESSAGE_TAG when outside the standard messaging window — for v1 we
  * stay inside the 24h window so RESPONSE messaging_type is sufficient.
  */
-export async function sendMessengerText(args: {
+interface TextSendArgs {
   pageAccessToken: string
   recipientPsid: string
   text: string
   messagingType?: 'RESPONSE' | 'UPDATE' | 'MESSAGE_TAG'
   tag?: 'HUMAN_AGENT'
-}): Promise<{ message_id: string }> {
+}
+
+async function sendOneText(
+  args: TextSendArgs,
+  text: string,
+): Promise<{ message_id: string }> {
   const url = new URL(`${GRAPH}/me/messages`)
   url.searchParams.set('access_token', args.pageAccessToken)
   const body: Record<string, unknown> = {
     recipient: { id: args.recipientPsid },
-    message: { text: args.text },
+    message: { text },
     messaging_type: args.messagingType ?? 'RESPONSE',
   }
   if (args.tag) body.tag = args.tag
   return postJson<{ message_id: string }>(url.toString(), body)
+}
+
+export async function sendMessengerText(args: TextSendArgs): Promise<{ message_id: string }> {
+  const parts = splitMessengerText(args.text)
+  // Within the limit (the common case) — single send, behaviour unchanged.
+  // Empty/whitespace text falls here too: send the raw text rather than nothing
+  // so the prior contract holds (callers already guard against empty replies).
+  if (parts.length <= 1) {
+    return sendOneText(args, parts[0] ?? args.text)
+  }
+  // Over 2000 chars — deliver as ordered bubbles, each within the limit.
+  // Without this, Graph rejects the entire message (#100, "message exceeds
+  // maximum length") and the customer receives NOTHING. Return the FIRST part's
+  // id so the worker's idempotency stamp (outbound_text_fb_id) stays stable.
+  //
+  // TRADEOFF: if a later part throws after an earlier part already delivered, a
+  // job retry re-sends from the top (one duplicated leading bubble). This only
+  // affects the rare >2000-char path and is strictly better than dropping the
+  // whole reply.
+  let firstId: string | null = null
+  for (const part of parts) {
+    const r = await sendOneText(args, part)
+    if (firstId === null) firstId = r.message_id
+  }
+  return { message_id: firstId ?? '' }
 }
 
 /**

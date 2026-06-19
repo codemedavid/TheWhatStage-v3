@@ -11,6 +11,8 @@ import { ragConfig } from '@/lib/rag/config'
 import {
   getActionPageRecommendationRules,
   getChatbotConfig,
+  REPLY_MAX_TOKENS,
+  REPLY_WITH_STRUCTURE_MAX_TOKENS,
   type ActionPageRecommendationRules,
 } from './config'
 import { selectMediaForReply, type SelectedMediaAsset } from '@/lib/media/selector'
@@ -296,10 +298,10 @@ export async function answerWithClassification(
       ...redactedHistory,
       { role: 'user', content: redactedUser },
     ],
-    // 600 = ~400 tokens of reply + headroom for the JSON envelope and
-    // structured fields (stage_change, action_page, recommend_*). The old
-    // 1600 ceiling was 4× what we ever actually emit.
-    { temperature: config.temperature, maxTokens: 600, responseFormat: 'json_object' },
+    // Reply text + JSON envelope + structured fields (stage_change,
+    // action_page, recommend_*). Cut too low this truncates the reply OR breaks
+    // the JSON (forcing a second fallback call) — see REPLY_WITH_STRUCTURE_MAX_TOKENS.
+    { temperature: config.temperature, maxTokens: REPLY_WITH_STRUCTURE_MAX_TOKENS, responseFormat: 'json_object' },
   )
   const raw = completion.text
   logChatbotUsage('chatbot.classify', {
@@ -388,7 +390,7 @@ export async function answerWithClassification(
         ...redactedHistory,
         { role: 'user', content: redactedUser },
       ],
-      { temperature: config.temperature, maxTokens: 400 },
+      { temperature: config.temperature, maxTokens: REPLY_MAX_TOKENS },
     )
     logChatbotUsage('chatbot.answer.fallback', {
       model: fb.model,

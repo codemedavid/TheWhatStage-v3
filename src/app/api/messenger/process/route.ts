@@ -50,6 +50,7 @@ import { resolveActiveProjectContext, renderProjectContextBlock } from '@/lib/pr
 import { interruptWorkflowRun } from '@/lib/workflow/trigger'
 import { runDeepReclassify } from '@/lib/chatbot/deep-reclassify'
 import { isBotPaused } from '@/lib/chatbot/takeover'
+import { ensureNonEmptyReply } from '@/lib/chatbot/reply-guard'
 import { computePauseUntil } from '@/lib/chatbot/pause'
 import { resolveSourceImages } from '@/lib/chatbot/source-images'
 import { firstMentionGate, filterAttachableMedia, mediaAttachKey } from '@/lib/chatbot/attach-gate'
@@ -764,7 +765,12 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
         selectedMedia = r.media
         attachImages = r.attachImages
       }
+      // Both the structured and the plain generation can come back empty (model
+      // returned nothing, JSON parse failed, content filter, etc.). Rather than
+      // go silent on the customer, send the operator-configured fallback message.
+      reply = ensureNonEmptyReply(reply, config.fallbackMessage ?? '')
       if (!reply) {
+        // Only reachable when the fallback message is itself empty.
         await markDone(admin, job.id, 'skipped', 'empty reply')
         return
       }

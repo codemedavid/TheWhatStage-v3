@@ -1,7 +1,29 @@
 import { describe, expect, it } from 'vitest'
-import { guardReply } from '@/lib/chatbot/reply-guard'
+import { ensureNonEmptyReply, guardReply } from '@/lib/chatbot/reply-guard'
 
 const FALLBACK = 'Sorry, I cannot share that information right now.'
+
+describe('ensureNonEmptyReply', () => {
+  it('returns the generated reply when it has content', () => {
+    expect(ensureNonEmptyReply('Hello there', FALLBACK)).toBe('Hello there')
+  })
+
+  it('trims the generated reply', () => {
+    expect(ensureNonEmptyReply('  spaced  ', FALLBACK)).toBe('spaced')
+  })
+
+  it('substitutes the configured fallback when the reply is empty', () => {
+    expect(ensureNonEmptyReply('', FALLBACK)).toBe(FALLBACK)
+  })
+
+  it('substitutes the fallback when the reply is whitespace only', () => {
+    expect(ensureNonEmptyReply('   \n  ', FALLBACK)).toBe(FALLBACK)
+  })
+
+  it('returns empty string only when both reply and fallback are empty', () => {
+    expect(ensureNonEmptyReply('', '   ')).toBe('')
+  })
+})
 
 describe('guardReply — contact leak detection', () => {
   it('drops a reply containing a phone number NOT in grounding', () => {
