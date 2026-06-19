@@ -38,9 +38,10 @@ as $$
   where id = p_thread_id;
 $$;
 
--- Functions are EXECUTE-able by PUBLIC by default; anon inherits that. Lock the
--- write-path RPC to service_role only.
-revoke all on function public.increment_thread_counters(uuid, text) from public;
+-- Supabase default privileges grant EXECUTE on new functions to anon &
+-- authenticated DIRECTLY (not via PUBLIC), so revoke from the roles explicitly.
+-- Write-path RPC: service_role only.
+revoke all on function public.increment_thread_counters(uuid, text) from public, anon, authenticated;
 grant execute on function public.increment_thread_counters(uuid, text) to service_role;
 
 -- Sum of unread across the caller's threads whose lead has at least one project.
@@ -64,5 +65,5 @@ as $$
     );
 $$;
 
-revoke all on function public.count_project_unread() from public;
+revoke all on function public.count_project_unread() from public, anon;
 grant execute on function public.count_project_unread() to authenticated;
