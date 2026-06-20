@@ -8,10 +8,14 @@ export function Toolbar({ params }: { params: LeadsQuery }) {
   const [q, setQ] = useState(params.q ?? '')
   const inputRef = useRef<HTMLInputElement>(null)
 
+  // Debounced search push. Only fire when the typed value differs from the URL —
+  // otherwise the mount run (and every navigation) would push a redundant
+  // replace. `set` is stable, so this effect runs only on real `q` changes.
   useEffect(() => {
+    if (q === (params.q ?? '')) return
     const t = setTimeout(() => set({ q: q || undefined }), 250)
     return () => clearTimeout(t)
-  }, [q, set])
+  }, [q, params.q, set])
 
   // "/" focuses search
   useEffect(() => {

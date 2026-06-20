@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { LeadsQuery } from '../_lib/schemas'
 import { fetchStages, fetchFieldDefs, type LeadRow } from '../_lib/queries'
+import { manilaDayStartIso, manilaDayEndIso } from '../_lib/day-bounds'
 import { leadsToCsv } from '../_lib/csv'
 
 const MAX_EXPORT = 50000
@@ -38,8 +39,9 @@ export async function exportLeadsCsv(
         `name.ilike.${term},email.ilike.${term},phone.ilike.${term},company.ilike.${term}`,
       )
     }
-    if (params.from) query = query.gte('created_at', `${params.from}T00:00:00Z`)
-    if (params.to)   query = query.lte('created_at', `${params.to}T23:59:59Z`)
+    // Match the on-screen date window: Manila day bounds against last_activity_at.
+    if (params.from) query = query.gte('last_activity_at', manilaDayStartIso(params.from))
+    if (params.to)   query = query.lte('last_activity_at', manilaDayEndIso(params.to))
   }
 
   query = query.order('created_at', { ascending: false }).limit(MAX_EXPORT)
