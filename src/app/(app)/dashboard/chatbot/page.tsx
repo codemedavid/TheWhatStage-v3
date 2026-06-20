@@ -69,6 +69,9 @@ export default async function ChatbotPage() {
         mediaAssets={mediaAssets}
         actionPages={actionPages}
       />
+      {/* Reply-timing control belongs with the bot's core reply behavior, on the
+          default tab, so it's discoverable instead of buried under follow-ups. */}
+      <MessageDebounceForm />
     </>
   )
 
@@ -79,7 +82,6 @@ export default async function ChatbotPage() {
         actionPages={actionPages.map((p) => ({ id: p.id, title: p.title }))}
       />
       <HumanTakeoverForm />
-      <MessageDebounceForm />
     </>
   )
 
