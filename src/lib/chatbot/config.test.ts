@@ -26,6 +26,7 @@ const baseRow = (overrides: Partial<ChatbotConfigRow> = {}): ChatbotConfigRow =>
   primary_action_page_id: null,
   pause_ai_instructions: 'pause when angry',
   human_takeover_minutes: 90,
+  message_debounce_seconds: 6,
   created_at: '',
   updated_at: '',
   ...overrides,
@@ -62,6 +63,21 @@ describe('rowToConfig — pause + takeover fields', () => {
   it('defaults humanTakeoverMinutes to 60 when null/missing', () => {
     const cfg = rowToConfig(baseRow({ human_takeover_minutes: null as unknown as number }))
     expect(cfg.humanTakeoverMinutes).toBe(60)
+  })
+
+  it('maps message_debounce_seconds', () => {
+    const cfg = rowToConfig(baseRow({ message_debounce_seconds: 8 }))
+    expect(cfg.messageDebounceSeconds).toBe(8)
+  })
+
+  it('defaults messageDebounceSeconds to 6 when null/missing', () => {
+    const cfg = rowToConfig(baseRow({ message_debounce_seconds: null as unknown as number }))
+    expect(cfg.messageDebounceSeconds).toBe(6)
+  })
+
+  it('clamps messageDebounceSeconds into the [0, 15] warm-worker window', () => {
+    expect(rowToConfig(baseRow({ message_debounce_seconds: 99 })).messageDebounceSeconds).toBe(15)
+    expect(rowToConfig(baseRow({ message_debounce_seconds: -4 })).messageDebounceSeconds).toBe(0)
   })
 })
 

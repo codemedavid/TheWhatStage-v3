@@ -64,6 +64,9 @@ export type ChatbotConfigRow = {
   primary_action_page_id: string | null
   pause_ai_instructions: string
   human_takeover_minutes: number
+  /** Quiet-window (seconds) the webhook waits before the bot replies, so a
+   *  burst of rapid customer messages is coalesced into one reply. 0 = off. */
+  message_debounce_seconds: number
   created_at: string
   updated_at: string
 }
@@ -79,8 +82,15 @@ export type ChatbotConfig = ChatbotPersona & {
   primaryActionPageId: string | null
   /** Pause-window duration (minutes) reused for AI self-pause handoffs. */
   humanTakeoverMinutes: number
+  /** Quiet-window (seconds) before the bot replies, coalescing rapid bursts. */
+  messageDebounceSeconds: number
   updatedAt: string
 }
+
+/** Max debounce window. Kept below the worker's DRAIN_WAIT_MAX_MS (20s) so a
+ *  warm worker still picks the job up without falling through to the 1-min cron. */
+export const MAX_MESSAGE_DEBOUNCE_SECONDS = 15
+export const DEFAULT_MESSAGE_DEBOUNCE_SECONDS = 6
 
 export const DEFAULT_CHATBOT_CONFIG: ChatbotConfig = {
   ...DEFAULT_CHATBOT_PERSONA,
@@ -99,6 +109,7 @@ export const DEFAULT_CHATBOT_CONFIG: ChatbotConfig = {
   primaryActionPageId: null,
   // Mirrors the DB default in 20260604000000_human_takeover.sql.
   humanTakeoverMinutes: 60,
+  messageDebounceSeconds: DEFAULT_MESSAGE_DEBOUNCE_SECONDS,
   updatedAt: '',
 }
 
@@ -183,6 +194,11 @@ export function rowToConfig(row: ChatbotConfigRow): ChatbotConfig {
     instructions: row.instructions ?? '',
     pauseAiInstructions: row.pause_ai_instructions ?? '',
     humanTakeoverMinutes: row.human_takeover_minutes ?? DEFAULT_CHATBOT_CONFIG.humanTakeoverMinutes,
+    messageDebounceSeconds: clamp(
+      Math.round(row.message_debounce_seconds ?? DEFAULT_MESSAGE_DEBOUNCE_SECONDS),
+      0,
+      MAX_MESSAGE_DEBOUNCE_SECONDS,
+    ),
     doRules: row.do_rules?.length ? row.do_rules : DEFAULT_CHATBOT_CONFIG.doRules,
     dontRules: row.dont_rules?.length ? row.dont_rules : DEFAULT_CHATBOT_CONFIG.dontRules,
     fallbackMessage: row.fallback_message || DEFAULT_CHATBOT_CONFIG.fallbackMessage,
