@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, useTransition } from 'react'
 import { sendAttachmentAsOperator, type AttachmentSendInput } from '../actions/messenger'
 import { AudioTrimmer } from './AudioTrimmer'
 import { describeSendError } from '../_lib/send-error'
+import { ATTACHMENT_ACCEPT, attachmentTypeFromFile, isAudioFile } from '../_lib/attachment-file'
 
 type Tab = 'upload' | 'library' | 'url'
 
@@ -21,13 +22,6 @@ interface LibraryAsset {
 }
 
 const URL_TYPES = ['image', 'video', 'audio', 'file'] as const
-
-function mimeToAttachmentType(mime: string): AttachmentSendInput['attachmentType'] {
-  if (mime.startsWith('image/')) return 'image'
-  if (mime.startsWith('video/')) return 'video'
-  if (mime.startsWith('audio/')) return 'audio'
-  return 'file'
-}
 
 type UploadOk = { url: string; attachmentType: AttachmentSendInput['attachmentType']; name: string }
 type UploadResult = UploadOk | { error: string }
@@ -132,16 +126,26 @@ function UploadTab({
   const inputRef = useRef<HTMLInputElement>(null)
   const [uploading, setUploading] = useState(false)
   const [pendingAudio, setPendingAudio] = useState<File | null>(null)
+  const [dragOver, setDragOver] = useState(false)
   const busy = sending || uploading
 
   const handleSelected = (file: File) => {
     // Audio routes through the trimmer first so the operator can choose what to
-    // send; everything else uploads immediately.
-    if (file.type.startsWith('audio/')) {
+    // send; everything else uploads immediately. Detection is extension-aware so
+    // iPadOS picks (which often report no MIME type) still reach the trimmer.
+    if (isAudioFile(file)) {
       setPendingAudio(file)
       return
     }
     void handleFile(file)
+  }
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    setDragOver(false)
+    if (busy) return
+    const file = e.dataTransfer.files?.[0]
+    if (file) handleSelected(file)
   }
 
   const handleFile = async (file: File) => {
@@ -161,7 +165,10 @@ function UploadTab({
       }
       onSend({
         source: 'upload',
-        attachmentType: upload.attachmentType,
+        // Trust the client-detected type for audio when the server fell back to
+        // a generic type, so iPadOS picks still send as a voice clip.
+        attachmentType:
+          upload.attachmentType === 'file' && isAudioFile(file) ? 'audio' : upload.attachmentType,
         url: upload.url,
         name: upload.name,
       })
@@ -192,7 +199,7 @@ function UploadTab({
       <input
         ref={inputRef}
         type="file"
-        accept="image/*,video/mp4,video/quicktime,audio/*,application/pdf"
+        accept={ATTACHMENT_ACCEPT}
         className="hidden"
         onChange={(e) => {
           const file = e.target.files?.[0]
@@ -204,13 +211,28 @@ function UploadTab({
         type="button"
         disabled={busy}
         onClick={() => inputRef.current?.click()}
-        className="lead-focus rounded-lg px-3 py-3 text-[12.5px] font-medium disabled:opacity-50"
-        style={{ border: '1px dashed var(--lead-line)', color: 'var(--lead-body)' }}
+        onDragOver={(e) => {
+          e.preventDefault()
+          if (!busy) setDragOver(true)
+        }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={handleDrop}
+        className="lead-focus rounded-lg px-3 py-3 text-[12.5px] font-medium transition-colors disabled:opacity-50"
+        style={{
+          border: `1px dashed ${dragOver ? 'var(--lead-accent)' : 'var(--lead-line)'}`,
+          background: dragOver ? 'var(--lead-surface-2)' : 'transparent',
+          color: 'var(--lead-body)',
+        }}
       >
-        {busy ? 'Sending…' : 'Choose a file to send (image, video, voice, PDF)'}
+        {busy
+          ? 'Sending…'
+          : dragOver
+            ? 'Drop to attach'
+            : 'Choose or drop a file (image, video, voice, PDF)'}
       </button>
       <p className="text-[11px]" style={{ color: 'var(--lead-faint)' }}>
-        Max 25 MB. Voice clips can be trimmed before sending. Sending pauses the bot.
+        Max 25 MB. Drag a file here or tap to browse. Voice clips can be trimmed before sending. Sending
+        pauses the bot.
       </p>
     </div>
   )
@@ -265,7 +287,13 @@ function LibraryTab({
           type="button"
           disabled={sending}
           title={a.name}
-          onClick={() => onSend({ source: 'asset', attachmentType: mimeToAttachmentType(a.mime_type), assetId: a.id })}
+          onClick={() =>
+            onSend({
+              source: 'asset',
+              attachmentType: attachmentTypeFromFile({ name: a.name, type: a.mime_type }),
+              assetId: a.id,
+            })
+          }
           className="lead-focus aspect-square overflow-hidden rounded-lg disabled:opacity-50"
           style={{ border: '1px solid var(--lead-line)' }}
         >
