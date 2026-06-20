@@ -222,6 +222,33 @@ describe('dispatchCapiEvent — network paths', () => {
     expect(errMsg).toContain('2804065')
   })
 
+  it('translates subcode 33 (dataset not found / no permission) into actionable guidance', async () => {
+    const { admin, inserts } = makeAdmin({ page: enabledPage, actionPage: noOverride })
+    mocks.fetch.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          error: {
+            message:
+              "Unsupported post request. Object with ID '594066603333964' does not exist, cannot be loaded due to missing permissions, or does not support this operation. Please read the Graph API documentation at https://developers.facebook.com/docs/graph-api",
+            type: 'GraphMethodException',
+            code: 100,
+            error_subcode: 33,
+            fbtrace_id: 'trace-33',
+          },
+        }),
+        { status: 400, headers: { 'content-type': 'application/json' } },
+      ),
+    )
+    await dispatchCapiEvent({ ...baseInput({ admin }) })
+    const errMsg = inserts[0].row.error_message as string
+    // Operator-facing guidance, not Meta's raw "Object with ID ... does not exist".
+    expect(errMsg).toMatch(/dataset id/i)
+    expect(errMsg).toMatch(/permission/i)
+    expect(errMsg).toMatch(/connected to this page/i)
+    expect(errMsg).toContain('subcode 33')
+    expect(errMsg).not.toContain('Unsupported post request')
+  })
+
   it('logs error on network failure', async () => {
     const { admin, inserts } = makeAdmin({ page: enabledPage, actionPage: noOverride })
     mocks.fetch.mockRejectedValueOnce(new Error('ENOTFOUND'))

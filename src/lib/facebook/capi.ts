@@ -12,6 +12,22 @@ import {
 const GRAPH_API_VERSION = 'v24.0'
 const NETWORK_TIMEOUT_MS = 10_000
 
+// Graph API error subcode 33: "Object with ID '…' does not exist, cannot be
+// loaded due to missing permissions, or does not support this operation."
+// For the CAPI events endpoint this always means the dataset id in the request
+// path (capi_dataset_id) can't be resolved with the supplied token.
+const SUBCODE_OBJECT_NOT_FOUND = 33
+
+// Meta returns subcode 33 with only a generic `message` (and no
+// error_user_title/error_user_msg) that just points operators at the Graph API
+// docs. Translate it into the concrete checks that actually fix a
+// business-messaging dataset misconfiguration.
+const DATASET_NOT_FOUND_GUIDANCE =
+  "Meta can't find this Dataset ID or the access token can't access it. " +
+  'Confirm the Dataset ID is the numeric dataset from Events Manager (not your Page ID), ' +
+  'the access token was generated with permission for that dataset, and ' +
+  'the dataset is connected to this Page and your ad account.'
+
 type Admin = {
   from: (table: string) => any
 }
@@ -255,6 +271,10 @@ function extractErrorMessage(parsed: unknown, httpStatus: number): string {
   const message = asNonEmptyString(e.message)
   const subcode =
     typeof e.error_subcode === 'number' ? e.error_subcode : asNonEmptyString(e.error_subcode)
+
+  if (Number(subcode) === SUBCODE_OBJECT_NOT_FOUND) {
+    return `${DATASET_NOT_FOUND_GUIDANCE} (subcode ${SUBCODE_OBJECT_NOT_FOUND})`
+  }
 
   const detail = title && userMsg ? `${title}: ${userMsg}` : userMsg ?? title ?? message
   if (!detail) return fallback
