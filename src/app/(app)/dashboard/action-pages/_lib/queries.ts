@@ -99,11 +99,17 @@ export interface SubmissionListItem {
   created_at: string
 }
 
+// Supabase's default `max-rows` ceiling. The submissions view computes its
+// stats (Total / This month / This week / outcome breakdown) from the rows it
+// receives, so a low cap silently understates every count. Pull up to the
+// platform ceiling so the totals reflect reality for a single action page.
+const SUBMISSIONS_FETCH_LIMIT = 1000
+
 export async function fetchSubmissions(
   supabase: SupabaseClient,
   userId: string,
   actionPageId: string,
-  limit = 100,
+  limit = SUBMISSIONS_FETCH_LIMIT,
 ): Promise<SubmissionListItem[]> {
   const { data, error } = await supabase
     .from('action_page_submissions')

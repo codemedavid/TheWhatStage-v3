@@ -24,25 +24,47 @@ export async function mintMediaAssetUrl(
   return signed.signedUrl
 }
 
+export interface ActionPageDeeplink {
+  url: string
+  /** Configured button label — fallback when no AI label is generated. */
+  ctaLabel: string
+  /** Page title — context for the CTA generator. */
+  title: string
+  /** bot_send_instructions — context for the CTA generator. */
+  instructions: string
+}
+
 export async function mintActionPageDeeplink(
   admin: SupabaseClient,
   pageId: string,
   userId: string,
   recipient: { psid: string; pageId: string },
-): Promise<string | null> {
+): Promise<ActionPageDeeplink | null> {
   const { data: page } = await admin
     .from('action_pages')
-    .select('slug, signing_secret')
+    .select('slug, signing_secret, cta_label, title, bot_send_instructions')
     .eq('id', pageId)
     .eq('user_id', userId)
-    .maybeSingle<{ slug: string; signing_secret: string }>()
+    .maybeSingle<{
+      slug: string
+      signing_secret: string
+      cta_label: string | null
+      title: string | null
+      bot_send_instructions: string | null
+    }>()
   if (!page) return null
 
   const exp = Math.floor(Date.now() / 1000) + DEEPLINK_TTL_SECONDS
-  return deeplinkActionPageUrl(page.signing_secret, {
+  const url = deeplinkActionPageUrl(page.signing_secret, {
     slug: page.slug,
     psid: recipient.psid,
     pageId: recipient.pageId,
     exp,
   })
+  return {
+    url,
+    ctaLabel: page.cta_label?.trim() || '',
+    title: page.title?.trim() || '',
+    instructions: page.bot_send_instructions?.trim() || '',
+  }
 }

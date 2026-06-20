@@ -10,6 +10,7 @@ import {
 function validSettings(overrides: Partial<FollowupSettings> = {}): FollowupSettings {
   return {
     enabled: true,
+    ai_enabled: false,
     touchpoints: DEFAULT_FOLLOWUP_SETTINGS.touchpoints.map((t) => ({
       ...t,
       image_media_asset_ids: [],
@@ -182,6 +183,35 @@ describe('FOLLOWUP_SETTINGS_SCHEMA', () => {
     expect(FOLLOWUP_SETTINGS_SCHEMA.safeParse(ok).success).toBe(true)
   })
 
+  it('defaults ai_enabled to false when missing', () => {
+    const parsed = FOLLOWUP_SETTINGS_SCHEMA.safeParse({
+      enabled: true,
+      touchpoints: DEFAULT_FOLLOWUP_SETTINGS.touchpoints,
+    })
+    expect(parsed.success).toBe(true)
+    if (parsed.success) expect(parsed.data.ai_enabled).toBe(false)
+  })
+
+  it('accepts ai_enabled set to true', () => {
+    const parsed = FOLLOWUP_SETTINGS_SCHEMA.safeParse(validSettings({ ai_enabled: true }))
+    expect(parsed.success).toBe(true)
+    if (parsed.success) expect(parsed.data.ai_enabled).toBe(true)
+  })
+
+  it('rejects a manual message longer than 200 chars', () => {
+    const bad = validSettings()
+    bad.touchpoints[0] = { ...bad.touchpoints[0], message: 'x'.repeat(201) }
+    expect(FOLLOWUP_SETTINGS_SCHEMA.safeParse(bad).success).toBe(false)
+  })
+
+  it('trims surrounding whitespace from a manual message', () => {
+    const ok = validSettings()
+    ok.touchpoints[0] = { ...ok.touchpoints[0], message: '  Hi {name}  ' }
+    const parsed = FOLLOWUP_SETTINGS_SCHEMA.safeParse(ok)
+    expect(parsed.success).toBe(true)
+    if (parsed.success) expect(parsed.data.touchpoints[0].message).toBe('Hi {name}')
+  })
+
   it('preserves image_media_asset_ids order through parse', () => {
     const ids = [
       '11111111-1111-4111-9111-111111111111',
@@ -201,6 +231,19 @@ describe('FOLLOWUP_SETTINGS_SCHEMA', () => {
   })
 })
 
+describe('DEFAULT_FOLLOWUP_SETTINGS — manual mode defaults', () => {
+  it('ships with AI disabled by default', () => {
+    expect(DEFAULT_FOLLOWUP_SETTINGS.ai_enabled).toBe(false)
+  })
+
+  it('ships a non-empty manual message for every touchpoint', () => {
+    for (const t of DEFAULT_FOLLOWUP_SETTINGS.touchpoints) {
+      expect(typeof t.message).toBe('string')
+      expect((t.message ?? '').trim().length).toBeGreaterThan(0)
+    }
+  })
+})
+
 describe('resolveEnabledOffsets', () => {
   it('returns 7-entry snapshot with slots 0..6 on defaults', () => {
     const snap = resolveEnabledOffsets(DEFAULT_FOLLOWUP_SETTINGS)
@@ -209,6 +252,21 @@ describe('resolveEnabledOffsets', () => {
     expect(snap[0].offset_ms).toBe(300_000)
     expect(snap[6].offset_ms).toBe(86_400_000)
     expect(snap[0].instruction).toMatch(/Quick light hello/i)
+  })
+
+  it('carries the manual message and ai_enabled=false into each snapshot entry', () => {
+    const s = validSettings({ ai_enabled: false })
+    s.touchpoints[0] = { ...s.touchpoints[0], message: 'Hi {name}, manual one po' }
+    const snap = resolveEnabledOffsets(s)
+    const slot0 = snap.find((e) => e.slot === 0)
+    expect(slot0?.message).toBe('Hi {name}, manual one po')
+    expect(snap.every((e) => e.ai_enabled === false)).toBe(true)
+  })
+
+  it('stamps ai_enabled=true on every entry when AI is on', () => {
+    const snap = resolveEnabledOffsets(validSettings({ ai_enabled: true }))
+    expect(snap.length).toBeGreaterThan(0)
+    expect(snap.every((e) => e.ai_enabled === true)).toBe(true)
   })
 
   it('skips disabled rows and preserves original slot indices', () => {
@@ -302,7 +360,7 @@ describe('loadFollowupSettings', () => {
   })
 
   it('returns parsed settings when stored value is valid', async () => {
-    const stored = { enabled: false, touchpoints: DEFAULT_FOLLOWUP_SETTINGS.touchpoints }
+    const stored = { enabled: false, ai_enabled: false, touchpoints: DEFAULT_FOLLOWUP_SETTINGS.touchpoints }
     const admin = makeAdmin({ data: { followup_settings: stored }, error: null })
     expect(await loadFollowupSettings(admin, 'u1')).toEqual(stored)
   })

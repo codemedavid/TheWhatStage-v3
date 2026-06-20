@@ -49,7 +49,7 @@ export default async function SubmissionsPage({
       .eq('user_id', user.id)
       .filter('meta->>source_property_action_page_id', 'eq', id)
       .order('created_at', { ascending: false })
-      .limit(200)
+      .limit(1000)
 
     const sourceIds = Array.from(
       new Set(((rows ?? []) as Array<{ action_page_id: string }>).map((r) => r.action_page_id)),
@@ -124,7 +124,7 @@ export default async function SubmissionsPage({
         .eq('user_id', user.id)
         .filter('meta->>source_sales_page_id', 'eq', id)
         .order('created_at', { ascending: false })
-        .limit(200),
+        .limit(1000),
       supabase
         .from('action_page_submissions')
         .select(
@@ -133,7 +133,7 @@ export default async function SubmissionsPage({
         .eq('user_id', user.id)
         .eq('action_page_id', id)
         .order('created_at', { ascending: false })
-        .limit(200),
+        .limit(1000),
     ])
 
     type ThreadInfo = {

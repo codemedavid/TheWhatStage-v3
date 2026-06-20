@@ -61,6 +61,25 @@ function fallback(kind: ConversationKind, slot: number, leadName: string | null)
   return sanitizeFollowup(line.replace('{name}', fn || 'there'))
 }
 
+// Manual mode (default): send the user-authored message verbatim after
+// interpolating `{name}` and running the same sanitize as AI output (strip
+// dashes, flatten to one line, cap length). No LLM call, so zero AI cost.
+// A blank message — or one that sanitizes to empty — falls back to the curated
+// per-offset pool so a touchpoint is never dropped.
+export function resolveManualMessage(
+  message: string,
+  kind: ConversationKind,
+  slot: number,
+  leadName: string | null,
+): string {
+  const trimmed = (message ?? '').trim()
+  if (!trimmed) return fallback(kind, slot, leadName)
+  const fn = firstName(leadName)
+  const interpolated = trimmed.replace(/\{name\}/g, fn || 'there')
+  const cleaned = sanitizeFollowup(interpolated)
+  return cleaned || fallback(kind, slot, leadName)
+}
+
 function buildSystemPrompt(args: GenerateArgs): string {
   const rules =
     'Hard rules: one line only, max 200 characters, no dashes ("-", "—", "–"), no markdown, no emojis ' +

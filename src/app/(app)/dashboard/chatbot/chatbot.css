@@ -1106,6 +1106,14 @@
   margin: 4px 0 0;
 }
 
+.afu-toggles {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
 .afu-toggle {
   display: inline-flex;
   align-items: center;
@@ -1113,6 +1121,10 @@
   font-size: 13px;
   color: #111827;
   cursor: pointer;
+}
+
+.afu-toggle input:disabled + span {
+  color: #9CA3AF;
 }
 
 .afu-rows-head {

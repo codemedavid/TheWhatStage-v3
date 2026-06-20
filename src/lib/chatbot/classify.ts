@@ -56,7 +56,11 @@ export interface ActionPageBrief {
 export interface ActionPageChoice {
   action_page_id: string
   reason: string
+  /** AI-written caption shown above the button (the card text). */
   button_text: string
+  /** AI-written 2-3 word call-to-action shown ON the button. Empty when the
+   *  model omitted it — the send path falls back to the page's cta_label. */
+  button_label: string
 }
 
 export interface ProductRecommendationRequest {
@@ -121,6 +125,9 @@ export async function answerWithClassification(
     activeSalesPageId?: string | null
     leadId?: string | null
     threadId?: string | null
+    /** Lead has an active (non-terminal) project — relax action-page re-asking
+     *  so an existing client is not pushed to re-fill a completed form. */
+    inActiveProject?: boolean
   } = {},
 ): Promise<AnswerWithClassificationResult> {
   const baseConfig = options.preloadedConfig ?? (await getChatbotConfig(supabase, userId))
@@ -208,6 +215,7 @@ export async function answerWithClassification(
     recommendRules,
     recommendPropertyRules,
     hasPauseRules,
+    options.inActiveProject ?? false,
   )
   // Back-compat concatenation (static prose + '\n\n' + volatile tail) used by
   // the legacy layout, the freeform-persona fallback, and the JSON-parse-fail
@@ -687,6 +695,11 @@ export function stageInstructionParts(
    *  `pause` field + decision block. Omitted/false leaves the schema untouched
    *  so the model is never told about a field it must never emit. */
   hasPauseRules: boolean = false,
+  /** When true, the lead has an active (non-terminal) project — relax the
+   *  action-page re-ask/re-send logic so an existing client is not pushed to
+   *  re-fill a form they already completed. Lead-specific, so it lives in the
+   *  volatile tail (never the cacheable static prefix). */
+  inActiveProject: boolean = false,
 ): StageInstructionParts {
   const hasActionPages = actionPages.length > 0
   const hasRecommend = !!recommendRules
@@ -701,7 +714,7 @@ export function stageInstructionParts(
   }
   if (hasActionPages) {
     schemaParts.push(
-      '"action_page": {"action_page_id": string, "reason": string, "button_text": string} | null',
+      '"action_page": {"action_page_id": string, "reason": string, "button_text": string, "button_label": string} | null',
     )
   }
   if (hasRecommend) {
@@ -759,11 +772,19 @@ export function stageInstructionParts(
       '- GOOD `reply` (action_page set): "Got it — same pattern as ibang clients namin. Tingnan mo kung magagamit niyo \'to sa team niyo." (no link reference; the button card follows automatically).\n' +
       'IRON RULE: if you find yourself writing the word "link", "button", "form", "check", "tap", "click", "tingnan", "heto", "eto", "here\'s" or any synonym referring to the action page inside `reply`, STOP and rewrite. Set `action_page.action_page_id` instead and let `reply` stay conversational.\n\n' +
       'BUTTON_TEXT RULES (the card caption shown above the button):\n' +
-      '- Write a short, action-pushing call-to-action in the SAME language as the customer (e.g. Tagalog/Taglish if they wrote Tagalog).\n' +
+      '- Write a strong, benefit-led call-to-action in the SAME language as the customer (e.g. Tagalog/Taglish if they wrote Tagalog).\n' +
+      '- Lead with the value or outcome the customer gets, then nudge the tap. Add light urgency when natural ("ngayon", "today", "para masimulan na").\n' +
       '- Max ~80 chars. One line. No greetings, no page title, no URL.\n' +
       '- Include a downward-pointing emoji like 👇 (or 📝/📅 when fitting) to draw the eye to the button.\n' +
-      '- Examples: "I-tap ang button sa baba para mag-book ng call 👇", "Fill out the quick form below 👇".\n' +
+      '- Examples: "Lock in your slot now, mga ilang seconds lang 👇", "Get your custom quote today 👇".\n' +
       '- NEVER use the action page title (e.g. "Lead Gen", "Booking") as the button_text.' +
+      '\n\n' +
+      'BUTTON_LABEL RULES (the short text shown ON the button itself):\n' +
+      '- Write a punchy 2-3 words (HARD max), in the SAME language as the customer. This is the tappable label, so it must be tiny and high-intent for click-through.\n' +
+      '- Use a first-person or action framing tied to the outcome: "Claim my slot", "Get my quote", "Book na", "Start now", "Send my song".\n' +
+      '- At most one emoji, only if it adds punch. No punctuation, no URL, no sentence.\n' +
+      '- NEVER use the action page title (e.g. "Lead Gen", "Booking") as the button_label, and never the generic default ("Open", "Open form", "View").\n' +
+      '- This is separate from button_text: button_text is the caption above; button_label is the few words inside the button.' +
       '\n\n' +
       'SEND NOW — when all prerequisites are met:\n' +
       '- Once the conversation shows that every prerequisite in the page\'s "send when" guidance has been answered, AND the customer\'s latest message shows any forward intent (agreement, "sige"/"okay"/"magkano"/"how do I"/"sign me up"/"book na"/equivalents in any language), you MUST set `action_page.action_page_id` to that page on this turn.\n' +
@@ -853,11 +874,27 @@ export function stageInstructionParts(
     recommendSection +
     recommendPropertySection
 
-  // VOLATILE tail: current-stage banner (interpolates currentStageId) +
-  // stage list (flags [CURRENT], interpolates the stage set) + action-page
-  // list (interpolates the page set). Changes per turn / per conversation.
+  // In-progress-deal guard for action pages. Lead-specific (depends on whether
+  // THIS lead has an active project), so it sits in the volatile tail rather
+  // than the cacheable static prefix. Only meaningful when action pages exist.
+  const inProjectActionGuard =
+    inActiveProject && hasActionPages
+      ? 'IN-PROGRESS DEAL — this customer already has an open project with you, so they are not a new inquiry. ' +
+        'Do NOT re-send or re-request an action page / form they already completed earlier for this deal, and do ' +
+        'NOT re-ask qualifying questions whose answers are already in the project context or earlier in the thread. ' +
+        'Only set `action_page` when a genuinely new and relevant page applies to a NEW need they raised this turn; ' +
+        'otherwise keep `action_page` null and just continue the conversation about the deal.\n\n'
+      : ''
+
+  // VOLATILE tail: in-progress-deal guard (lead-specific) + current-stage banner
+  // (interpolates currentStageId) + stage list (flags [CURRENT], interpolates
+  // the stage set) + action-page list (interpolates the page set). Changes per
+  // turn / per conversation.
   const volatileTail =
-    currentStageBanner(stages, currentStageId) + stageList(stages, currentStageId) + apListSection
+    inProjectActionGuard +
+    currentStageBanner(stages, currentStageId) +
+    stageList(stages, currentStageId) +
+    apListSection
 
   return { staticPrefix, volatileTail }
 }
@@ -977,19 +1014,33 @@ function actionPageList(pages: ActionPageBrief[]): string {
   return `Action pages:\n${lines.join('\n')}`
 }
 
-function coerceActionPage(
+// Messenger hard-caps button titles at 20 characters (see
+// sendMessengerButton). Clamp the AI label here too so the value persisted /
+// previewed matches what the customer actually sees.
+const BUTTON_LABEL_MAX = 20
+
+export function coerceActionPage(
   raw: unknown,
   pages: ActionPageBrief[],
 ): ActionPageChoice | null {
   if (!raw || typeof raw !== 'object') return null
-  const r = raw as { action_page_id?: unknown; reason?: unknown; button_text?: unknown }
+  const r = raw as {
+    action_page_id?: unknown
+    reason?: unknown
+    button_text?: unknown
+    button_label?: unknown
+  }
   const id = typeof r.action_page_id === 'string' ? r.action_page_id : null
   if (!id) return null
   if (!pages.some((p) => p.id === id)) return null
   const reason = typeof r.reason === 'string' ? r.reason : ''
   const button_text =
     typeof r.button_text === 'string' ? r.button_text.trim().slice(0, 200) : ''
-  return { action_page_id: id, reason, button_text }
+  const button_label =
+    typeof r.button_label === 'string'
+      ? r.button_label.trim().slice(0, BUTTON_LABEL_MAX)
+      : ''
+  return { action_page_id: id, reason, button_text, button_label }
 }
 
 export function stageList(stages: StageBrief[], currentStageId: string | null): string {

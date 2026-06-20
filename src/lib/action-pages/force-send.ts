@@ -267,6 +267,7 @@ export async function decideForceSend(ctx: ForceSendContext): Promise<ForceSendD
       action_page_id: page.id,
       reason: 'force-send: qualified + ready',
       button_text: '',
+      button_label: '',
     },
     overrideFired: true,
     reason: 'override',

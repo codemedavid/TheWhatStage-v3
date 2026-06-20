@@ -10,6 +10,20 @@ export type { ProjectStageRow, ProjectStageKind } from '@/lib/projects/types'
 export const projectsTag = (userId: string) => `projects:list:${userId}`
 export const projectStagesTag = (userId: string) => `projects:stages:${userId}`
 
+/**
+ * Build the `title/description` ilike OR-filter for a free-text project search.
+ * PostgREST's `.or()` grammar treats `,` as a condition separator and `()` as
+ * grouping, so a raw term containing any of them yields a malformed filter and
+ * the query throws. Wrapping each value in double quotes makes PostgREST treat
+ * reserved characters literally; backslashes and quotes inside the term are
+ * escaped per PostgREST's quoting rules. The `%…%` wildcards still apply.
+ */
+export function buildProjectSearchOr(q: string): string {
+  const escaped = q.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+  const term = `"%${escaped}%"`
+  return `title.ilike.${term},description.ilike.${term}`
+}
+
 const SORT_MAP: Record<ProjectsQuery['sort'], { col: string; asc: boolean; nullsLast?: boolean }> = {
   recent:     { col: 'created_at', asc: false },
   oldest:     { col: 'created_at', asc: true  },
@@ -168,10 +182,7 @@ export async function fetchProjectsPage(
     .from('projects').select(PROJECT_SELECT, { count: 'exact' })
     .eq('user_id', userId)
   if (stageId) query = query.eq('stage_id', stageId)
-  if (params.q) {
-    const term = `%${params.q}%`
-    query = query.or(`title.ilike.${term},description.ilike.${term}`)
-  }
+  if (params.q) query = query.or(buildProjectSearchOr(params.q))
   query = query.order(sort.col, { ascending: sort.asc, nullsFirst: !sort.nullsLast })
 
   const from = (params.page - 1) * PAGE_SIZE
@@ -198,10 +209,7 @@ export async function fetchBoardProjects(
   let query = supabase
     .from('projects').select(PROJECT_SELECT)
     .eq('user_id', userId)
-  if (params?.q) {
-    const term = `%${params.q}%`
-    query = query.or(`title.ilike.${term},description.ilike.${term}`)
-  }
+  if (params?.q) query = query.or(buildProjectSearchOr(params.q))
   if (params?.from) query = query.gte('updated_at', params.from)
   if (params?.to) query = query.lte('updated_at', `${params.to}T23:59:59.999`)
   query = query
