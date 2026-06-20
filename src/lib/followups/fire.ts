@@ -18,6 +18,7 @@ import { shouldSeed } from './gates'
 import { generateFollowupMessage, resolveManualMessage } from './generateMessage'
 import { mintMediaAssetUrl, mintActionPageDeeplink } from './attachments'
 import { generateActionPageCta } from './generateCta'
+import { GUIDING_DEFAULT_CAPTION } from '@/lib/messenger/action-page-card'
 import type { SnapshotEntry } from './settings'
 
 // Back-compat: snapshots captured before the multi-image change carry
@@ -291,7 +292,7 @@ export async function handleFollowupSend(
               leadName,
               recentMessages,
             })
-          : { caption: 'Tap below to continue 👇', label: fallbackLabel }
+          : { caption: GUIDING_DEFAULT_CAPTION, label: fallbackLabel }
         try {
           await sendOutbound({
             admin,

@@ -49,13 +49,13 @@ describe('generateActionPageCta', () => {
   it('falls back to a default caption and the page cta_label when the LLM throws', async () => {
     completeMock.mockRejectedValueOnce(new Error('boom'))
     const cta = await generateActionPageCta(baseArgs)
-    expect(cta).toEqual({ caption: 'Tap below to continue 👇', label: 'Open form' })
+    expect(cta).toEqual({ caption: 'Tap the button below 👇 then fill out the quick form to continue.', label: 'Open form' })
   })
 
   it('falls back when the LLM returns non-JSON', async () => {
     completeMock.mockResolvedValueOnce('totally not json')
     const cta = await generateActionPageCta(baseArgs)
-    expect(cta).toEqual({ caption: 'Tap below to continue 👇', label: 'Open form' })
+    expect(cta).toEqual({ caption: 'Tap the button below 👇 then fill out the quick form to continue.', label: 'Open form' })
   })
 
   it('falls back to the cta_label when the parsed label is empty', async () => {
@@ -68,7 +68,7 @@ describe('generateActionPageCta', () => {
   it('falls back to the default caption when the parsed caption is empty', async () => {
     completeMock.mockResolvedValueOnce(JSON.stringify({ caption: '', label: 'Book na' }))
     const cta = await generateActionPageCta(baseArgs)
-    expect(cta.caption).toBe('Tap below to continue 👇')
+    expect(cta.caption).toBe('Tap the button below 👇 then fill out the quick form to continue.')
     expect(cta.label).toBe('Book na')
   })
 
@@ -95,6 +95,6 @@ describe('generateActionPageCta', () => {
       () => new Promise((resolve) => setTimeout(() => resolve('late'), 50)),
     )
     const cta = await generateActionPageCta({ ...baseArgs, timeoutMs: 5 })
-    expect(cta).toEqual({ caption: 'Tap below to continue 👇', label: 'Open form' })
+    expect(cta).toEqual({ caption: 'Tap the button below 👇 then fill out the quick form to continue.', label: 'Open form' })
   })
 })

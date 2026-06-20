@@ -777,7 +777,8 @@ export function stageInstructionParts(
       '- Example tone: "Sige po, para masimulan na natin — i-click niyo lang po yung button sa baba 👇 tapos fill-up niyo lang po yung form." or "To get started, just tap the button below 👇 and fill out the quick form."\n' +
       '- Max ~160 chars, 1-2 short sentences. No greetings like "Hi", no page title, no URL.\n' +
       '- Include a downward-pointing emoji like 👇 (or 📝/📅 when fitting) pointing to the button.\n' +
-      '- NEVER use the action page title (e.g. "Lead Gen", "Booking") as the button_text.' +
+      '- Write plain, natural text ONLY — no markdown, no asterisks or bold/italics, no surrounding quotes, no headings. It is shown as-is in the chat.\n' +
+      '- ALWAYS provide a non-empty button_text whenever you set an action_page — never leave it blank and never use the action page title (e.g. "Lead Gen", "Booking") as the button_text.' +
       '\n\n' +
       'BUTTON_LABEL RULES (the short text shown ON the button itself):\n' +
       '- Write a punchy 2-3 words (HARD max), in the SAME language as the customer. This is the tappable label, so it must be tiny and high-intent for click-through.\n' +

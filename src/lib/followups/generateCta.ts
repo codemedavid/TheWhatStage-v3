@@ -16,12 +16,15 @@
 import { HfRouterLlm } from '@/lib/rag/llm'
 import { ragConfig } from '@/lib/rag/config'
 import { manilaNowBlock } from '@/lib/time/manilaNow'
+import { GUIDING_DEFAULT_CAPTION, cleanCardCaption } from '@/lib/messenger/action-page-card'
 
 const LLM_TIMEOUT_MS = 8_000
 const CAPTION_MAX = 200
 // Messenger hard-caps button titles at 20 characters (see sendMessengerButton).
 const LABEL_MAX = 20
-const DEFAULT_CAPTION = 'Tap below to continue 👇'
+// Guiding fallback caption (shared with the live-chat path) used when the LLM
+// returns no usable caption — never the page title.
+const DEFAULT_CAPTION = GUIDING_DEFAULT_CAPTION
 
 export interface GenerateCtaArgs {
   /** Action page title — context only; never used verbatim as the label. */
@@ -49,12 +52,12 @@ function firstName(name: string | null): string {
   return name.trim().split(/\s+/)[0]
 }
 
-// Light clean for the caption: flatten to one line, strip surrounding quotes,
-// cap length. Keeps hyphens and emoji (Tagalog CTAs need both).
+// Clean for the caption: strip surrounding quotes AND markdown emphasis so the
+// card renders as natural plain text, then cap length. Keeps hyphens and emoji
+// (Tagalog CTAs need both). Shares cleanCardCaption with the live-chat path.
 function cleanCaption(input: unknown): string {
-  if (typeof input !== 'string') return ''
-  const oneLine = input.replace(/\s+/g, ' ').trim().replace(/^["']|["']$/g, '').trim()
-  return oneLine.length > CAPTION_MAX ? oneLine.slice(0, CAPTION_MAX) : oneLine
+  const cleaned = cleanCardCaption(input)
+  return cleaned.length > CAPTION_MAX ? cleaned.slice(0, CAPTION_MAX) : cleaned
 }
 
 function cleanLabel(input: unknown): string {
@@ -104,6 +107,8 @@ function buildSystemPrompt(args: GenerateCtaArgs): string {
     'i-click niyo lang po yung button sa baba 👇 tapos fill-up niyo lang po yung form." ' +
     'Lead with a light nudge, then the steps. Max ~160 chars, 1-2 short sentences. ' +
     'Include a downward emoji like 👇 pointing to the button. No page title, no URL.\n' +
+    'Write plain, natural text ONLY — no markdown, no asterisks or bold/italics, no ' +
+    'surrounding quotes, no headings. It is shown as-is in the chat.\n' +
     'label rules: a punchy 2-3 words (HARD max) in the SAME language, high-intent and first-person ' +
     'where natural ("Claim my slot", "Book na", "Get my quote"). At most one emoji. ' +
     'NEVER use the page title or a generic word like "Open", "Open form", or "View" as the label.'

@@ -468,7 +468,7 @@ describe('handleFollowupSend — attachments', () => {
     )!
     expect(buttonCall[0].payload).toMatchObject({
       kind: 'button',
-      text: 'Tap below to continue 👇',
+      text: 'Tap the button below 👇 then fill out the quick form to continue.',
       ctaLabel: 'Open form',
     })
   })

@@ -16,6 +16,7 @@ import {
 } from '@/lib/messenger/property-outbound'
 import { recommendProperty } from '@/lib/chatbot/recommend-property'
 import { handleCampaignSend } from '@/lib/messenger/campaignSend'
+import { resolveCardCaption, resolveCardLabel } from '@/lib/messenger/action-page-card'
 import { handleReminderFire } from '@/lib/reminders/fire'
 import { maybeScheduleFollowup } from '@/lib/followups/seed'
 import { handleFollowupSendJob } from '@/lib/followups/fire'
@@ -1245,11 +1246,13 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
               pageId: thread.page_id,
               exp,
             })
-            const aiBtnText = (actionPageChoice.button_text ?? '').trim()
-            let btnText = (aiBtnText || chosen.title).slice(0, 640)
+            // Card caption (above the button): a guiding "what to do next"
+            // instruction in natural plain text. Never the page title — an empty
+            // AI caption falls back to a guiding default, not "<Page> fill up form".
+            let btnText = resolveCardCaption(actionPageChoice.button_text)
             // AI-customized button label (2-3 words) for higher CTR. Falls back
             // to the page's configured cta_label when the model omits it.
-            const btnLabel = (actionPageChoice.button_label ?? '').trim() || chosen.cta_label
+            const btnLabel = resolveCardLabel(actionPageChoice.button_label, chosen.cta_label)
 
             // For catalog action pages, send a horizontally-scrollable
             // carousel of products (image + title + price/summary + per-card
