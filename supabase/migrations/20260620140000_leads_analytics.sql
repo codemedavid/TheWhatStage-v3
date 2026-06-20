@@ -223,9 +223,9 @@ begin
     where e.user_id = auth.uid()
   ),
   maxrank as (
-    select lead_id, max(rank) as max_rank
-    from touched
-    group by lead_id
+    select t.lead_id, max(t.rank) as max_rank
+    from touched t
+    group by t.lead_id
   )
   select f.id, f.name, f.kind, f.position, f.rank,
          (select count(*) from maxrank m where m.max_rank >= f.rank)::bigint
@@ -298,9 +298,9 @@ begin
     where e.user_id = auth.uid()
   ),
   maxrank as (
-    select project_id, max(rank) as max_rank
-    from touched
-    group by project_id
+    select t.project_id, max(t.rank) as max_rank
+    from touched t
+    group by t.project_id
   )
   select f.id, f.name, f.kind, f.position, f.rank,
          (select count(*) from maxrank m where m.max_rank >= f.rank)::bigint
@@ -364,9 +364,9 @@ begin
     join forward f on f.id = e.to_stage_id
   ),
   maxrank as (
-    select submission_id, max(rank) as max_rank
-    from touched
-    group by submission_id
+    select t.submission_id, max(t.rank) as max_rank
+    from touched t
+    group by t.submission_id
   )
   select f.id, f.name, f.kind, f.position, f.rank,
          (select count(*) from maxrank m where m.max_rank >= f.rank)::bigint
