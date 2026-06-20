@@ -185,15 +185,29 @@ export async function fetchProjectsPage(
 
 // All projects for the board, ordered for column grouping. Projects are far
 // fewer than leads per user, so the board loads them in one shot (no paging).
+// Optional `params` apply the toolbar's search (`q`) and last-activity date
+// window (`from`/`to`, matched on `updated_at`) server-side so the board and the
+// stats strip stay consistent. `params.from`/`to` are pre-resolved day bounds
+// (see resolveProjectsDateRange) — `to` is widened to end-of-day because
+// `updated_at` is a timestamp, not a date.
 export async function fetchBoardProjects(
   supabase: SupabaseClient,
   userId: string,
+  params?: Pick<ProjectsQuery, 'q' | 'from' | 'to'>,
 ): Promise<ProjectCardRow[]> {
-  const { data, error } = await supabase
+  let query = supabase
     .from('projects').select(PROJECT_SELECT)
     .eq('user_id', userId)
+  if (params?.q) {
+    const term = `%${params.q}%`
+    query = query.or(`title.ilike.${term},description.ilike.${term}`)
+  }
+  if (params?.from) query = query.gte('updated_at', params.from)
+  if (params?.to) query = query.lte('updated_at', `${params.to}T23:59:59.999`)
+  query = query
     .order('stage_id', { ascending: true })
     .order('position', { ascending: true })
+  const { data, error } = await query
   if (error) throw error
   const rows = ((data ?? []) as ProjectRowWithJoins[]).map(flattenProject)
   await populateOriginKind(supabase, rows)

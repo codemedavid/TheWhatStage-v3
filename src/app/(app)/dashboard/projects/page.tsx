@@ -7,7 +7,13 @@ import {
   fetchBoardProjects,
   fetchProjectById,
 } from './_lib/queries'
+import { ProjectsQuery } from './_lib/schemas'
+import { resolveProjectsDateRange } from './_lib/date-range'
+import { computeProjectStats } from './_lib/stats'
 import { ProjectBoardClient } from './_components/ProjectBoard.client'
+import { ProjectsToolbar } from './_components/ProjectsToolbar'
+import { ProjectStats } from './_components/ProjectStats'
+import { ProjectsNavProvider } from './_components/_useUrlState'
 import { DeepLinkProjectDrawer } from './_components/DeepLinkProjectDrawer.client'
 
 const UUID_RE =
@@ -19,28 +25,42 @@ export default async function ProjectsPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>
 }) {
   const sp = await searchParams
+  const params = ProjectsQuery.parse({
+    q: sp.q, range: sp.range, from: sp.from, to: sp.to, sort: sp.sort,
+  })
   const projectId =
     typeof sp.project === 'string' && UUID_RE.test(sp.project) ? sp.project : undefined
 
   return (
     <div data-leads-root className="px-4 py-6 md:px-8">
       <Suspense fallback={<BoardFallback />}>
-        <ProjectsBody projectId={projectId} />
+        <ProjectsBody params={params} projectId={projectId} />
       </Suspense>
     </div>
   )
 }
 
-async function ProjectsBody({ projectId }: { projectId?: string }) {
+async function ProjectsBody({
+  params,
+  projectId,
+}: {
+  params: ProjectsQuery
+  projectId?: string
+}) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
   await ensureDefaultProjectStages(user.id)
 
+  // Resolve the `range` preset into concrete from/to bounds (matched on
+  // updated_at) for the data query, while the Toolbar keeps the original
+  // `params` so its preset buttons reflect the user's selection.
+  const queryParams = resolveProjectsDateRange(params)
+
   const [stages, projects, deepLinkProject] = await Promise.all([
     fetchProjectStagesCached(user.id),
-    fetchBoardProjects(supabase, user.id),
+    fetchBoardProjects(supabase, user.id, queryParams),
     projectId ? fetchProjectById(supabase, user.id, projectId) : Promise.resolve(null),
   ])
 
@@ -48,10 +68,11 @@ async function ProjectsBody({ projectId }: { projectId?: string }) {
     stage,
     projects: projects.filter((p) => p.stage_id === stage.id),
   }))
+  const stats = computeProjectStats(projects, stages)
 
   return (
-    <>
-      <header className="mb-5 flex flex-wrap items-center gap-3">
+    <ProjectsNavProvider>
+      <header className="mb-1 flex flex-wrap items-center gap-3">
         <h1 className="text-[20px] font-semibold" style={{ color: 'var(--lead-ink)' }}>
           Projects
         </h1>
@@ -60,12 +81,17 @@ async function ProjectsBody({ projectId }: { projectId?: string }) {
         </span>
       </header>
 
-      <ProjectBoardClient columns={columns} stages={stages} />
+      <ProjectStats stats={stats} />
+      <ProjectsToolbar params={params} />
+
+      <div className="mt-5">
+        <ProjectBoardClient columns={columns} stages={stages} />
+      </div>
 
       {projectId && (
         <DeepLinkProjectDrawer project={deepLinkProject} stages={stages} />
       )}
-    </>
+    </ProjectsNavProvider>
   )
 }
 
