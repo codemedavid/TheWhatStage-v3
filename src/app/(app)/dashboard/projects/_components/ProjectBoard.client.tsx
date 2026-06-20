@@ -24,6 +24,9 @@ import { StageSettingsDrawer } from './StageSettingsDrawer'
 import type { ProjectCardRow } from '../_lib/queries'
 import { UnreadBadge } from '../../_components/UnreadBadge'
 import type { ProjectStageRow } from '@/lib/projects/types'
+import { formatMoney } from '../_lib/format'
+
+export { formatMoney }
 
 type Column = { stage: ProjectStageRow; projects: ProjectCardRow[] }
 
@@ -38,15 +41,6 @@ const stageIdFromDrag = (dragId: string) =>
 type BoardAction =
   | { type: 'moveProject'; id: string; toStageId: string; toIndex: number }
   | { type: 'reorderStages'; orderedIds: string[] }
-
-export function formatMoney(value: number | null, currency: string): string {
-  if (value == null) return ''
-  try {
-    return new Intl.NumberFormat(undefined, { style: 'currency', currency, maximumFractionDigits: 0 }).format(value)
-  } catch {
-    return `${currency} ${value.toLocaleString()}`
-  }
-}
 
 export function ProjectBoardClient({
   columns,

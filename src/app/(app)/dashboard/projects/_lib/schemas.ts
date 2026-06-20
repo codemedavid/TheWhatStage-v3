@@ -73,6 +73,14 @@ export const ProjectsQuery = z.object({
   stage: z.string().uuid().optional(),
   page: z.coerce.number().int().min(1).default(1),
   q: z.string().trim().max(120).optional(),
+  // Quick date-range preset, matched on each project's last activity
+  // (`updated_at`). Unlike leads (which default to `today`), projects are
+  // long-lived pipeline items, so the board defaults to `all` to avoid hiding
+  // existing work on load. `custom` means the explicit `from`/`to` bounds take
+  // over; `all` clears the date filter entirely.
+  range: z.enum(['today', 'week', 'month', 'all', 'custom']).default('all'),
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   sort: z.enum(['recent', 'oldest', 'title_asc', 'value_desc']).default('recent'),
 })
 export type ProjectsQuery = z.infer<typeof ProjectsQuery>
