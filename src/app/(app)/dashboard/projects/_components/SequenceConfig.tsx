@@ -101,6 +101,7 @@ export function SequenceConfig({ stageId, stageName }: { stageId: string; stageN
             channel: 'messenger' as const,
           })),
         })
+        if (!result.ok) { setError(result.error); return }
         setSaved(true)
         setSeeded(result.seeded)
       } catch (e) {
@@ -129,7 +130,8 @@ export function SequenceConfig({ stageId, stageName }: { stageId: string; stageN
             channel: 'messenger' as const,
           })),
         })
-        setPreview(result)
+        if (!result.ok) { setPreviewError(result.error); return }
+        setPreview(result.touches)
       } catch (e) {
         setPreviewError(e instanceof Error ? e.message : 'Failed to generate preview')
       }

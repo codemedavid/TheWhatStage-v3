@@ -12,6 +12,7 @@ import {
 } from '../_lib/queries'
 import { seedStageProjectsImmediate, cancelStageSequenceRuns } from '@/lib/projects/sequences/seed'
 import { draftSequenceBatch, loadSequenceSendContext, retrieveKnowledge } from '@/lib/sequences/shared'
+import { describeActionError, isRedirectError, type ActionResult } from '../_lib/action-result'
 
 async function requireUser() {
   const supabase = await createClient()
@@ -45,59 +46,80 @@ export async function loadStageSequence(stageId: string): Promise<StageSequence>
 // ALREADY in the stage are enrolled immediately (first touch on the next tick);
 // when disabled, their in-flight runs are cancelled. Returns how many existing
 // projects were newly enrolled so the UI can confirm something happened.
-export async function saveStageSequence(raw: unknown): Promise<{ seeded: number }> {
-  const input = SequenceInput.parse(raw)
+export async function saveStageSequence(raw: unknown): Promise<ActionResult<{ seeded: number }>> {
+  // Validate without throwing — a thrown error here would be masked by Next.js
+  // in production into an opaque "Server Components render" message.
+  const parsed = SequenceInput.safeParse(raw)
+  if (!parsed.success) return { ok: false, error: describeActionError(parsed.error) }
+  const input = parsed.data
+
+  // requireUser() may redirect (which throws a sentinel); keep it outside the
+  // try so the navigation isn't swallowed.
   const { supabase, userId } = await requireUser()
-  await assertStageOwned(supabase, userId, input.stage_id)
 
-  const { data: seq, error: seqErr } = await supabase
-    .from('project_stage_sequences')
-    .upsert(
-      {
+  let seqId: string
+  try {
+    await assertStageOwned(supabase, userId, input.stage_id)
+
+    const { data: seq, error: seqErr } = await supabase
+      .from('project_stage_sequences')
+      .upsert(
+        {
+          user_id: userId,
+          stage_id: input.stage_id,
+          enabled: input.enabled,
+          stage_instructions: input.stage_instructions?.trim() || null,
+          do_rules: input.do_rules,
+          dont_rules: input.dont_rules,
+        },
+        { onConflict: 'stage_id' },
+      )
+      .select('id').single()
+    if (seqErr) throw seqErr
+    seqId = seq.id
+
+    // Replace steps: clear then re-insert with fresh positions.
+    const { error: delErr } = await supabase
+      .from('project_stage_sequence_steps').delete().eq('sequence_id', seqId)
+    if (delErr) throw delErr
+
+    if (input.steps.length > 0) {
+      const rows = input.steps.map((s, position) => ({
         user_id: userId,
-        stage_id: input.stage_id,
-        enabled: input.enabled,
-        stage_instructions: input.stage_instructions?.trim() || null,
-        do_rules: input.do_rules,
-        dont_rules: input.dont_rules,
-      },
-      { onConflict: 'stage_id' },
-    )
-    .select('id').single()
-  if (seqErr) throw seqErr
-
-  // Replace steps: clear then re-insert with fresh positions.
-  const { error: delErr } = await supabase
-    .from('project_stage_sequence_steps').delete().eq('sequence_id', seq.id)
-  if (delErr) throw delErr
-
-  if (input.steps.length > 0) {
-    const rows = input.steps.map((s, position) => ({
-      user_id: userId,
-      sequence_id: seq.id,
-      position,
-      delay_minutes: s.delay_minutes,
-      instruction: s.instruction,
-      fallback_message: s.fallback_message?.trim() || null,
-      channel: s.channel,
-    }))
-    const { error: insErr } = await supabase
-      .from('project_stage_sequence_steps').insert(rows)
-    if (insErr) throw insErr
+        sequence_id: seqId,
+        position,
+        delay_minutes: s.delay_minutes,
+        instruction: s.instruction,
+        fallback_message: s.fallback_message?.trim() || null,
+        channel: s.channel,
+      }))
+      const { error: insErr } = await supabase
+        .from('project_stage_sequence_steps').insert(rows)
+      if (insErr) throw insErr
+    }
+  } catch (e) {
+    if (isRedirectError(e)) throw e
+    return { ok: false, error: describeActionError(e) }
   }
 
-  // Enroll / unenroll projects already sitting in this stage. Uses the admin
-  // client to match the cron/worker path (and to read messenger_threads).
-  const admin = createAdminClient()
+  // Enroll / unenroll projects already sitting in this stage. This is a
+  // side-effect: the config is already saved, so a failure here must NOT fail
+  // the whole save (it only means existing cards aren't auto-enrolled yet).
+  // Uses the admin client to match the cron/worker path (reads messenger_threads).
   let seeded = 0
-  if (input.enabled && input.steps.length > 0) {
-    seeded = await seedStageProjectsImmediate(admin, { userId, stageId: input.stage_id })
-  } else {
-    await cancelStageSequenceRuns(admin, userId, input.stage_id, 'stage sequence disabled')
+  try {
+    const admin = createAdminClient()
+    if (input.enabled && input.steps.length > 0) {
+      seeded = await seedStageProjectsImmediate(admin, { userId, stageId: input.stage_id })
+    } else {
+      await cancelStageSequenceRuns(admin, userId, input.stage_id, 'stage sequence disabled')
+    }
+  } catch (e) {
+    console.error('[stage-sequence] enrollment side-effect failed (config still saved)', e)
   }
 
   revalidatePath('/dashboard/projects', 'layout')
-  return { seeded }
+  return { ok: true, seeded }
 }
 
 // Load the project (lead) picker options for the per-stage preview UI.
@@ -119,9 +141,16 @@ export type SequencePreviewTouch = {
 // return the messages WITHOUT sending or persisting anything — the test
 // preview. Uses the in-editor config so an operator can see exactly what would
 // go out before saving.
-export async function previewStageSequence(raw: unknown): Promise<SequencePreviewTouch[]> {
-  const input = SequencePreviewInput.parse(raw)
+export async function previewStageSequence(
+  raw: unknown,
+): Promise<ActionResult<{ touches: SequencePreviewTouch[] }>> {
+  const parsed = SequencePreviewInput.safeParse(raw)
+  if (!parsed.success) return { ok: false, error: describeActionError(parsed.error) }
+  const input = parsed.data
+
   const { supabase, userId } = await requireUser()
+
+  try {
   await assertStageOwned(supabase, userId, input.stage_id)
 
   // Owner-scoped project lookup (RLS) — authoritative customer facts + lead.
@@ -182,11 +211,16 @@ export async function previewStageSequence(raw: unknown): Promise<SequencePrevie
   })
 
   const byPosition = new Map(drafts.map((d) => [d.position, d.text]))
-  return input.steps.map((s, position) => ({
+  const touches = input.steps.map((s, position) => ({
     position,
     delay_minutes: s.delay_minutes,
     text: byPosition.get(position) ?? null,
   }))
+  return { ok: true, touches }
+  } catch (e) {
+    if (isRedirectError(e)) throw e
+    return { ok: false, error: describeActionError(e) }
+  }
 }
 
 export async function setStageSequenceEnabled(stageId: string, enabled: boolean): Promise<{ seeded: number }> {

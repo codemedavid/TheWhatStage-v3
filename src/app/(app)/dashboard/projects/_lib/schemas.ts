@@ -31,15 +31,33 @@ export const ProjectUpdateInput = ProjectInput.partial().omit({
 })
 export type ProjectUpdateInput = z.infer<typeof ProjectUpdateInput>
 
+// Per-rule cap for Do/Don't guidance lines. Roomy enough for a sentence or two
+// of strategy (raised from a tweet-length 280, which silently rejected normal
+// guidance and surfaced an opaque masked error).
+export const MAX_RULE_LEN = 1000
+export const MAX_INSTRUCTION_LEN = 2000
+
 export const SequenceStepInput = z.object({
   delay_minutes: z.number().int().min(0).max(525600),
-  instruction: z.string().min(1).max(2000),
+  instruction: z.string().min(1).max(MAX_INSTRUCTION_LEN, `must be ${MAX_INSTRUCTION_LEN} characters or fewer`),
   // Sent verbatim when the AI draft for this step is empty or errors, so a
   // follow-up touch is never silently dropped. Blank => engine uses a default.
-  fallback_message: z.string().max(2000).optional().nullable(),
+  fallback_message: z.string().max(MAX_INSTRUCTION_LEN, `must be ${MAX_INSTRUCTION_LEN} characters or fewer`).optional().nullable(),
   channel: z.literal('messenger').default('messenger'),
 })
 export type SequenceStepInput = z.infer<typeof SequenceStepInput>
+
+// One Do/Don't guidance line per array entry.
+const RuleList = z
+  .array(z.string().min(1).max(MAX_RULE_LEN, `must be ${MAX_RULE_LEN} characters or fewer`))
+  .max(20, 'at most 20 rules')
+  .default([])
+
+const StageInstructions = z
+  .string()
+  .max(MAX_INSTRUCTION_LEN, `must be ${MAX_INSTRUCTION_LEN} characters or fewer`)
+  .optional()
+  .nullable()
 
 export const SequenceInput = z.object({
   stage_id: z.string().uuid(),
@@ -47,9 +65,9 @@ export const SequenceInput = z.object({
   // Per-stage AI guidance: how to communicate / follow up while a card sits in
   // this stage. Stage-wide (applies to every card), layered on top of the
   // global chatbot brain. Keep generic — customer specifics live on each card.
-  stage_instructions: z.string().max(2000).optional().nullable(),
-  do_rules: z.array(z.string().min(1).max(280)).max(20).default([]),
-  dont_rules: z.array(z.string().min(1).max(280)).max(20).default([]),
+  stage_instructions: StageInstructions,
+  do_rules: RuleList,
+  dont_rules: RuleList,
   steps: z.array(SequenceStepInput).max(20),
 })
 export type SequenceInput = z.infer<typeof SequenceInput>
@@ -61,9 +79,9 @@ export type SequenceInput = z.infer<typeof SequenceInput>
 export const SequencePreviewInput = z.object({
   stage_id: z.string().uuid(),
   project_id: z.string().uuid(),
-  stage_instructions: z.string().max(2000).optional().nullable(),
-  do_rules: z.array(z.string().min(1).max(280)).max(20).default([]),
-  dont_rules: z.array(z.string().min(1).max(280)).max(20).default([]),
+  stage_instructions: StageInstructions,
+  do_rules: RuleList,
+  dont_rules: RuleList,
   steps: z.array(SequenceStepInput).min(1).max(20),
 })
 export type SequencePreviewInput = z.infer<typeof SequencePreviewInput>
