@@ -3,6 +3,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useRef,
   useTransition,
   type ReactNode,
 } from 'react'
@@ -33,17 +34,26 @@ export function useUrlState() {
   const isPending = ctx?.isPending ?? localPending
   const start = ctx?.start ?? localStart
 
+  // Read the latest search params through a ref so `set` keeps a STABLE identity
+  // across navigations. If `set` depended on `sp` directly it would change on
+  // every URL update, re-running any effect that lists it as a dependency (e.g.
+  // the Toolbar's debounced search push) — which fires another navigation, and
+  // the page refreshes in an endless loop when a filter is switched.
+  const spRef = useRef(sp)
+  spRef.current = sp
+
   const set = useCallback(
     (patch: Record<string, string | undefined>) => {
-      const next = new URLSearchParams(sp.toString())
+      const next = new URLSearchParams(spRef.current.toString())
       for (const [k, v] of Object.entries(patch)) {
         if (v === undefined || v === '') next.delete(k)
         else next.set(k, v)
       }
       next.delete('page')
-      start(() => router.replace(`${pathname}?${next.toString()}`))
+      const qs = next.toString()
+      start(() => router.replace(qs ? `${pathname}?${qs}` : pathname))
     },
-    [router, pathname, sp, start],
+    [router, pathname, start],
   )
 
   return { sp, set, isPending }

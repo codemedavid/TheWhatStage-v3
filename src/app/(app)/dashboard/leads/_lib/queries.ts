@@ -3,6 +3,24 @@ import { unstable_cache } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { normalizeThreadCounts } from '@/lib/messenger/unread'
 import { type LeadsQuery, PAGE_SIZE } from './schemas'
+import { manilaDayStartIso, manilaDayEndIso } from './day-bounds'
+
+/**
+ * Apply the leads date window. Filters on `last_activity_at` — a denormalized
+ * max(created_at, messenger thread last_message_at) — so a date preset surfaces
+ * leads we *interacted with* in the window, not only leads created in it. Bounds
+ * are Asia/Manila calendar days converted to precise UTC instants. Returns the
+ * same builder for chaining (PostgREST builders mutate-and-return).
+ */
+function applyActivityWindow<T extends {
+  gte: (col: string, v: string) => T
+  lte: (col: string, v: string) => T
+}>(query: T, params: Pick<LeadsQuery, 'from' | 'to'>): T {
+  let q = query
+  if (params.from) q = q.gte('last_activity_at', manilaDayStartIso(params.from))
+  if (params.to) q = q.lte('last_activity_at', manilaDayEndIso(params.to))
+  return q
+}
 
 export const stagesTag = (userId: string) => `leads:stages:${userId}`
 export const fieldDefsTag = (userId: string) => `leads:field-defs:${userId}`
@@ -31,6 +49,8 @@ export type LeadRow = {
   position: number
   created_at: string
   updated_at: string
+  /** max(created_at, latest messenger activity) — drives the date-range filter. */
+  last_activity_at: string
   picture_url: string | null
   /** Unread inbound messages waiting on this lead's Messenger thread. */
   unread_count: number
@@ -169,8 +189,7 @@ export async function fetchLeadsTotal(
       `name.ilike.${term},email.ilike.${term},phone.ilike.${term},company.ilike.${term}`,
     )
   }
-  if (params.from) query = query.gte('created_at', `${params.from}T00:00:00Z`)
-  if (params.to)   query = query.lte('created_at', `${params.to}T23:59:59Z`)
+  query = applyActivityWindow(query, params)
   const { count, error } = await query
   if (error) throw error
   return count ?? 0
@@ -195,8 +214,7 @@ export async function fetchLeadsPage(
       `name.ilike.${term},email.ilike.${term},phone.ilike.${term},company.ilike.${term}`,
     )
   }
-  if (params.from) query = query.gte('created_at', `${params.from}T00:00:00Z`)
-  if (params.to)   query = query.lte('created_at', `${params.to}T23:59:59Z`)
+  query = applyActivityWindow(query, params)
 
   query = query.order(sort.col, { ascending: sort.asc, nullsFirst: !sort.nullsLast })
 
@@ -355,8 +373,7 @@ export async function fetchContactLeadsTotal(
       `name.ilike.${term},email.ilike.${term},phone.ilike.${term},company.ilike.${term}`,
     )
   }
-  if (params.from) query = query.gte('created_at', `${params.from}T00:00:00Z`)
-  if (params.to)   query = query.lte('created_at', `${params.to}T23:59:59Z`)
+  query = applyActivityWindow(query, params)
   const { count, error } = await query
   if (error) throw error
   return count ?? 0
@@ -383,8 +400,7 @@ export async function fetchContactLeadsPage(
       `name.ilike.${term},email.ilike.${term},phone.ilike.${term},company.ilike.${term}`,
     )
   }
-  if (params.from) query = query.gte('created_at', `${params.from}T00:00:00Z`)
-  if (params.to)   query = query.lte('created_at', `${params.to}T23:59:59Z`)
+  query = applyActivityWindow(query, params)
 
   if (params.contact_sort === 'name_asc') {
     query = query.order('name', { ascending: true })

@@ -14,6 +14,7 @@ const lead: LeadRow = {
   estimated_value: 1000, notes: null,
   custom_fields: { industry: 'SaaS' }, phones: null, emails: null, position: 0,
   created_at: '2026-04-28T00:00:00Z', updated_at: '2026-04-28T00:00:00Z',
+  last_activity_at: '2026-04-28T00:00:00Z',
   picture_url: null,
   unread_count: 0,
   missed_count: 0,
