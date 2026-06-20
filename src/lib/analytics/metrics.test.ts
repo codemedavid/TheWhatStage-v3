@@ -1,13 +1,19 @@
 import { describe, expect, it } from 'vitest'
 import {
   buildFunnel,
+  computeDelta,
   conversionPct,
+  crosstabLookup,
   daysInRange,
+  formatDelta,
   formatPct,
   formatRatio,
   perDay,
+  previousPeriod,
   ratio,
   reachedFor,
+  toCsv,
+  type CrosstabCell,
   type FunnelInputRow,
 } from './metrics'
 
@@ -106,5 +112,93 @@ describe('reachedFor', () => {
 
   it('returns 0 for an unknown stage', () => {
     expect(reachedFor(rows, 'missing')).toBe(0)
+  })
+})
+
+describe('previousPeriod', () => {
+  it('returns the immediately-preceding range of equal length', () => {
+    // June has 30 days; the prior 30-day window ends the day before `from`.
+    expect(previousPeriod('2026-06-01', '2026-06-30')).toEqual({
+      from: '2026-05-02',
+      to: '2026-05-31',
+    })
+  })
+
+  it('handles a single-day range', () => {
+    expect(previousPeriod('2026-06-20', '2026-06-20')).toEqual({
+      from: '2026-06-19',
+      to: '2026-06-19',
+    })
+  })
+
+  it('returns null for missing or inverted bounds (all-time has no prior period)', () => {
+    expect(previousPeriod(null, '2026-06-30')).toBeNull()
+    expect(previousPeriod('2026-06-30', null)).toBeNull()
+    expect(previousPeriod('2026-06-30', '2026-06-01')).toBeNull()
+  })
+})
+
+describe('computeDelta', () => {
+  it('computes absolute and percentage change with direction', () => {
+    expect(computeDelta(120, 100)).toEqual({ abs: 20, pct: 20, direction: 'up' })
+    expect(computeDelta(80, 100)).toEqual({ abs: -20, pct: -20, direction: 'down' })
+    expect(computeDelta(100, 100)).toEqual({ abs: 0, pct: 0, direction: 'flat' })
+  })
+
+  it('returns null pct when there is no baseline to compare against', () => {
+    expect(computeDelta(5, 0)).toEqual({ abs: 5, pct: null, direction: 'up' })
+  })
+})
+
+describe('formatDelta', () => {
+  it('renders a signed percentage', () => {
+    expect(formatDelta({ abs: 20, pct: 20, direction: 'up' })).toBe('+20.0%')
+    expect(formatDelta({ abs: -12.5, pct: -12.5, direction: 'down' })).toBe('-12.5%')
+  })
+
+  it('renders new when there is no baseline', () => {
+    expect(formatDelta({ abs: 5, pct: null, direction: 'up' })).toBe('New')
+  })
+
+  it('renders no change for a flat delta', () => {
+    expect(formatDelta({ abs: 0, pct: 0, direction: 'flat' })).toBe('No change')
+  })
+})
+
+describe('crosstabLookup', () => {
+  const cells: CrosstabCell[] = [
+    { leadStageId: 'q', leadStageName: 'Qualified', leadRank: 1, leadStageTotal: 142,
+      projectStageId: 'won', projectStageName: 'Won', projectKind: 'won', projectRank: 2, leads: 37 },
+    { leadStageId: 'q', leadStageName: 'Qualified', leadRank: 1, leadStageTotal: 142,
+      projectStageId: 'open', projectStageName: 'Open', projectKind: 'open', projectRank: 0, leads: 96 },
+  ]
+
+  it('looks up the cell for a lead rank x project rank and derives pct + ratio', () => {
+    const r = crosstabLookup(cells, 1, 2)
+    expect(r.leads).toBe(37)
+    expect(r.total).toBe(142)
+    expect(r.pct).toBeCloseTo(26.06, 1)
+    // "leads per win" = 142 / 37
+    expect(r.ratio).toBeCloseTo(3.84, 1)
+  })
+
+  it('returns zeros when the cell is absent', () => {
+    expect(crosstabLookup(cells, 9, 9)).toEqual({ leads: 0, total: 0, pct: 0, ratio: 0 })
+  })
+})
+
+describe('toCsv', () => {
+  it('joins headers and rows with newlines', () => {
+    const csv = toCsv(['Stage', 'Reached'], [['New', 100], ['Won', 7]])
+    expect(csv).toBe('Stage,Reached\nNew,100\nWon,7')
+  })
+
+  it('quotes and escapes values containing commas, quotes, or newlines', () => {
+    const csv = toCsv(['Name'], [['Acme, Inc.'], ['She said "hi"'], ['line1\nline2']])
+    expect(csv).toBe('Name\n"Acme, Inc."\n"She said ""hi"""\n"line1\nline2"')
+  })
+
+  it('returns just the header row when there are no data rows', () => {
+    expect(toCsv(['A', 'B'], [])).toBe('A,B')
   })
 })
