@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState, useTransition } from 'react'
 import { sendAttachmentAsOperator, type AttachmentSendInput } from '../actions/messenger'
 import { AudioTrimmer } from './AudioTrimmer'
+import { describeSendError } from '../_lib/send-error'
 
 type Tab = 'upload' | 'library' | 'url'
 
@@ -65,7 +66,11 @@ export function AttachmentComposer({ leadId, onSent, onError, onClose }: Props) 
   const send = (input: AttachmentSendInput) => {
     startSend(async () => {
       try {
-        await sendAttachmentAsOperator(leadId, input)
+        const result = await sendAttachmentAsOperator(leadId, input)
+        if (!result.ok) {
+          onError(describeSendError(result.error))
+          return
+        }
         onSent()
         onClose()
       } catch (e) {

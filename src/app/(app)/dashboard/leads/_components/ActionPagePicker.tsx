@@ -5,6 +5,7 @@ import {
   sendActionPageAsOperator,
   type SendableActionPage,
 } from '../actions/messenger'
+import { describeSendError } from '../_lib/send-error'
 
 // Mirror the Meta limits enforced server-side in sendActionPageAsOperator.
 const MESSAGE_MAX = 640
@@ -51,7 +52,11 @@ export function ActionPagePicker({ leadId, onSent, onError, onClose }: Props) {
         onSend={(overrides) => {
           startSend(async () => {
             try {
-              await sendActionPageAsOperator(leadId, selected.id, overrides)
+              const result = await sendActionPageAsOperator(leadId, selected.id, overrides)
+              if (!result.ok) {
+                onError(describeSendError(result.error))
+                return
+              }
               onSent()
               onClose()
             } catch (e) {

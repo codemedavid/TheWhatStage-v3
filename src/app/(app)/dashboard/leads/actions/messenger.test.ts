@@ -147,9 +147,14 @@ describe('replyAsOperator — bot_paused_until stamp', () => {
     expect(patches.some((p) => 'bot_paused_until' in p)).toBe(false)
   })
 
-  it('still stamps when the FB send fails (operator intent counted)', async () => {
-    sendOutboundMock.mockResolvedValue({ sent: false, reason: 'rate_limited' })
+  it('returns a recorded failure (no throw) when the FB send is policy-blocked', async () => {
+    // A policy block (e.g. HUMAN_AGENT not approved) is an expected, already
+    // persisted outcome — the action must resolve with a structured failure so
+    // the UI can show it inline, NOT throw (a thrown server action surfaces as a
+    // scary production 500 "Server Components render" error).
+    sendOutboundMock.mockResolvedValue({ sent: false, reason: 'human_agent_unapproved' })
     const patches: Record<string, unknown>[] = []
+    const rows: Record<string, unknown>[] = []
     supabaseFromMock.mockImplementation(makeSupabaseStub({
       thread: {
         id: 't1', psid: 'psid', page_id: 'p1', last_inbound_at: null,
@@ -157,14 +162,41 @@ describe('replyAsOperator — bot_paused_until stamp', () => {
         facebook_pages: { page_access_token: 'enc' },
       },
       threadUpdateSpy: (p) => { patches.push(p) },
+      messageInsertSpy: (r) => { rows.push(r) },
     }))
 
-    await expect(replyAsOperator('lead-1', 'hello')).rejects.toThrow()
+    const result = await replyAsOperator('lead-1', 'hello')
+
+    expect(result).toEqual({ ok: false, error: 'policy_blocked:human_agent_unapproved' })
+    // Failed attempt is still persisted with the machine-readable error.
+    expect(rows[0]?.error).toBe('policy_blocked:human_agent_unapproved')
+    // Operator intent still counts — pause window is stamped even on failure.
     const stampPatch = patches.find((p) => 'bot_paused_until' in p)
     expect(stampPatch).toBeDefined()
     expect(typeof stampPatch?.bot_paused_until).toBe('string')
+    // ...but the success-only thread tail (last_message_at) is NOT written.
     const tailPatch = patches.find((p) => 'last_message_at' in p)
     expect(tailPatch).toBeUndefined()
+  })
+
+  it('returns { ok: true } when the send succeeds', async () => {
+    supabaseFromMock.mockImplementation(makeSupabaseStub({
+      thread: {
+        id: 't1', psid: 'psid', page_id: 'p1', last_inbound_at: null,
+        controlled_by_run_id: null,
+        facebook_pages: { page_access_token: 'enc' },
+      },
+    }))
+
+    const result = await replyAsOperator('lead-1', 'hello')
+
+    expect(result).toEqual({ ok: true })
+  })
+
+  it('still throws for genuine infrastructure failures (no thread)', async () => {
+    supabaseFromMock.mockImplementation(makeSupabaseStub({ thread: null }))
+
+    await expect(replyAsOperator('lead-1', 'hello')).rejects.toThrow(/no Messenger thread/)
   })
 })
 

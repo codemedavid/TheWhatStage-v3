@@ -525,11 +525,24 @@ interface OperatorSendSpec {
   attachments?: OperatorAttachment[]
 }
 
+/**
+ * Outcome of an operator-initiated send. A `policy_blocked:*` or FB API failure
+ * is an EXPECTED, already-persisted result (the failed message row carries the
+ * machine-readable error and is shown inline in the thread), so it is returned
+ * as `{ ok: false }` rather than thrown. Throwing a server action surfaces in
+ * production as an opaque "Server Components render" 500, which is the wrong
+ * signal for a routine, recoverable send failure.
+ *
+ * Genuine infrastructure failures (no thread, missing page token, DB errors)
+ * still throw — those are not recorded and the operator cannot act on them.
+ */
+export type SendResult = { ok: true } | { ok: false; error: string }
+
 async function dispatchOperatorSend(args: {
   context: string
   leadId: string
   build: (thread: OperatorThread) => OperatorSendSpec | Promise<OperatorSendSpec>
-}): Promise<void> {
+}): Promise<SendResult> {
   const { context, leadId, build } = args
   const { supabase, userId } = await requireUser()
 
@@ -647,14 +660,18 @@ async function dispatchOperatorSend(args: {
       .eq('id', thread.id)
   }
 
-  if (sendError) throw new Error(`${context}: ${sendError}`)
   revalidatePath('/dashboard/leads', 'layout')
+
+  // A recorded send failure (policy block / FB rejection) is returned, not
+  // thrown — the failed message row already carries `error` for inline display.
+  if (sendError) return { ok: false, error: sendError }
+  return { ok: true }
 }
 
-export async function replyAsOperator(leadId: string, text: string): Promise<void> {
+export async function replyAsOperator(leadId: string, text: string): Promise<SendResult> {
   const body = text.trim()
-  if (!body) return
-  await dispatchOperatorSend({
+  if (!body) return { ok: true }
+  return dispatchOperatorSend({
     context: 'replyAsOperator',
     leadId,
     build: () => ({ payload: { kind: 'text', text: body }, body }),
@@ -713,7 +730,7 @@ export async function sendActionPageAsOperator(
   leadId: string,
   actionPageId: string,
   overrides?: ActionPageSendOverrides,
-): Promise<void> {
+): Promise<SendResult> {
   const { supabase, userId } = await requireUser()
 
   // Validate per-send overrides at the boundary. Invalid/blank values fall back
@@ -744,7 +761,7 @@ export async function sendActionPageAsOperator(
     throw new Error('sendActionPageAsOperator: action page is not published')
   }
 
-  await dispatchOperatorSend({
+  return dispatchOperatorSend({
     context: 'sendActionPageAsOperator',
     leadId,
     build: (thread) => {
@@ -795,7 +812,7 @@ function assertHttpsUrl(raw: string, context: string): string {
 export async function sendAttachmentAsOperator(
   leadId: string,
   input: AttachmentSendInput,
-): Promise<void> {
+): Promise<SendResult> {
   const { supabase, userId } = await requireUser()
   const admin = createAdminClient()
 
@@ -838,7 +855,7 @@ export async function sendAttachmentAsOperator(
       : { kind: input.attachmentType, url }
   const body = attachment.name ? `[${input.attachmentType}] ${attachment.name}` : `[${input.attachmentType}]`
 
-  await dispatchOperatorSend({
+  return dispatchOperatorSend({
     context: 'sendAttachmentAsOperator',
     leadId,
     build: () => ({ payload, body, attachments: [attachment] }),

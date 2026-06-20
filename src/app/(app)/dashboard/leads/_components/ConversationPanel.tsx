@@ -15,6 +15,7 @@ import {
 } from '../actions/messenger'
 import { AttachmentComposer } from './AttachmentComposer'
 import { ActionPagePicker } from './ActionPagePicker'
+import { describeSendError } from '../_lib/send-error'
 
 type State =
   | { status: 'loading' }
@@ -25,6 +26,7 @@ type State =
 export function ConversationPanel({ leadId }: { leadId: string }) {
   const [state, setState] = useState<State>({ status: 'loading' })
   const [draft, setDraft] = useState('')
+  const [sendNotice, setSendNotice] = useState<string | null>(null)
   const [panel, setPanel] = useState<'none' | 'attach' | 'page'>('none')
   const [sending, startSend] = useTransition()
   const [toggling, startToggle] = useTransition()
@@ -111,12 +113,17 @@ export function ConversationPanel({ leadId }: { leadId: string }) {
   const onSend = () => {
     const value = draft.trim()
     if (!value) return
+    setSendNotice(null)
     startSend(async () => {
       try {
-        await replyAsOperator(leadId, value)
+        const result = await replyAsOperator(leadId, value)
         setDraft('')
+        // On a recorded policy block the failed attempt is persisted and shown
+        // inline in the thread — just refresh; don't blow away the whole panel.
         refresh()
+        if (!result.ok) setSendNotice(describeSendError(result.error))
       } catch (e) {
+        // Genuine infrastructure failures (no thread, missing token) still throw.
         setState({
           status: 'error',
           message: e instanceof Error ? e.message : 'Send failed',
@@ -203,6 +210,28 @@ export function ConversationPanel({ leadId }: { leadId: string }) {
           onError={(message) => setState({ status: 'error', message })}
           onClose={() => setPanel('none')}
         />
+      )}
+
+      {sendNotice && (
+        <div
+          role="alert"
+          className="flex items-start justify-between gap-2 rounded-lg px-3 py-2 text-[12px]"
+          style={{
+            background: 'var(--lead-danger-soft)',
+            border: '1px solid var(--lead-danger)',
+            color: 'var(--lead-danger)',
+          }}
+        >
+          <span>{sendNotice}</span>
+          <button
+            type="button"
+            onClick={() => setSendNotice(null)}
+            aria-label="Dismiss"
+            className="shrink-0 font-medium underline"
+          >
+            Dismiss
+          </button>
+        </div>
       )}
 
       <div className="flex items-center gap-2">
@@ -587,7 +616,7 @@ function Bubble({ m }: { m: ConversationMessage }) {
         {isEmpty && <div className="whitespace-pre-wrap break-words">(empty)</div>}
         {m.error && (
           <div className="mt-1 text-[10.5px]" style={{ color: 'var(--lead-danger)' }}>
-            Send failed: {m.error}
+            {describeSendError(m.error)}
           </div>
         )}
         <div
