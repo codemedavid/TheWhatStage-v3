@@ -17,6 +17,9 @@ import CatalogOrdersView, { type CatalogOrderEntry } from './CatalogOrdersView'
 import SalesSubmissionsView, {
   type SalesSubmissionRow,
 } from './SalesSubmissionsView'
+import FormSubmissionsView, {
+  type FormSubmissionRow,
+} from './FormSubmissionsView'
 import type { OrderPayment } from '@/lib/order-payments/types'
 import { listBySubmissionIds } from '@/lib/order-payments/server'
 
@@ -330,8 +333,6 @@ export default async function SubmissionsPage({
   const kind = page.kind
 
   const now = new Date()
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
-  const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
 
   /* ---- Booking kind: transform to BookingEntry[] and render premium view ---- */
   if (kind === 'booking') {
@@ -422,6 +423,23 @@ export default async function SubmissionsPage({
     )
   }
 
+  /* ---- Form & qualification kinds: sales-style view with detail drawer ---- */
+  if (kind === 'form' || kind === 'qualification') {
+    const rows: FormSubmissionRow[] = submissions.map((s) => ({
+      ...s,
+      project: projectBySubmission.get(s.id) ?? null,
+    }))
+    return (
+      <FormSubmissionsView
+        pageId={id}
+        pageTitle={page.title}
+        pageStatus={page.status}
+        kind={kind}
+        submissions={rows}
+      />
+    )
+  }
+
   /* ---- All other kinds: original layout ---- */
   return (
     <div className="mx-auto max-w-4xl space-y-6 pb-16">
@@ -476,275 +494,11 @@ export default async function SubmissionsPage({
         </div>
       </div>
 
-      {/* Kind-specific stats + content */}
-      {kind === 'form' && (
-        <FormView
-          submissions={submissions}
-          monthStart={monthStart}
-          weekAgo={weekAgo}
-          projectBySubmission={projectBySubmission}
-        />
-      )}
-      {kind === 'qualification' && (
-        <QualificationView
-          submissions={submissions}
-          weekAgo={weekAgo}
-          projectBySubmission={projectBySubmission}
-        />
-      )}
-      {kind !== 'form' && kind !== 'qualification' && (
-        <GenericView
-          submissions={submissions}
-          projectBySubmission={projectBySubmission}
-        />
-      )}
-    </div>
-  )
-}
-
-/* ═══════════════════════════════════════════════
-   FORM VIEW  (grouped by submitted date)
-═══════════════════════════════════════════════ */
-
-function FormView({
-  submissions,
-  monthStart,
-  weekAgo,
-  projectBySubmission,
-}: {
-  submissions: SubmissionListItem[]
-  monthStart: Date
-  weekAgo: Date
-  projectBySubmission: Map<string, SubmissionProjectInfo>
-}) {
-  const submitted = submissions.filter((s) => s.outcome === 'submitted' || !s.outcome)
-  const thisMonth = submitted.filter((s) => new Date(s.created_at) >= monthStart)
-  const thisWeek = submitted.filter((s) => new Date(s.created_at) >= weekAgo)
-  const groups = groupByCreatedDate(submissions)
-
-  return (
-    <>
-      <div className="grid grid-cols-3 gap-3">
-        <StatCard value={submitted.length} label="Total submissions" color="violet" />
-        <StatCard value={thisMonth.length} label="This month" color="indigo" />
-        <StatCard value={thisWeek.length} label="This week" color="blue" />
-      </div>
-
-      {submissions.length === 0 ? (
-        <EmptyState icon="form" message="No submissions yet. Responses will appear here once leads fill the form." />
-      ) : (
-        <div className="space-y-8">
-          {groups.map(({ dateKey, dateLabel, isToday, items }) => (
-            <section key={dateKey}>
-              <DayDivider label={dateLabel} count={items.length} isToday={isToday} />
-              <div className="space-y-2.5">
-                {items.map((s) => (
-                  <FormCard
-                    key={s.id}
-                    submission={s}
-                    project={projectBySubmission.get(s.id) ?? null}
-                  />
-                ))}
-              </div>
-            </section>
-          ))}
-        </div>
-      )}
-    </>
-  )
-}
-
-function FormCard({
-  submission: s,
-  project,
-}: {
-  submission: SubmissionListItem
-  project: SubmissionProjectInfo | null
-}) {
-  const data = s.data as Record<string, unknown>
-  const fields = data.fields && typeof data.fields === 'object'
-    ? (data.fields as Record<string, unknown>)
-    : {}
-
-  return (
-    <div className="overflow-hidden rounded-xl border border-[#E5E7EB] bg-white shadow-[0_1px_3px_rgba(0,0,0,0.06)] hover:shadow-[0_2px_8px_rgba(0,0,0,0.08)] transition-shadow">
-      <PersonContent submission={s} fields={fields} project={project} />
-    </div>
-  )
-}
-
-/* ═══════════════════════════════════════════════
-   QUALIFICATION VIEW
-═══════════════════════════════════════════════ */
-
-function formatOutcomeLabel(outcome: string): string {
-  return OUTCOME_META[outcome]?.label ?? outcome.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
-}
-
-function qualificationStatColor(outcome: string): 'green' | 'red' | 'amber' | 'blue' | 'violet' | 'indigo' {
-  if (/disqual|lost|not_fit/i.test(outcome)) return 'red'
-  if (/review|pending/i.test(outcome)) return 'amber'
-  if (/qual|won|hot/i.test(outcome)) return 'green'
-  return 'indigo'
-}
-
-function QualificationView({
-  submissions,
-  weekAgo,
-  projectBySubmission,
-}: {
-  submissions: SubmissionListItem[]
-  weekAgo: Date
-  projectBySubmission: Map<string, SubmissionProjectInfo>
-}) {
-  const outcomeCounts = Array.from(
-    submissions.reduce((map, s) => {
-      const key = s.outcome || 'unknown'
-      map.set(key, (map.get(key) ?? 0) + 1)
-      return map
-    }, new Map<string, number>()),
-  ).sort((a, b) => b[1] - a[1])
-  const thisWeek = submissions.filter((s) => new Date(s.created_at) >= weekAgo)
-  const groups = groupByCreatedDate(submissions)
-
-  return (
-    <>
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        {outcomeCounts.slice(0, 3).map(([outcome, count]) => (
-          <StatCard
-            key={outcome}
-            value={count}
-            label={formatOutcomeLabel(outcome)}
-            color={qualificationStatColor(outcome)}
-          />
-        ))}
-        <StatCard value={thisWeek.length} label="This week" color="blue" />
-      </div>
-
-      {submissions.length === 0 ? (
-        <EmptyState icon="workflow" message="No responses yet. Qualification results will appear once leads complete the quiz." />
-      ) : (
-        <div className="space-y-8">
-          {groups.map(({ dateKey, dateLabel, isToday, items }) => (
-            <section key={dateKey}>
-              <DayDivider label={dateLabel} count={items.length} isToday={isToday} />
-              <div className="space-y-2.5">
-                {items.map((s) => (
-                  <QualificationCard
-                    key={s.id}
-                    submission={s}
-                    project={projectBySubmission.get(s.id) ?? null}
-                  />
-                ))}
-              </div>
-            </section>
-          ))}
-        </div>
-      )}
-    </>
-  )
-}
-
-function QualificationCard({
-  submission: s,
-  project,
-}: {
-  submission: SubmissionListItem
-  project: SubmissionProjectInfo | null
-}) {
-  const data = s.data as Record<string, unknown>
-  const answers = Array.isArray(data.answers) ? data.answers : []
-  const score = typeof data.score === 'number' ? data.score : null
-
-  const outcomeMeta = OUTCOME_META[s.outcome ?? ''] ?? {
-    bg: '#F3F4F6', text: '#6B7280', label: s.outcome ?? '—',
-  }
-
-  return (
-    <div className="overflow-hidden rounded-xl border border-[#E5E7EB] bg-white shadow-[0_1px_3px_rgba(0,0,0,0.06)] hover:shadow-[0_2px_8px_rgba(0,0,0,0.08)] transition-shadow">
-      <div className="flex flex-col gap-3 p-4">
-        {/* Person row */}
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#EFF6FF] text-[#3B82F6]">
-              <PersonIcon size={14} />
-            </div>
-            <div className="min-w-0">
-              {s.lead_id ? (
-                <Link
-                  href={`/dashboard/leads?lead=${s.lead_id}`}
-                  className="block truncate text-[14px] font-semibold text-[#111827] hover:text-[#0EA5E9] transition-colors"
-                >
-                  {s.lead_name ?? s.messenger_name ?? 'Unknown lead'}
-                </Link>
-              ) : (
-                <span className="block truncate text-[14px] font-semibold text-[#374151]">
-                  {s.lead_name ?? s.messenger_name ?? 'Anonymous'}
-                </span>
-              )}
-              <div className="mt-0.5 flex items-center gap-2">
-                {s.psid && (
-                  <span className="inline-flex items-center gap-1 text-[11px] text-[#6B7280]">
-                    <MessengerIcon size={10} />
-                    via Messenger
-                  </span>
-                )}
-                {s.lead_id && (
-                  <Link href={`/dashboard/leads?lead=${s.lead_id}`} className="text-[11px] text-[#0EA5E9] hover:underline">
-                    View lead →
-                  </Link>
-                )}
-              </div>
-            </div>
-          </div>
-          <div className="flex shrink-0 flex-col items-end gap-1.5">
-            <div className="flex items-center gap-2">
-              <span
-                className="rounded-full px-2.5 py-0.5 text-[11px] font-semibold"
-                style={{ background: outcomeMeta.bg, color: outcomeMeta.text }}
-              >
-                {outcomeMeta.label}
-              </span>
-              {score !== null && (
-                <span className="text-[12px] font-medium text-[#374151]">
-                  {score.toFixed(1)} pts
-                </span>
-              )}
-            </div>
-            <span className="text-[11px] text-[#9CA3AF]">{relTime(new Date(s.created_at))}</span>
-            <CreateProjectButton
-              submissionId={s.id}
-              leadId={s.lead_id}
-              existingProject={project}
-            />
-          </div>
-        </div>
-
-        {/* Answers */}
-        {answers.length > 0 && (
-          <div className="border-t border-[#F3F4F6] pt-3 space-y-2">
-            {answers.map((a: Record<string, unknown>, i: number) => {
-              const prompt = typeof a.prompt === 'string' ? a.prompt : `Q${i + 1}`
-              const display = a.display
-              const displayStr = Array.isArray(display)
-                ? display.join(', ')
-                : typeof display === 'string'
-                  ? display
-                  : typeof a.value === 'string'
-                    ? a.value
-                    : '—'
-              return (
-                <div key={i} className="grid grid-cols-[1fr_auto] gap-3 items-start">
-                  <span className="text-[12px] text-[#6B7280] leading-snug">{prompt}</span>
-                  <span className="text-right text-[12.5px] font-medium text-[#374151] leading-snug max-w-[200px] break-words">
-                    {displayStr || '—'}
-                  </span>
-                </div>
-              )
-            })}
-          </div>
-        )}
-      </div>
+      {/* Generic stats + content (sales/realestate fallback, unknown kinds) */}
+      <GenericView
+        submissions={submissions}
+        projectBySubmission={projectBySubmission}
+      />
     </div>
   )
 }
@@ -870,75 +624,6 @@ function GenericCard({
 /* ═══════════════════════════════════════════════
    SHARED PIECES
 ═══════════════════════════════════════════════ */
-
-function PersonContent({
-  submission: s,
-  fields,
-  project,
-}: {
-  submission: SubmissionListItem
-  fields: Record<string, unknown>
-  project: SubmissionProjectInfo | null
-}) {
-  return (
-    <div className="flex flex-1 flex-col gap-2 p-4 min-w-0">
-      {/* Person row */}
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex items-center gap-2.5 min-w-0">
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#EFF6FF] text-[#3B82F6]">
-            <PersonIcon size={14} />
-          </div>
-          <div className="min-w-0">
-            {s.lead_id ? (
-              <Link
-                href={`/dashboard/leads?lead=${s.lead_id}`}
-                className="block truncate text-[14px] font-semibold text-[#111827] hover:text-[#0EA5E9] transition-colors"
-              >
-                {s.lead_name ?? s.messenger_name ?? 'Unknown lead'}
-              </Link>
-            ) : (
-              <span className="block truncate text-[14px] font-semibold text-[#374151]">
-                {s.lead_name ?? s.messenger_name ?? 'Anonymous'}
-              </span>
-            )}
-            <div className="mt-0.5 flex items-center gap-2">
-              {s.psid && (
-                <span className="inline-flex items-center gap-1 text-[11px] text-[#6B7280]">
-                  <MessengerIcon size={10} />
-                  via Messenger
-                </span>
-              )}
-              {s.lead_id && (
-                <Link href={`/dashboard/leads?lead=${s.lead_id}`} className="text-[11px] text-[#0EA5E9] hover:underline">
-                  View lead →
-                </Link>
-              )}
-            </div>
-          </div>
-        </div>
-        <div className="flex shrink-0 flex-col items-end gap-1.5">
-          <span className="text-[11px] text-[#9CA3AF]">
-            {relTime(new Date(s.created_at))}
-          </span>
-          <CreateProjectButton
-            submissionId={s.id}
-            leadId={s.lead_id}
-            existingProject={project}
-          />
-        </div>
-      </div>
-
-      {/* Fields */}
-      {Object.keys(fields).length > 0 && (
-        <div className="mt-1 grid grid-cols-1 gap-1.5 border-t border-[#F3F4F6] pt-2 sm:grid-cols-2">
-          {Object.entries(fields).map(([key, val]) => (
-            <FieldRow key={key} label={humanize(key)} value={formatFieldValue(val)} />
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
 
 function FieldRow({ label, value }: { label: string; value: string }) {
   return (
@@ -1125,16 +810,6 @@ const KIND_LABEL: Record<string, string> = {
   catalog:       'Catalog',
   sales:         'Sales Page',
   realestate:    'Real Estate',
-}
-
-const OUTCOME_META: Record<string, { bg: string; text: string; label: string }> = {
-  qualified:      { bg: '#D1FAE5', text: '#065F46', label: 'Qualified' },
-  disqualified:   { bg: '#FEE2E2', text: '#991B1B', label: 'Disqualified' },
-  pending_review: { bg: '#FEF3C7', text: '#92400E', label: 'Pending review' },
-  submitted:      { bg: '#EFF6FF', text: '#1D4ED8', label: 'Submitted' },
-  booked:         { bg: '#D1FAE5', text: '#065F46', label: 'Booked' },
-  checked_out:    { bg: '#D1FAE5', text: '#065F46', label: 'Checked out' },
-  invalid:        { bg: '#FEE2E2', text: '#991B1B', label: 'Invalid' },
 }
 
 /* ═══════════════════════════════════════════════
