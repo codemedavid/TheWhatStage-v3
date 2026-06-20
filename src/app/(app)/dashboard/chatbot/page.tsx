@@ -10,6 +10,7 @@ import { PrimaryGoalSection, type PrimaryGoalOption } from './_components/Primar
 import { ChatbotTabs } from './_components/ChatbotTabs'
 import { AutoFollowupForm } from './_components/AutoFollowupForm'
 import { HumanTakeoverForm } from './_components/HumanTakeoverForm'
+import { MessageDebounceForm } from './_components/MessageDebounceForm'
 import type { PersonalityTemplate } from '@/lib/chatbot/personality/types'
 import './chatbot.css'
 
@@ -78,6 +79,7 @@ export default async function ChatbotPage() {
         actionPages={actionPages.map((p) => ({ id: p.id, title: p.title }))}
       />
       <HumanTakeoverForm />
+      <MessageDebounceForm />
     </>
   )
 
