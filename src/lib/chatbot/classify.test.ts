@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { StageBrief, StageChange, ActionPageBrief } from './classify'
-import { applyStageChange, sanitizeReply, stageInstruction, stageList } from './classify'
+import { applyStageChange, coerceActionPage, sanitizeReply, stageInstruction, stageList } from './classify'
 
 // applyStageChange creates a fresh admin client after a successful move so
 // it can fire `dispatchStageEntered`. The real implementation pulls Supabase
@@ -416,5 +416,76 @@ describe('stageInstruction SEND NOW rule', () => {
   it('does not include SEND NOW when no action pages', () => {
     const out = stageInstruction([stage], stage.id, [], null, null)
     expect(out).not.toContain('SEND NOW')
+  })
+})
+
+describe('stageInstruction BUTTON_LABEL rule', () => {
+  const stage: StageBrief = {
+    id: 's', name: 'Qualifying', description: null, position: 1, kind: 'qualifying',
+  }
+  const page: ActionPageBrief = {
+    id: 'p1', title: 'Lead Gen Form', cta_label: 'Open form',
+    bot_send_instructions: 'Send when customer asks to sign up.',
+  }
+
+  it('includes BUTTON_LABEL rules describing a 2-3 word punchy label', () => {
+    const out = stageInstruction([stage], stage.id, [page], null, null)
+    expect(out).toContain('BUTTON_LABEL RULES')
+    expect(out).toMatch(/2.?3 words/i)
+    expect(out).toMatch(/same language/i)
+    // Must warn against reusing the page title as the label.
+    expect(out).toMatch(/never use the action page title/i)
+  })
+
+  it('omits BUTTON_LABEL rules when no action pages exist', () => {
+    const out = stageInstruction([stage], stage.id, [], null, null)
+    expect(out).not.toContain('BUTTON_LABEL RULES')
+  })
+
+  it('advertises button_label in the JSON schema for the action_page object', () => {
+    const out = stageInstruction([stage], stage.id, [page], null, null)
+    expect(out).toContain('"button_label"')
+  })
+})
+
+describe('coerceActionPage', () => {
+  const pages: ActionPageBrief[] = [
+    { id: 'p1', title: 'Form', cta_label: 'Open form', bot_send_instructions: 'send' },
+  ]
+
+  it('parses action_page_id, reason, button_text and button_label', () => {
+    const out = coerceActionPage(
+      { action_page_id: 'p1', reason: 'fits', button_text: 'Fill this out 👇', button_label: 'Claim slot 🎵' },
+      pages,
+    )
+    expect(out).toEqual({
+      action_page_id: 'p1',
+      reason: 'fits',
+      button_text: 'Fill this out 👇',
+      button_label: 'Claim slot 🎵',
+    })
+  })
+
+  it('defaults button_label to empty string when absent', () => {
+    const out = coerceActionPage({ action_page_id: 'p1', reason: '', button_text: 'x' }, pages)
+    expect(out?.button_label).toBe('')
+  })
+
+  it('trims and clamps button_label to the Messenger 20-char button cap', () => {
+    const out = coerceActionPage(
+      { action_page_id: 'p1', button_label: '   ' + 'A'.repeat(40) + '   ' },
+      pages,
+    )
+    expect(out?.button_label.length).toBe(20)
+    expect(out?.button_label).toBe('A'.repeat(20))
+  })
+
+  it('ignores a non-string button_label', () => {
+    const out = coerceActionPage({ action_page_id: 'p1', button_label: 123 }, pages)
+    expect(out?.button_label).toBe('')
+  })
+
+  it('returns null for an action_page_id not in the allowed list', () => {
+    expect(coerceActionPage({ action_page_id: 'nope', button_label: 'X' }, pages)).toBeNull()
   })
 })

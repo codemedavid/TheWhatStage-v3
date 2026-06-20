@@ -3,9 +3,11 @@
 
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 
-const { sendOutboundMock, generateMock, shouldSeedMock, resolvePolicyMock, mintAssetMock, mintDeeplinkMock } = vi.hoisted(() => ({
+const { sendOutboundMock, generateMock, generateCtaMock, resolveManualMock, shouldSeedMock, resolvePolicyMock, mintAssetMock, mintDeeplinkMock } = vi.hoisted(() => ({
   sendOutboundMock: vi.fn(),
   generateMock: vi.fn(),
+  generateCtaMock: vi.fn(),
+  resolveManualMock: vi.fn(),
   shouldSeedMock: vi.fn(),
   resolvePolicyMock: vi.fn(),
   mintAssetMock: vi.fn(),
@@ -25,7 +27,13 @@ vi.mock('@/lib/facebook/crypto', () => ({ decryptToken: (s: string) => `dec:${s}
 vi.mock('@/lib/agent/classifyPolicy', () => ({
   isInsideWindow: (s: string | null) => !!s && Date.now() - new Date(s).getTime() < 24 * 3600_000,
 }))
-vi.mock('./generateMessage', () => ({ generateFollowupMessage: generateMock }))
+vi.mock('./generateMessage', () => ({
+  generateFollowupMessage: generateMock,
+  resolveManualMessage: resolveManualMock,
+}))
+vi.mock('./generateCta', () => ({
+  generateActionPageCta: generateCtaMock,
+}))
 vi.mock('./gates', () => ({ shouldSeed: shouldSeedMock }))
 
 import { handleFollowupSend } from './fire'
@@ -112,6 +120,8 @@ const DEFAULT_SNAPSHOT = [
 beforeEach(() => {
   sendOutboundMock.mockReset()
   generateMock.mockReset()
+  generateCtaMock.mockReset()
+  resolveManualMock.mockReset()
   shouldSeedMock.mockReset()
   resolvePolicyMock.mockReset()
   mintAssetMock.mockReset()
@@ -119,10 +129,17 @@ beforeEach(() => {
 
   shouldSeedMock.mockResolvedValue({ ok: true, inboundCount: 1 })
   generateMock.mockResolvedValue('Hi Maria, balikan lang po.')
+  generateCtaMock.mockResolvedValue({ caption: 'I-claim mo na slot mo 👇', label: 'Claim slot' })
+  resolveManualMock.mockReturnValue('Hi Maria, manual nudge po.')
   sendOutboundMock.mockResolvedValue({ sent: true, messageId: 'fbm-1' })
   resolvePolicyMock.mockResolvedValue({ mode: 'RESPONSE' })
   mintAssetMock.mockResolvedValue('https://signed/img.jpg')
-  mintDeeplinkMock.mockResolvedValue('https://app/a/booking?psid=p&pid=g&exp=1&sig=x')
+  mintDeeplinkMock.mockResolvedValue({
+    url: 'https://app/a/booking?psid=p&pid=g&exp=1&sig=x',
+    ctaLabel: 'Open form',
+    title: 'Booking',
+    instructions: 'send when ready',
+  })
 })
 
 describe('handleFollowupSend', () => {
@@ -340,8 +357,8 @@ describe('handleFollowupSend — attachments', () => {
     })
     expect(sendOutboundMock.mock.calls[2][0].payload).toMatchObject({
       kind: 'button',
-      text: 'Tap below to continue 👇',
-      ctaLabel: 'View',
+      text: 'I-claim mo na slot mo 👇',
+      ctaLabel: 'Claim slot',
       url: 'https://app/a/booking?psid=p&pid=g&exp=1&sig=x',
     })
     // Regression: pageId must come from the schedule, not thread (thread select
@@ -421,6 +438,39 @@ describe('handleFollowupSend — attachments', () => {
     expect(generateMock).toHaveBeenCalledWith(expect.objectContaining({
       attachmentHint: '',
     }))
+  })
+
+  it('generates the button CTA from the page context in AI mode', async () => {
+    const seed = attachSeed({ action_page_id: '22222222-2222-4222-9222-222222222222' })
+    const { admin } = makeAdmin(seed)
+    await handleFollowupSend(admin as never, { scheduleId: 's1' })
+    expect(generateCtaMock).toHaveBeenCalledTimes(1)
+    expect(generateCtaMock).toHaveBeenCalledWith(
+      expect.objectContaining({ pageTitle: 'Booking', ctaLabel: 'Open form', instructions: 'send when ready' }),
+    )
+    const buttonCall = sendOutboundMock.mock.calls.find(
+      (c: { payload: { kind: string } }[]) => c[0].payload.kind === 'button',
+    )!
+    expect(buttonCall[0].payload).toMatchObject({ text: 'I-claim mo na slot mo 👇', ctaLabel: 'Claim slot' })
+  })
+
+  it('falls back to the page cta_label and default caption in manual mode (no LLM)', async () => {
+    const seed = attachSeed({
+      ai_enabled: false,
+      message: 'Hi {name}, manual po.',
+      action_page_id: '22222222-2222-4222-9222-222222222222',
+    })
+    const { admin } = makeAdmin(seed)
+    await handleFollowupSend(admin as never, { scheduleId: 's1' })
+    expect(generateCtaMock).not.toHaveBeenCalled()
+    const buttonCall = sendOutboundMock.mock.calls.find(
+      (c: { payload: { kind: string } }[]) => c[0].payload.kind === 'button',
+    )!
+    expect(buttonCall[0].payload).toMatchObject({
+      kind: 'button',
+      text: 'Tap below to continue 👇',
+      ctaLabel: 'Open form',
+    })
   })
 })
 
@@ -606,5 +656,77 @@ describe('handleFollowupSend — legacy snapshot shape (image_media_asset_id)', 
     await handleFollowupSend(admin as never, { scheduleId: 's1' })
     const kinds = sendOutboundMock.mock.calls.map((c: { payload: { kind: string } }[]) => c[0].payload.kind)
     expect(kinds).toEqual(['text'])
+  })
+})
+
+describe('handleFollowupSend — manual vs AI message source', () => {
+  function manualSeed(entry: Record<string, unknown>) {
+    return {
+      schedule: {
+        id: 's1', user_id: 'u1', lead_id: 'l1', thread_id: 't1', page_id: 'p1',
+        started_at: new Date(Date.now() - 5 * 60_000).toISOString(),
+        next_offset_idx: 0,
+        conversation_kind: 'generic' as const,
+        status: 'pending',
+        offsets_snapshot: [{ slot: 0, offset_ms: 5 * 60_000, instruction: '', ...entry }],
+      },
+      thread:  { id: 't1', psid: 'PSID', last_inbound_at: new Date(Date.now() - 60_000).toISOString(), full_name: 'Maria' },
+      page:    { id: 'p1', page_access_token: 'enc-token' },
+      lead:    { name: 'Maria' },
+      chatbot: { persona: 'warm' },
+      history: [],
+    }
+  }
+
+  it('uses resolveManualMessage and skips the LLM when ai_enabled is false', async () => {
+    resolveManualMock.mockReturnValue('Hi Maria, manual nudge po.')
+    const { admin } = makeAdmin(
+      manualSeed({ ai_enabled: false, message: 'Hi {name}, manual nudge po.' }) as never,
+    )
+
+    await handleFollowupSend(admin as never, { scheduleId: 's1' })
+
+    expect(generateMock).not.toHaveBeenCalled()
+    expect(resolveManualMock).toHaveBeenCalledWith('Hi {name}, manual nudge po.', 'generic', 0, 'Maria')
+    expect(sendOutboundMock.mock.calls[0][0].payload).toMatchObject({
+      kind: 'text', text: 'Hi Maria, manual nudge po.',
+    })
+  })
+
+  it('calls the LLM when ai_enabled is true', async () => {
+    generateMock.mockResolvedValue('Hi Maria, AI nudge po.')
+    const { admin } = makeAdmin(manualSeed({ ai_enabled: true, message: 'ignored' }) as never)
+
+    await handleFollowupSend(admin as never, { scheduleId: 's1' })
+
+    expect(generateMock).toHaveBeenCalledTimes(1)
+    expect(resolveManualMock).not.toHaveBeenCalled()
+  })
+
+  it('preserves AI behavior for legacy snapshot entries that lack ai_enabled', async () => {
+    generateMock.mockResolvedValue('Hi Maria, AI nudge po.')
+    const { admin } = makeAdmin(manualSeed({}) as never) // no ai_enabled key at all
+
+    await handleFollowupSend(admin as never, { scheduleId: 's1' })
+
+    expect(generateMock).toHaveBeenCalledTimes(1)
+    expect(resolveManualMock).not.toHaveBeenCalled()
+  })
+
+  it('still sends configured attachments in manual mode (no LLM, no hint build)', async () => {
+    resolveManualMock.mockReturnValue('Hi Maria, manual with pic.')
+    const { admin } = makeAdmin(
+      manualSeed({
+        ai_enabled: false,
+        message: 'Hi {name}, manual with pic.',
+        image_media_asset_ids: ['11111111-1111-4111-9111-111111111111'],
+      }) as never,
+    )
+
+    await handleFollowupSend(admin as never, { scheduleId: 's1' })
+
+    expect(generateMock).not.toHaveBeenCalled()
+    const kinds = sendOutboundMock.mock.calls.map((c: { payload: { kind: string } }[]) => c[0].payload.kind)
+    expect(kinds).toEqual(['text', 'image'])
   })
 })

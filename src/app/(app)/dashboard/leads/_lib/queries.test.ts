@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseMatchedSignals, fetchLeadsTotal } from './queries'
+import { parseMatchedSignals, fetchLeadsTotal, buildLeadSearchOr } from './queries'
 import { LeadsQuery } from './schemas'
 
 // Minimal chainable stand-in for a PostgREST count query. Records every filter
@@ -40,6 +40,32 @@ describe('fetchLeadsTotal date window', () => {
     expect(calls.lte).toContainEqual(['last_activity_at', '2026-06-20T15:59:59.999Z'])
     // Must not fall back to the created_at-only window.
     expect(calls.gte.some(([col]) => col === 'created_at')).toBe(false)
+  })
+})
+
+describe('buildLeadSearchOr', () => {
+  it('wraps a plain term in quoted ilike patterns across all columns', () => {
+    expect(buildLeadSearchOr('acme')).toBe(
+      'name.ilike."%acme%",email.ilike."%acme%",phone.ilike."%acme%",company.ilike."%acme%"',
+    )
+  })
+
+  it('keeps a comma inside the quoted value so PostgREST does not read it as a separator', () => {
+    // A raw comma would split the .or() into bogus extra conditions and throw.
+    const or = buildLeadSearchOr('smith, john')
+    expect(or).toContain('name.ilike."%smith, john%"')
+    // Exactly the four intended conditions, not six.
+    expect(or.split('.ilike.').length - 1).toBe(4)
+  })
+
+  it('escapes embedded double quotes and backslashes', () => {
+    expect(buildLeadSearchOr('a"b\\c')).toBe(
+      'name.ilike."%a\\"b\\\\c%",email.ilike."%a\\"b\\\\c%",phone.ilike."%a\\"b\\\\c%",company.ilike."%a\\"b\\\\c%"',
+    )
+  })
+
+  it('tolerates parentheses without breaking the filter grouping', () => {
+    expect(buildLeadSearchOr('(test)')).toContain('name.ilike."%(test)%"')
   })
 })
 

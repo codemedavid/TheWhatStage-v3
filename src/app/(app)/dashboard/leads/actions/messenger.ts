@@ -1,5 +1,6 @@
 'use server'
 
+import { z } from 'zod'
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
@@ -669,6 +670,7 @@ export interface SendableActionPage {
   id: string
   title: string
   kind: string
+  description: string | null
   cta_label: string | null
 }
 
@@ -680,7 +682,7 @@ export async function listSendableActionPages(): Promise<SendableActionPage[]> {
   const { supabase, userId } = await requireUser()
   const { data, error } = await supabase
     .from('action_pages')
-    .select('id, title, kind, cta_label')
+    .select('id, title, kind, description, cta_label')
     .eq('user_id', userId)
     .eq('status', 'published')
     .order('updated_at', { ascending: false })
@@ -688,11 +690,37 @@ export async function listSendableActionPages(): Promise<SendableActionPage[]> {
   return (data ?? []) as SendableActionPage[]
 }
 
+// Meta limits: button text ≤ 640 chars, button label ≤ 20 chars.
+const ACTION_PAGE_TEXT_MAX = 640
+const ACTION_PAGE_CTA_MAX = 20
+
+/**
+ * Per-send overrides for the message body and CTA label. Both are optional —
+ * when omitted (or blank after trimming) the action page's saved defaults are
+ * used. These never mutate the saved action_pages record.
+ */
+export interface ActionPageSendOverrides {
+  messageText?: string
+  ctaLabel?: string
+}
+
+const actionPageOverridesSchema = z.object({
+  messageText: z.string().trim().min(1).max(ACTION_PAGE_TEXT_MAX).optional(),
+  ctaLabel: z.string().trim().min(1).max(ACTION_PAGE_CTA_MAX).optional(),
+})
+
 export async function sendActionPageAsOperator(
   leadId: string,
   actionPageId: string,
+  overrides?: ActionPageSendOverrides,
 ): Promise<void> {
   const { supabase, userId } = await requireUser()
+
+  // Validate per-send overrides at the boundary. Invalid/blank values fall back
+  // to the saved defaults rather than blocking the send.
+  const parsed = actionPageOverridesSchema.safeParse(overrides ?? {})
+  const overrideText = parsed.success ? parsed.data.messageText : undefined
+  const overrideCta = parsed.success ? parsed.data.ctaLabel : undefined
 
   // Load + authorize the page here (own client / RLS) so the deeplink builder
   // only deals with already-validated data.
@@ -727,12 +755,15 @@ export async function sendActionPageAsOperator(
         pageId: thread.page_id,
         exp,
       })
-      const text = [page.title, page.description?.trim()].filter(Boolean).join('\n\n').slice(0, 640)
-      const ctaLabel = (page.cta_label?.trim() || 'Open').slice(0, 20)
+      const defaultText = [page.title, page.description?.trim()].filter(Boolean).join('\n\n')
+      const text = (overrideText ?? defaultText).slice(0, ACTION_PAGE_TEXT_MAX)
+      const ctaLabel = (overrideCta || page.cta_label?.trim() || 'Open').slice(0, ACTION_PAGE_CTA_MAX)
+      // History preview + attachment name reflect what was actually sent.
+      const body = text || page.title
       return {
-        payload: { kind: 'button', text: text || page.title, url, ctaLabel },
-        body: page.title,
-        attachments: [{ type: 'action_page', action_page_id: page.id, url, name: page.title }],
+        payload: { kind: 'button', text: body, url, ctaLabel },
+        body,
+        attachments: [{ type: 'action_page', action_page_id: page.id, url, name: body }],
       }
     },
   })

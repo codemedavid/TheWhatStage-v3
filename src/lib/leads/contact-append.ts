@@ -9,6 +9,9 @@ const PHONE_RE =
 // Standard email pattern.
 const EMAIL_RE = /[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g
 
+// Anchored single-value email check (non-global; safe for .test()).
+const EMAIL_EXACT_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/
+
 export function extractPhones(text: string): string[] {
   const raw = text.match(PHONE_RE) ?? []
   return [...new Set(raw.map((p) => p.replace(/[\s\-.()/]/g, '').trim()).filter(Boolean))]
@@ -20,6 +23,45 @@ export function extractEmails(text: string): string[] {
 }
 
 export type ContactSource = 'form' | 'booking' | 'catalog' | 'messenger' | 'manual'
+
+// Field keys/labels that strongly imply a phone number even when the form
+// builder set a generic field_kind (e.g. "number" or "short_text").
+const PHONE_HINT_RE = /phone|mobile|contact|tel|whatsapp|viber|cellphone|cel|hp/i
+
+// A value is treated as a phone when its digits form a plausible 7-15 digit
+// number AND either the field hints at a phone or it matches a PH mobile shape.
+function looksLikePhone(value: string, hinted: boolean): boolean {
+  const digits = value.replace(/[^0-9]/g, '')
+  if (digits.length < 7 || digits.length > 15) return false
+  if (hinted) return true
+  return /^(\+?63|0)9\d{9}$/.test(value.replace(/[^0-9+]/g, ''))
+}
+
+/**
+ * Classify a single form/booking field value as a phone, email, or neither.
+ * Mirrors the historical backfill: emails by pattern; phones by digit shape
+ * combined with a field_kind/key/label hint, so phone fields configured as
+ * "number" or "short_text" are still captured.
+ */
+function classifyFieldValue(
+  value: string,
+  fieldKind: string | undefined,
+  key: string | undefined,
+  label: string | undefined,
+): 'phone' | 'email' | null {
+  const trimmed = value.trim()
+  if (!trimmed) return null
+  if (EMAIL_EXACT_RE.test(trimmed)) return 'email'
+  if (fieldKind === 'email') return null
+  const hinted =
+    fieldKind === 'phone' ||
+    fieldKind === 'number' ||
+    fieldKind === 'tel' ||
+    PHONE_HINT_RE.test(key ?? '') ||
+    PHONE_HINT_RE.test(label ?? '')
+  if (looksLikePhone(trimmed, hinted)) return 'phone'
+  return null
+}
 
 /**
  * Atomically append contact values to a lead's phones/emails arrays and to the
@@ -57,30 +99,27 @@ export function extractContactsFromSubmission(
   const phones: string[] = []
   const emails: string[] = []
 
-  if (kind === 'form') {
-    const blocks = (config.blocks as Array<Record<string, unknown>> | undefined) ?? []
+  if (kind === 'form' || kind === 'booking') {
+    const blocks =
+      kind === 'form'
+        ? ((config.blocks as Array<Record<string, unknown>> | undefined) ?? [])
+        : (((config.form as Record<string, unknown> | undefined)
+            ?.fields as Array<Record<string, unknown>> | undefined) ?? [])
     const fields = (data.fields as Record<string, unknown> | undefined) ?? {}
     for (const block of blocks) {
-      if (block.type !== 'field') continue
+      // form uses block.type === 'field'; booking field defs have no type.
+      if (kind === 'form' && block.type !== 'field') continue
       const key = block.key as string
-      const fieldKind = block.field_kind as string
       const value = typeof fields[key] === 'string' ? (fields[key] as string).trim() : ''
       if (!value) continue
-      if (fieldKind === 'email') emails.push(value.toLowerCase())
-      else if (fieldKind === 'phone') phones.push(value)
-    }
-  } else if (kind === 'booking') {
-    const formFields =
-      ((config.form as Record<string, unknown> | undefined)
-        ?.fields as Array<Record<string, unknown>> | undefined) ?? []
-    const fields = (data.fields as Record<string, unknown> | undefined) ?? {}
-    for (const fieldDef of formFields) {
-      const key = fieldDef.key as string
-      const fieldKind = fieldDef.field_kind as string
-      const value = typeof fields[key] === 'string' ? (fields[key] as string).trim() : ''
-      if (!value) continue
-      if (fieldKind === 'email') emails.push(value.toLowerCase())
-      else if (fieldKind === 'phone') phones.push(value)
+      const classified = classifyFieldValue(
+        value,
+        block.field_kind as string | undefined,
+        key,
+        block.label as string | undefined,
+      )
+      if (classified === 'email') emails.push(value.toLowerCase())
+      else if (classified === 'phone') phones.push(value)
     }
   } else if (kind === 'catalog') {
     const customer = (data.customer as Record<string, unknown> | undefined) ?? {}

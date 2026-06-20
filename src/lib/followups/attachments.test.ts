@@ -11,7 +11,13 @@ import { mintMediaAssetUrl, mintActionPageDeeplink } from './attachments'
 function makeAdmin(opts: {
   asset?: { storage_path: string; is_archived: boolean } | null
   signedUrl?: string | null
-  page?: { slug: string; signing_secret: string } | null
+  page?: {
+    slug: string
+    signing_secret: string
+    cta_label?: string | null
+    title?: string | null
+    bot_send_instructions?: string | null
+  } | null
 } = {}) {
   return {
     from(table: string) {
@@ -72,21 +78,43 @@ describe('mintMediaAssetUrl', () => {
 })
 
 describe('mintActionPageDeeplink', () => {
-  it('returns the signed deeplink with PSID, pageId, and exp claims', async () => {
-    const admin = makeAdmin({ page: { slug: 'booking', signing_secret: 'secret-xyz' } })
-    const url = await mintActionPageDeeplink(admin as never, 'page-1', 'u1', {
+  it('returns the signed deeplink plus the page CTA context', async () => {
+    const admin = makeAdmin({
+      page: {
+        slug: 'booking',
+        signing_secret: 'secret-xyz',
+        cta_label: 'Open form',
+        title: 'Booking',
+        bot_send_instructions: 'send when ready',
+      },
+    })
+    const result = await mintActionPageDeeplink(admin as never, 'page-1', 'u1', {
       psid: 'PSID123',
       pageId: 'pageuuid-456',
     })
-    expect(url).toMatch(/https:\/\/app\/a\/booking\?psid=PSID123&pid=pageuuid-456&exp=\d+&sig=secr/)
+    expect(result?.url).toMatch(
+      /https:\/\/app\/a\/booking\?psid=PSID123&pid=pageuuid-456&exp=\d+&sig=secr/,
+    )
+    expect(result).toMatchObject({ ctaLabel: 'Open form', title: 'Booking', instructions: 'send when ready' })
+  })
+
+  it('defaults missing cta_label/title/instructions to safe strings', async () => {
+    const admin = makeAdmin({
+      page: { slug: 'booking', signing_secret: 'secret-xyz', cta_label: null, title: null, bot_send_instructions: null },
+    })
+    const result = await mintActionPageDeeplink(admin as never, 'page-1', 'u1', {
+      psid: 'PSID123',
+      pageId: 'pageuuid-456',
+    })
+    expect(result).toMatchObject({ ctaLabel: '', title: '', instructions: '' })
   })
 
   it('returns null when the action page is missing', async () => {
     const admin = makeAdmin({ page: null })
-    const url = await mintActionPageDeeplink(admin as never, 'page-1', 'u1', {
+    const result = await mintActionPageDeeplink(admin as never, 'page-1', 'u1', {
       psid: 'PSID123',
       pageId: 'pageuuid-456',
     })
-    expect(url).toBeNull()
+    expect(result).toBeNull()
   })
 })

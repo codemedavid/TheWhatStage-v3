@@ -1,4 +1,5 @@
 import { HfRouterLlm, ragConfig } from '@/lib/rag'
+import { isPriceInquiry, priceInquiryDecision } from './inquiry'
 
 const categories = ['good', 'question', 'spam', 'abusive', 'needs_no_action'] as const
 const confidences = ['low', 'medium', 'high'] as const
@@ -113,6 +114,14 @@ export function parseCommentDecision(raw: string): CommentDecision | null {
 }
 
 export async function classifyComment(input: CommentClassifierInput): Promise<CommentDecision | null> {
+  // High-value buying inquiries (e.g. "hm?" = "how much") are short and
+  // context-free, so the LLM often mislabels them needs_no_action and the
+  // customer never gets a reply. Guarantee a private_reply for these
+  // deterministically instead of trusting the model.
+  if (isPriceInquiry(input.message)) {
+    return priceInquiryDecision()
+  }
+
   const system =
     'You classify Facebook Page comments for a business CRM. Output JSON only. ' +
     'Schema: {"category":"good|question|spam|abusive|needs_no_action","confidence":"low|medium|high","public_reply":string|null,"private_reply":string|null,"moderation_action":"none|public_reply|private_reply|hide|delete","reason":string}. ' +

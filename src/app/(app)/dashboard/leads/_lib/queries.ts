@@ -25,6 +25,22 @@ function applyActivityWindow<T extends {
 export const stagesTag = (userId: string) => `leads:stages:${userId}`
 export const fieldDefsTag = (userId: string) => `leads:field-defs:${userId}`
 
+/**
+ * Build the `name/email/phone/company` ilike OR-filter for a free-text lead
+ * search. PostgREST's `.or()` grammar treats `,` as a condition separator and
+ * `()` as grouping, so interpolating a raw search term that contains any of them
+ * produces a malformed filter — the query throws and the leads page's Suspense
+ * boundary fails during SSR. Wrapping each value in double quotes makes
+ * PostgREST treat reserved characters literally; backslashes and quotes inside
+ * the term are escaped per PostgREST's quoting rules. The `%…%` wildcards still
+ * apply normally inside the quoted value.
+ */
+export function buildLeadSearchOr(q: string): string {
+  const escaped = q.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+  const term = `"%${escaped}%"`
+  return `name.ilike.${term},email.ilike.${term},phone.ilike.${term},company.ilike.${term}`
+}
+
 const SORT_MAP: Record<LeadsQuery['sort'], { col: string; asc: boolean; nullsLast?: boolean }> = {
   recent:     { col: 'created_at',      asc: false },
   oldest:     { col: 'created_at',      asc: true  },
@@ -183,12 +199,7 @@ export async function fetchLeadsTotal(
   let query = supabase
     .from('leads').select('id', { count: 'exact', head: true })
     .eq('user_id', userId)
-  if (params.q) {
-    const term = `%${params.q}%`
-    query = query.or(
-      `name.ilike.${term},email.ilike.${term},phone.ilike.${term},company.ilike.${term}`,
-    )
-  }
+  if (params.q) query = query.or(buildLeadSearchOr(params.q))
   query = applyActivityWindow(query, params)
   const { count, error } = await query
   if (error) throw error
@@ -208,12 +219,7 @@ export async function fetchLeadsPage(
     .eq('user_id', userId)
   if (stageId) query = query.eq('stage_id', stageId)
 
-  if (params.q) {
-    const term = `%${params.q}%`
-    query = query.or(
-      `name.ilike.${term},email.ilike.${term},phone.ilike.${term},company.ilike.${term}`,
-    )
-  }
+  if (params.q) query = query.or(buildLeadSearchOr(params.q))
   query = applyActivityWindow(query, params)
 
   query = query.order(sort.col, { ascending: sort.asc, nullsFirst: !sort.nullsLast })
@@ -367,12 +373,7 @@ export async function fetchContactLeadsTotal(
   else if (params.contact_filter === 'both') query = query.not('phones', 'eq', '{}').not('emails', 'eq', '{}')
   else query = query.or('phones.neq.{},emails.neq.{}')
 
-  if (params.q) {
-    const term = `%${params.q}%`
-    query = query.or(
-      `name.ilike.${term},email.ilike.${term},phone.ilike.${term},company.ilike.${term}`,
-    )
-  }
+  if (params.q) query = query.or(buildLeadSearchOr(params.q))
   query = applyActivityWindow(query, params)
   const { count, error } = await query
   if (error) throw error
@@ -394,12 +395,7 @@ export async function fetchContactLeadsPage(
   else if (params.contact_filter === 'both') query = query.not('phones', 'eq', '{}').not('emails', 'eq', '{}')
   else query = query.or('phones.neq.{},emails.neq.{}')
 
-  if (params.q) {
-    const term = `%${params.q}%`
-    query = query.or(
-      `name.ilike.${term},email.ilike.${term},phone.ilike.${term},company.ilike.${term}`,
-    )
-  }
+  if (params.q) query = query.or(buildLeadSearchOr(params.q))
   query = applyActivityWindow(query, params)
 
   if (params.contact_sort === 'name_asc') {

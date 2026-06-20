@@ -73,13 +73,13 @@ describe('maybeScheduleFollowup', () => {
     expect(inserted.started_at).toBe(lastInboundAt)
     expect(inserted.next_run_at).toBe(new Date(Date.parse(lastInboundAt) + 5 * 60_000).toISOString())
     expect(inserted.offsets_snapshot).toEqual([
-      { offset_ms: 300000,   slot: 0, instruction: 'Quick light hello — just ask if still interested po.',          image_media_asset_ids: [], action_page_id: null },
-      { offset_ms: 3600000,  slot: 1, instruction: 'Friendly nudge — offer to answer any questions.',                image_media_asset_ids: [], action_page_id: null },
-      { offset_ms: 18000000, slot: 2, instruction: 'Share one concrete benefit or social proof — keep it short.',   image_media_asset_ids: [], action_page_id: null },
-      { offset_ms: 28800000, slot: 3, instruction: "Ask one focused question to surface what's blocking them.",     image_media_asset_ids: [], action_page_id: null },
-      { offset_ms: 43200000, slot: 4, instruction: 'Light reminder — emphasize convenience and flexibility.',       image_media_asset_ids: [], action_page_id: null },
-      { offset_ms: 64800000, slot: 5, instruction: 'Soft scarcity or a clear call to decide — no pressure.',        image_media_asset_ids: [], action_page_id: null },
-      { offset_ms: 86400000, slot: 6, instruction: 'Last graceful check — invite them to message anytime.',         image_media_asset_ids: [], action_page_id: null },
+      { offset_ms: 300000,   slot: 0, ai_enabled: false, instruction: 'Quick light hello — just ask if still interested po.',          message: 'Hi {name}, interested pa po kayo?',                              image_media_asset_ids: [], action_page_id: null },
+      { offset_ms: 3600000,  slot: 1, ai_enabled: false, instruction: 'Friendly nudge — offer to answer any questions.',                message: 'Hi {name}, balik lang po ako, anything I can help with?',        image_media_asset_ids: [], action_page_id: null },
+      { offset_ms: 18000000, slot: 2, ai_enabled: false, instruction: 'Share one concrete benefit or social proof — keep it short.',   message: 'Hi {name}, baka may tanong po kayo, happy to help anytime.',     image_media_asset_ids: [], action_page_id: null },
+      { offset_ms: 28800000, slot: 3, ai_enabled: false, instruction: "Ask one focused question to surface what's blocking them.",     message: 'Hi {name}, ano po sa tingin niyo so far?',                       image_media_asset_ids: [], action_page_id: null },
+      { offset_ms: 43200000, slot: 4, ai_enabled: false, instruction: 'Light reminder — emphasize convenience and flexibility.',       message: 'Hi {name}, nandito lang po ako kung kailangan niyo ng details.', image_media_asset_ids: [], action_page_id: null },
+      { offset_ms: 64800000, slot: 5, ai_enabled: false, instruction: 'Soft scarcity or a clear call to decide — no pressure.',        message: 'Hi {name}, gusto niyo pa po bang ituloy?',                       image_media_asset_ids: [], action_page_id: null },
+      { offset_ms: 86400000, slot: 6, ai_enabled: false, instruction: 'Last graceful check — invite them to message anytime.',         message: 'Hi {name}, last check po, message lang anytime kayo ready.',     image_media_asset_ids: [], action_page_id: null },
     ])
   })
 
@@ -121,6 +121,7 @@ describe('maybeScheduleFollowup', () => {
     mockShouldSeed.mockResolvedValue({ ok: true, inboundCount: 1 })
     const settings = {
       enabled: true,
+      ai_enabled: false,
       touchpoints: DEFAULT_FOLLOWUP_SETTINGS.touchpoints.map((t, idx) => ({
         ...t,
         enabled: idx % 2 === 0, // keep slots 0, 2, 4, 6
@@ -134,10 +135,10 @@ describe('maybeScheduleFollowup', () => {
     })
     const ins = captured.find((c) => c.op === 'insert')!.values as Record<string, unknown>
     expect(ins.offsets_snapshot).toEqual([
-      { offset_ms: 300000,   slot: 0, instruction: 'Quick light hello — just ask if still interested po.',        image_media_asset_ids: [], action_page_id: null },
-      { offset_ms: 18000000, slot: 2, instruction: 'Share one concrete benefit or social proof — keep it short.', image_media_asset_ids: [], action_page_id: null },
-      { offset_ms: 43200000, slot: 4, instruction: 'Light reminder — emphasize convenience and flexibility.',     image_media_asset_ids: [], action_page_id: null },
-      { offset_ms: 86400000, slot: 6, instruction: 'Last graceful check — invite them to message anytime.',       image_media_asset_ids: [], action_page_id: null },
+      { offset_ms: 300000,   slot: 0, ai_enabled: false, instruction: 'Quick light hello — just ask if still interested po.',        message: 'Hi {name}, interested pa po kayo?',                          image_media_asset_ids: [], action_page_id: null },
+      { offset_ms: 18000000, slot: 2, ai_enabled: false, instruction: 'Share one concrete benefit or social proof — keep it short.', message: 'Hi {name}, baka may tanong po kayo, happy to help anytime.', image_media_asset_ids: [], action_page_id: null },
+      { offset_ms: 43200000, slot: 4, ai_enabled: false, instruction: 'Light reminder — emphasize convenience and flexibility.',     message: 'Hi {name}, nandito lang po ako kung kailangan niyo ng details.', image_media_asset_ids: [], action_page_id: null },
+      { offset_ms: 86400000, slot: 6, ai_enabled: false, instruction: 'Last graceful check — invite them to message anytime.',       message: 'Hi {name}, last check po, message lang anytime kayo ready.',  image_media_asset_ids: [], action_page_id: null },
     ])
     // next_run_at uses the first enabled offset (slot 0 = 5m).
     expect(ins.next_run_at).toBe(new Date(Date.parse(lastInboundAt) + 300_000).toISOString())

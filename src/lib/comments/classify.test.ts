@@ -108,6 +108,32 @@ describe('parseCommentDecision', () => {
 })
 
 describe('classifyComment', () => {
+  it('short-circuits "hm?" price inquiries to private_reply without calling the LLM', async () => {
+    let llmCalled = false
+    const decision = await classifyComment({
+      message: 'hm?',
+      pageName: 'WhatStage',
+      complete: async () => {
+        llmCalled = true
+        return JSON.stringify({
+          category: 'needs_no_action',
+          confidence: 'high',
+          public_reply: null,
+          private_reply: null,
+          moderation_action: 'none',
+          reason: 'Too short to act on',
+        })
+      },
+    })
+
+    expect(llmCalled).toBe(false)
+    expect(decision).toMatchObject({
+      category: 'question',
+      moderationAction: 'private_reply',
+    })
+    expect(decision?.privateReply).toBeTruthy()
+  })
+
   it('uses injected LLM and parses the result', async () => {
     const decision = await classifyComment({
       message: 'How much is the booking?',

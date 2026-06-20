@@ -395,6 +395,7 @@ describe('decideForceSend', () => {
       action_page_id: 'primary',
       reason: 'LLM said so',
       button_text: 'Tap below 👇',
+      button_label: 'Tap now',
     }
     const r = await decideForceSend(ctx({ llmActionPage: llmChoice }))
     expect(r.overrideFired).toBe(false)

@@ -11,7 +11,11 @@ vi.mock('@/lib/rag/config', () => ({
   ragConfig: { classifierModel: 'fake-model' },
 }))
 
-import { generateFollowupMessage, buildSystemPromptForTest } from './generateMessage'
+import {
+  generateFollowupMessage,
+  buildSystemPromptForTest,
+  resolveManualMessage,
+} from './generateMessage'
 
 describe('generateFollowupMessage', () => {
   beforeEach(() => {
@@ -155,6 +159,39 @@ describe('generateFollowupMessage', () => {
     })
     // Fallback for slot 4 generic.
     expect(text).toBe('Hi Jay, available pa po kayo to chat?')
+  })
+})
+
+describe('resolveManualMessage', () => {
+  beforeEach(() => {
+    completeMock.mockReset()
+  })
+
+  it('returns the manual message with {name} interpolated and sanitized', () => {
+    const text = resolveManualMessage('Hi {name}, balik lang po ako!', 'generic', 1, 'Ana Cruz')
+    expect(text).toBe('Hi Ana, balik lang po ako!')
+    expect(completeMock).not.toHaveBeenCalled()
+  })
+
+  it('replaces {name} with "there" when no lead name', () => {
+    const text = resolveManualMessage('Hi {name}, kumusta?', 'generic', 1, null)
+    expect(text).toBe('Hi there, kumusta?')
+  })
+
+  it('strips dashes and flattens to one line', () => {
+    const text = resolveManualMessage('Hello {name} -\nany updates?', 'real', 2, 'Jay')
+    expect(text).toBe('Hello Jay any updates?')
+    expect(text).not.toMatch(/-|—|–/)
+  })
+
+  it('falls back to the curated pool when the message is blank', () => {
+    const text = resolveManualMessage('', 'generic', 0, 'Jay')
+    expect(text).toBe('Hi Jay, interested pa po kayo?')
+  })
+
+  it('falls back to the curated pool when the message sanitizes to empty', () => {
+    const text = resolveManualMessage('   ---   ', 'generic', 0, 'Jay')
+    expect(text).toBe('Hi Jay, interested pa po kayo?')
   })
 })
 

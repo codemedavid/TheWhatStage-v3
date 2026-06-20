@@ -40,6 +40,11 @@ export type ActiveProjectContext = {
   value: number | null
   currency: string
   ai_instructions: string | null
+  // Per-stage AI guidance (from project_stage_sequences for the project's
+  // current stage). Steers HOW the bot talks to an in-progress customer.
+  stage_instructions: string | null
+  stage_do_rules: string[]
+  stage_dont_rules: string[]
 }
 
 export type ProjectSequenceStep = {

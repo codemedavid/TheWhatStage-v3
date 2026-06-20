@@ -19,6 +19,7 @@ interface RowDraft {
   enabled: boolean
   value: number
   unit: Unit
+  message: string
   instruction: string
   images: RowImage[] // 0–3, ordered
   actionPageId: string | null
@@ -28,6 +29,7 @@ interface ActionPageOption { id: string; title: string }
 
 interface FormState {
   enabled: boolean
+  aiEnabled: boolean
   rows: RowDraft[]
 }
 
@@ -51,12 +53,14 @@ function draftToMs(row: RowDraft): number {
 function settingsToState(s: FollowupSettings): FormState {
   return {
     enabled: s.enabled,
+    aiEnabled: s.ai_enabled,
     rows: s.touchpoints.map((t) => {
       const { value, unit } = msToDraft(t.offset_ms)
       return {
         enabled: t.enabled,
         value,
         unit,
+        message: t.message ?? '',
         instruction: t.instruction,
         images: t.image_media_asset_ids.map((id) => ({ id, thumbUrl: null, name: null })),
         actionPageId: t.action_page_id,
@@ -68,9 +72,11 @@ function settingsToState(s: FollowupSettings): FormState {
 function stateToSettings(s: FormState): FollowupSettings {
   return {
     enabled: s.enabled,
+    ai_enabled: s.aiEnabled,
     touchpoints: s.rows.map((r) => ({
       enabled: r.enabled,
       offset_ms: draftToMs(r),
+      message: r.message,
       instruction: r.instruction,
       image_media_asset_ids: r.images.map((i) => i.id),
       action_page_id: r.actionPageId,
@@ -236,17 +242,29 @@ export function AutoFollowupForm({
         <div>
           <h2 className="afu-title">Auto Follow-Up</h2>
           <p className="afu-help">
-            When a lead goes quiet, send up to 7 nudges before stopping.
+            When a lead goes quiet, send up to 7 nudges before stopping. Messages
+            are written manually by default; turn on AI to generate each nudge.
           </p>
         </div>
-        <label className="afu-toggle">
-          <input
-            type="checkbox"
-            checked={state.enabled}
-            onChange={(e) => setState((s) => ({ ...s, enabled: e.target.checked }))}
-          />
-          <span>{state.enabled ? 'Enabled' : 'Disabled'}</span>
-        </label>
+        <div className="afu-toggles">
+          <label className="afu-toggle">
+            <input
+              type="checkbox"
+              checked={state.enabled}
+              onChange={(e) => setState((s) => ({ ...s, enabled: e.target.checked }))}
+            />
+            <span>{state.enabled ? 'Enabled' : 'Disabled'}</span>
+          </label>
+          <label className="afu-toggle">
+            <input
+              type="checkbox"
+              checked={state.aiEnabled}
+              onChange={(e) => setState((s) => ({ ...s, aiEnabled: e.target.checked }))}
+              disabled={!state.enabled}
+            />
+            <span>{state.aiEnabled ? 'AI writes messages' : 'Manual messages'}</span>
+          </label>
+        </div>
       </header>
 
       <div className="afu-rows-head">
@@ -293,23 +311,43 @@ export function AutoFollowupForm({
               <span className="afu-row-suffix">after last reply</span>
               {err && <span className="afu-row-error" role="alert">{err}</span>}
               <div className="afu-row-guide">
-                <label className="afu-row-guide-label" htmlFor={`afu-guide-${idx}`}>
-                  Guide
+                <label className="afu-row-guide-label" htmlFor={`afu-msg-${idx}`}>
+                  Message
                 </label>
                 <input
-                  id={`afu-guide-${idx}`}
+                  id={`afu-msg-${idx}`}
                   type="text"
                   className="afu-row-guide-input"
                   maxLength={200}
-                  value={row.instruction}
-                  onChange={(e) => setRow(idx, { instruction: e.target.value })}
+                  value={row.message}
+                  onChange={(e) => setRow(idx, { message: e.target.value })}
                   disabled={!row.enabled}
-                  placeholder="Leave blank to use the default style for this touchpoint."
+                  placeholder="Message to send. Use {name} for the lead's first name. Blank = default nudge."
                 />
                 <span className="afu-row-guide-count" aria-hidden="true">
-                  {row.instruction.length}/200
+                  {row.message.length}/200
                 </span>
               </div>
+              {state.aiEnabled && (
+                <div className="afu-row-guide">
+                  <label className="afu-row-guide-label" htmlFor={`afu-guide-${idx}`}>
+                    AI guide
+                  </label>
+                  <input
+                    id={`afu-guide-${idx}`}
+                    type="text"
+                    className="afu-row-guide-input"
+                    maxLength={200}
+                    value={row.instruction}
+                    onChange={(e) => setRow(idx, { instruction: e.target.value })}
+                    disabled={!row.enabled}
+                    placeholder="Leave blank to use the default style for this touchpoint."
+                  />
+                  <span className="afu-row-guide-count" aria-hidden="true">
+                    {row.instruction.length}/200
+                  </span>
+                </div>
+              )}
 
               <div className="afu-row-attach">
                 <div className="afu-attach-item">

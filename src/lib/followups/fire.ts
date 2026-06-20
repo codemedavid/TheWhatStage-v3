@@ -15,8 +15,9 @@ import { decryptToken } from '@/lib/facebook/crypto'
 import { sendOutbound, resolveSendPolicy } from '@/lib/messenger/outbound'
 import { isInsideWindow } from '@/lib/agent/classifyPolicy'
 import { shouldSeed } from './gates'
-import { generateFollowupMessage } from './generateMessage'
+import { generateFollowupMessage, resolveManualMessage } from './generateMessage'
 import { mintMediaAssetUrl, mintActionPageDeeplink } from './attachments'
+import { generateActionPageCta } from './generateCta'
 import type { SnapshotEntry } from './settings'
 
 // Back-compat: snapshots captured before the multi-image change carry
@@ -90,6 +91,11 @@ export async function handleFollowupSend(
   const imageMediaAssetIds = readImageIds(entry)
   const actionPageId      = entry.action_page_id
 
+  // Manual mode (default) sends the user-authored message — no LLM call. Legacy
+  // snapshots seeded before this feature have no `ai_enabled` key; treat those
+  // as AI to preserve the behavior they were created under.
+  const useAi = entry.ai_enabled !== false
+
   // Re-check gates: a lead who booked between scheduling and firing should
   // not receive the touchpoint.
   const gate = await shouldSeed(admin, {
@@ -162,8 +168,10 @@ export async function handleFollowupSend(
   const policy = await resolveSendPolicy(admin, thread.id, thread.last_inbound_at, insideWindowKind(thread.last_inbound_at))
   const canAttach = policy.mode === 'RESPONSE'
 
+  // The attachment hint only feeds the LLM prompt; skip building it (and its
+  // media/page lookups) in manual mode where no prompt is generated.
   let attachmentHint = ''
-  if (canAttach) {
+  if (canAttach && useAi) {
     const hintParts: string[] = []
     if (imageMediaAssetIds.length === 1) {
       const { data: asset } = await admin
@@ -188,15 +196,17 @@ export async function handleFollowupSend(
     attachmentHint = hintParts.join(' and ')
   }
 
-  const text = await generateFollowupMessage({
-    kind: schedule.conversation_kind,
-    slot: entry.slot,
-    leadName,
-    personalityBlock,
-    recentMessages,
-    instruction: entry.instruction ?? '',
-    attachmentHint,
-  })
+  const text = useAi
+    ? await generateFollowupMessage({
+        kind: schedule.conversation_kind,
+        slot: entry.slot,
+        leadName,
+        personalityBlock,
+        recentMessages,
+        instruction: entry.instruction ?? '',
+        attachmentHint,
+      })
+    : resolveManualMessage(entry.message ?? '', schedule.conversation_kind, entry.slot, leadName)
 
   if (!text) {
     await markFailed(admin, schedule.id, 'empty message')
@@ -263,17 +273,31 @@ export async function handleFollowupSend(
       }
     }
     if (actionPageId) {
-      const url = await mintActionPageDeeplink(admin, actionPageId, schedule.user_id, {
+      const deeplink = await mintActionPageDeeplink(admin, actionPageId, schedule.user_id, {
         psid: thread.psid,
         pageId: schedule.page_id,
       })
-      if (url) {
+      if (deeplink) {
+        // AI mode → generate a strong caption + 2-3 word label for higher CTR.
+        // Manual mode → no LLM: use the page's configured cta_label with a
+        // neutral caption. Either way fall back to the page cta_label.
+        const fallbackLabel = deeplink.ctaLabel || 'View'
+        const cta = useAi
+          ? await generateActionPageCta({
+              pageTitle: deeplink.title,
+              ctaLabel: fallbackLabel,
+              instructions: deeplink.instructions,
+              personalityBlock,
+              leadName,
+              recentMessages,
+            })
+          : { caption: 'Tap below to continue 👇', label: fallbackLabel }
         try {
           await sendOutbound({
             admin,
             thread: { id: thread.id, psid: thread.psid, last_inbound_at: thread.last_inbound_at },
             pageToken,
-            payload: { kind: 'button', text: 'Tap below to continue 👇', url, ctaLabel: 'View' },
+            payload: { kind: 'button', text: cta.caption, url: deeplink.url, ctaLabel: cta.label },
             kind: 'bot',
           })
         } catch (e) {
