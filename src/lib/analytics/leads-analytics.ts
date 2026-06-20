@@ -192,6 +192,7 @@ export async function getLeadProjectCrosstab(f: AnalyticsFilters): Promise<Cross
   return rows.map((r) => ({
     leadStageId: String(r.lead_stage_id),
     leadStageName: String(r.lead_stage_name),
+    leadKind: String(r.lead_kind ?? ''),
     leadRank: n(r.lead_rank),
     leadStageTotal: n(r.lead_stage_total),
     projectStageId: String(r.project_stage_id),

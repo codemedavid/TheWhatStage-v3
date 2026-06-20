@@ -150,6 +150,7 @@ export function formatDelta(delta: Delta): string {
 export interface CrosstabCell {
   leadStageId: string
   leadStageName: string
+  leadKind?: string
   leadRank: number
   leadStageTotal: number
   projectStageId: string
