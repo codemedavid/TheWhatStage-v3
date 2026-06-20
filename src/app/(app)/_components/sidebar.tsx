@@ -6,6 +6,7 @@ import { useState, useEffect, useTransition } from 'react'
 
 type IconName =
   | 'overview'
+  | 'analytics'
   | 'leads'
   | 'projects'
   | 'knowledge'
@@ -38,6 +39,7 @@ type NavItem = {
 
 const items: NavItem[] = [
   { href: '/dashboard', label: 'Overview', icon: 'overview' },
+  { href: '/dashboard/analytics', label: 'Analytics', icon: 'analytics' },
   { href: '/dashboard/leads', label: 'Leads', icon: 'leads' },
   { href: '/dashboard/projects', label: 'Projects', icon: 'projects' },
   { href: '/dashboard/knowledge', label: 'Knowledge', icon: 'knowledge' },
@@ -67,6 +69,14 @@ function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
       <>
         <path d="M3 12L12 3l9 9" />
         <path d="M5 10v10h14V10" />
+      </>
+    ),
+    analytics: (
+      <>
+        <path d="M4 20V10" />
+        <path d="M10 20V4" />
+        <path d="M16 20v-6" />
+        <path d="M3 20h18" />
       </>
     ),
     leads: (
