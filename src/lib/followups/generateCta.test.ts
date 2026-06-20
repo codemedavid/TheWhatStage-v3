@@ -11,7 +11,7 @@ vi.mock('@/lib/rag/config', () => ({
   ragConfig: { classifierModel: 'fake-model' },
 }))
 
-import { generateActionPageCta } from './generateCta'
+import { generateActionPageCta, buildCtaSystemPromptForTest } from './generateCta'
 
 const baseArgs = {
   pageTitle: 'Lead Gen Form',
@@ -80,6 +80,14 @@ describe('generateActionPageCta', () => {
     expect(joined).toContain('Lead Gen Form')
     expect(joined).toContain('warm Taglish')
     expect(joined).toMatch(/2.?3 words/i)
+  })
+
+  it('instructs the model to guide the customer through what to do (tap button below, then fill the form)', () => {
+    const prompt = buildCtaSystemPromptForTest(baseArgs)
+    // Caption should now walk the customer through the next steps, not just sell.
+    expect(prompt).toMatch(/below|sa baba/i)
+    expect(prompt).toMatch(/fill\s*(out|up|in)?\s*.*form/i)
+    expect(prompt).toMatch(/guide|walk|step|what to do|tell them/i)
   })
 
   it('falls back when the LLM call exceeds the timeout', async () => {

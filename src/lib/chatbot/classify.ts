@@ -772,11 +772,11 @@ export function stageInstructionParts(
       '- GOOD `reply` (action_page set): "Got it — same pattern as ibang clients namin. Tingnan mo kung magagamit niyo \'to sa team niyo." (no link reference; the button card follows automatically).\n' +
       'IRON RULE: if you find yourself writing the word "link", "button", "form", "check", "tap", "click", "tingnan", "heto", "eto", "here\'s" or any synonym referring to the action page inside `reply`, STOP and rewrite. Set `action_page.action_page_id` instead and let `reply` stay conversational.\n\n' +
       'BUTTON_TEXT RULES (the card caption shown above the button):\n' +
-      '- Write a strong, benefit-led call-to-action in the SAME language as the customer (e.g. Tagalog/Taglish if they wrote Tagalog).\n' +
-      '- Lead with the value or outcome the customer gets, then nudge the tap. Add light urgency when natural ("ngayon", "today", "para masimulan na").\n' +
-      '- Max ~80 chars. One line. No greetings, no page title, no URL.\n' +
-      '- Include a downward-pointing emoji like 👇 (or 📝/📅 when fitting) to draw the eye to the button.\n' +
-      '- Examples: "Lock in your slot now, mga ilang seconds lang 👇", "Get your custom quote today 👇".\n' +
+      '- Write a warm, GUIDING instruction that tells the customer exactly what to do next, in the SAME language as the customer (polite, human Taglish with "po" if they wrote Tagalog).\n' +
+      '- Walk them through the steps like a helpful person would: tap/click the button below, then fill out the short form. Add a light nudge first ("para masimulan na natin", "to get started").\n' +
+      '- Example tone: "Sige po, para masimulan na natin — i-click niyo lang po yung button sa baba 👇 tapos fill-up niyo lang po yung form." or "To get started, just tap the button below 👇 and fill out the quick form."\n' +
+      '- Max ~160 chars, 1-2 short sentences. No greetings like "Hi", no page title, no URL.\n' +
+      '- Include a downward-pointing emoji like 👇 (or 📝/📅 when fitting) pointing to the button.\n' +
       '- NEVER use the action page title (e.g. "Lead Gen", "Booking") as the button_text.' +
       '\n\n' +
       'BUTTON_LABEL RULES (the short text shown ON the button itself):\n' +

@@ -97,9 +97,13 @@ function buildSystemPrompt(args: GenerateCtaArgs): string {
     `You are writing the call-to-action for a button that links a Messenger lead to "${args.pageTitle}".\n` +
     `${instr}${fnHint}\n` +
     'Return ONLY a JSON object: {"caption": string, "label": string}. No prose, no code fences.\n' +
-    'caption rules: a strong, benefit-led one-line CTA in the SAME language as the customer ' +
-    '(Tagalog/Taglish if they wrote Tagalog). Lead with the value, then nudge the tap. ' +
-    'Max ~80 chars. Include a downward emoji like 👇. No page title, no URL.\n' +
+    'caption rules: a warm, guiding instruction that tells the customer exactly what to do next, ' +
+    'in the SAME language as the customer (warm, polite Taglish with "po" if they wrote Tagalog). ' +
+    'Walk them through the steps like a helpful person would: tap/click the button below, then ' +
+    'fill out the short form. Keep it natural and human, e.g. "Sige po, para masimulan na natin, ' +
+    'i-click niyo lang po yung button sa baba 👇 tapos fill-up niyo lang po yung form." ' +
+    'Lead with a light nudge, then the steps. Max ~160 chars, 1-2 short sentences. ' +
+    'Include a downward emoji like 👇 pointing to the button. No page title, no URL.\n' +
     'label rules: a punchy 2-3 words (HARD max) in the SAME language, high-intent and first-person ' +
     'where natural ("Claim my slot", "Book na", "Get my quote"). At most one emoji. ' +
     'NEVER use the page title or a generic word like "Open", "Open form", or "View" as the label.'
