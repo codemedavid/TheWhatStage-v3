@@ -3,13 +3,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   from: vi.fn(),
+  rpc: vi.fn(),
   after: vi.fn((task: () => unknown) => {
     void task()
   }),
 }))
 
 vi.mock('@/lib/supabase/admin', () => ({
-  createAdminClient: () => ({ from: mocks.from }),
+  createAdminClient: () => ({ from: mocks.from, rpc: mocks.rpc }),
 }))
 
 vi.mock('next/server', async () => {
@@ -84,6 +85,7 @@ function makeMessengerAdminMock(
     ownerStatus?: 'active' | 'pending' | 'paused'
     threadOverrides?: Record<string, unknown>
     autoClassifyEnabled?: boolean
+    debounceSeconds?: number
   } = {},
 ) {
   const messengerJobInsert = vi.fn(() => ({
@@ -91,6 +93,9 @@ function makeMessengerAdminMock(
       single: vi.fn(async () => ({ data: { id: 'messenger-job-1' }, error: null })),
     })),
   }))
+
+  // Reply path enqueues via the coalescing RPC; default returns a job id.
+  mocks.rpc.mockResolvedValue({ data: 'messenger-job-1', error: null })
 
   mocks.from.mockImplementation((table: string) => {
     if (table === 'facebook_pages') return pageLookup()
@@ -134,7 +139,10 @@ function makeMessengerAdminMock(
         select: vi.fn(() => ({
           eq: vi.fn(() => ({
             maybeSingle: vi.fn(async () => ({
-              data: autoClassify ? { auto_classify_enabled: true } : null,
+              data: {
+                auto_classify_enabled: autoClassify,
+                message_debounce_seconds: options.debounceSeconds ?? 6,
+              },
               error: null,
             })),
           })),
@@ -328,10 +336,13 @@ describe('facebook webhook comment events', () => {
 
     expect(res.status).toBe(200)
     await expect(res.json()).resolves.toEqual({ received: true })
-    expect(messengerJobInsert).toHaveBeenCalledWith({
-      thread_id: 'thread-1',
-      inbound_msg_id: 'message-1',
-      user_id: 'user-1',
+    // Reply path enqueues through the coalescing RPC, not a raw insert.
+    expect(messengerJobInsert).not.toHaveBeenCalled()
+    expect(mocks.rpc).toHaveBeenCalledWith('enqueue_or_extend_messenger_job', {
+      p_thread_id: 'thread-1',
+      p_inbound_msg_id: 'message-1',
+      p_user_id: 'user-1',
+      p_debounce_seconds: 6,
     })
     expect(mocks.from).not.toHaveBeenCalledWith('facebook_comment_jobs')
     expect(global.fetch).toHaveBeenCalledTimes(1)
@@ -772,15 +783,83 @@ describe('facebook webhook comment events', () => {
     await Promise.resolve()
 
     expect(res.status).toBe(200)
-    expect(messengerJobInsert).toHaveBeenCalledWith({
-      thread_id: 'thread-1',
-      inbound_msg_id: 'message-1',
-      user_id: 'user-1',
+    expect(mocks.rpc).toHaveBeenCalledWith('enqueue_or_extend_messenger_job', {
+      p_thread_id: 'thread-1',
+      p_inbound_msg_id: 'message-1',
+      p_user_id: 'user-1',
+      p_debounce_seconds: 6,
     })
     expect(global.fetch).toHaveBeenCalledTimes(1)
     expect(global.fetch).toHaveBeenCalledWith('https://app.test/api/messenger/process', {
       method: 'POST',
       headers: { 'x-worker-secret': 'messenger-secret' },
+    })
+  })
+
+  it('passes the per-tenant debounce window to the enqueue RPC', async () => {
+    makeMessengerAdminMock({ debounceSeconds: 10 })
+
+    const res = await postWebhook({
+      object: 'page',
+      entry: [
+        {
+          id: 'fb-page-1',
+          messaging: [
+            {
+              sender: { id: 'psid-1' },
+              recipient: { id: 'fb-page-1' },
+              message: { mid: 'mid-debounce', text: 'Hello' },
+            },
+          ],
+        },
+      ],
+    })
+
+    await Promise.resolve()
+
+    expect(res.status).toBe(200)
+    expect(mocks.rpc).toHaveBeenCalledWith(
+      'enqueue_or_extend_messenger_job',
+      expect.objectContaining({ p_debounce_seconds: 10 }),
+    )
+  })
+
+  it('keeps a direct (non-coalescing) insert on the muted classify-only path', async () => {
+    const { messengerJobInsert } = makeMessengerAdminMock({
+      threadOverrides: { auto_reply_enabled: false },
+      autoClassifyEnabled: true,
+    })
+
+    const res = await postWebhook({
+      object: 'page',
+      entry: [
+        {
+          id: 'fb-page-1',
+          messaging: [
+            {
+              sender: { id: 'psid-1' },
+              recipient: { id: 'fb-page-1' },
+              message: { mid: 'mid-muted', text: 'Hello' },
+            },
+          ],
+        },
+      ],
+    })
+
+    await Promise.resolve()
+
+    expect(res.status).toBe(200)
+    // Muted threads never reply, so the burst-coalescing RPC is not used —
+    // the per-message classify cadence (inbound_since_classify) is preserved.
+    // (bumpThreadOnInbound still calls rpc for counters, so assert specifically.)
+    expect(mocks.rpc).not.toHaveBeenCalledWith(
+      'enqueue_or_extend_messenger_job',
+      expect.anything(),
+    )
+    expect(messengerJobInsert).toHaveBeenCalledWith({
+      thread_id: 'thread-1',
+      inbound_msg_id: 'message-1',
+      user_id: 'user-1',
     })
   })
 })

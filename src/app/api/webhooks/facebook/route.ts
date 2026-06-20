@@ -6,6 +6,10 @@ import { mapMetaStatusStrict, buildStatusUpdate } from '@/lib/messenger-template
 import { interruptWorkflowRun } from '@/lib/workflow/trigger'
 import { isBotPaused } from '@/lib/chatbot/takeover'
 import { bumpThreadOnInbound } from '@/lib/messenger/inbound-counters'
+import {
+  DEFAULT_MESSAGE_DEBOUNCE_SECONDS,
+  MAX_MESSAGE_DEBOUNCE_SECONDS,
+} from '@/lib/chatbot/config'
 import { handlePostback } from './_postback'
 import { isUserActive } from './_status'
 
@@ -476,38 +480,60 @@ async function handleEvent(
   // Reactive bot is gated by either the sticky manual toggle OR an active
   // human-takeover pause. In either case, fall through to classify-only if
   // the user has auto_classify enabled.
-  if (
+  const muted =
     thread.auto_reply_enabled === false ||
     isBotPaused((thread as { bot_paused_until?: string | null }).bot_paused_until)
-  ) {
-    const { data: cfg } = await admin
-      .from('chatbot_configs')
-      .select('auto_classify_enabled')
-      .eq('user_id', userId)
-      .maybeSingle<{ auto_classify_enabled: boolean }>()
+
+  // One config read serves both the auto-classify gate (muted path) and the
+  // debounce window (reply path).
+  const { data: cfg } = await admin
+    .from('chatbot_configs')
+    .select('auto_classify_enabled, message_debounce_seconds')
+    .eq('user_id', userId)
+    .maybeSingle<{ auto_classify_enabled: boolean; message_debounce_seconds: number | null }>()
+
+  if (muted) {
     if (!cfg?.auto_classify_enabled) return null
+    // Muted threads never reply, so there is nothing to coalesce — keep the
+    // per-message insert so the worker's Nth-message classify cadence
+    // (inbound_since_classify) is preserved exactly.
+    const { data: job, error: jobErr } = await admin
+      .from('messenger_jobs')
+      .insert({ thread_id: thread.id, inbound_msg_id: inserted.id, user_id: userId })
+      .select('id')
+      .single()
+    if (jobErr || !job) {
+      throw new Error(`[fb.webhook] job enqueue failed: ${jobErr?.message ?? 'no row'}`)
+    }
+    return job.id
   }
 
-  const { data: job, error: jobErr } = await admin
-    .from('messenger_jobs')
-    .insert({
-      thread_id: thread.id,
-      inbound_msg_id: inserted.id,
-      user_id: userId,
-    })
-    .select('id')
-    .single()
-
-  if (jobErr || !job) {
+  // Reply path: enqueue via the coalescing RPC. It either slides the thread's
+  // existing queued reply job forward by the debounce window (so a rapid burst
+  // becomes one reply) or inserts a fresh job. Debounce window is clamped in
+  // app code; the SQL guarantees at most one queued reply job per thread.
+  const debounceSeconds = clampDebounceSeconds(cfg?.message_debounce_seconds)
+  const { data: jobId, error: jobErr } = await admin.rpc('enqueue_or_extend_messenger_job', {
+    p_thread_id: thread.id,
+    p_inbound_msg_id: inserted.id,
+    p_user_id: userId,
+    p_debounce_seconds: debounceSeconds,
+  })
+  if (jobErr || !jobId) {
     // Infra error enqueueing the worker job. Throw so the webhook returns 5xx
-    // (Meta redelivers) and Sentry sees it — strictly better than the prior
-    // silent return-null→200. Rare in practice: the message insert just above
-    // succeeded on the same connection, so a DB blip striking only this adjacent
-    // write is unlikely. (Known residual: if it DID strike only here, redelivery
-    // dedupes the message at 23505 and won't re-enqueue.)
-    throw new Error(`[fb.webhook] job enqueue failed: ${jobErr?.message ?? 'no row'}`)
+    // (Meta redelivers) and Sentry sees it. Redelivery dedupes the message at
+    // 23505 (unique fb_message_id) before reaching here.
+    throw new Error(`[fb.webhook] job enqueue failed: ${jobErr?.message ?? 'no id'}`)
   }
-  return job.id
+  return jobId as string
+}
+
+/** Clamp the stored debounce window to [0, MAX]. Mirrors rowToConfig so a stray
+ *  value never pushes the reply past the worker's warm-wait window. */
+function clampDebounceSeconds(raw: number | null | undefined): number {
+  const n = Math.round(raw ?? DEFAULT_MESSAGE_DEBOUNCE_SECONDS)
+  if (!Number.isFinite(n)) return DEFAULT_MESSAGE_DEBOUNCE_SECONDS
+  return Math.max(0, Math.min(MAX_MESSAGE_DEBOUNCE_SECONDS, n))
 }
 
 async function handleFeedChange(
