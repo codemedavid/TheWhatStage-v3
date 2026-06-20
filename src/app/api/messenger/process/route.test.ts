@@ -110,6 +110,11 @@ vi.mock('@/lib/messenger/property-outbound', () => ({
 
 let pendingInboundCount = 0
 let pendingDeepFlag = false
+// Coalescing: inbound rows returned for loadCoalescedInbound's direction=inbound
+// query, and the boundary (last outbound) row. Default empty → worker falls back
+// to the single inbound_msg_id body, preserving pre-debounce behavior.
+let pendingCoalesceRows: Array<{ id: string; body: string; created_at: string }> = []
+let pendingLastOutbound: { created_at: string } | null = null
 
 const { resolveCommentBridgesForThread } = await import('./route')
 const { POST } = await import('./route')
@@ -119,6 +124,8 @@ beforeEach(() => {
   deepMocks.runDeepReclassify.mockClear()
   pendingInboundCount = 0
   pendingDeepFlag = false
+  pendingCoalesceRows = []
+  pendingLastOutbound = null
 })
 
 function makeWorkerRequest(): Request {
@@ -196,6 +203,11 @@ function makeWorkerAdminMock() {
         return { count: pendingInboundCount, data: null, error: null }
       }
 
+      // Coalesce boundary: most-recent outbound message's created_at.
+      if (this.table === 'messenger_messages' && this.filters.direction === 'outbound') {
+        return { data: pendingLastOutbound, error: null }
+      }
+
       if (this.table === 'messenger_messages') {
         return {
           data: {
@@ -271,6 +283,11 @@ function makeWorkerAdminMock() {
       // Count query landing in resolveMany (via .then) — return count shape
       if (this.table === 'messenger_messages' && this.selectOpts.count === 'exact') {
         return { count: pendingInboundCount, data: null, error: null }
+      }
+
+      // Coalesce window: inbound rows since the last outbound.
+      if (this.table === 'messenger_messages' && this.filters.direction === 'inbound') {
+        return { data: pendingCoalesceRows, error: null }
       }
 
       if (this.table === 'messenger_messages') {
@@ -969,6 +986,38 @@ describe('POST /api/messenger/process', () => {
         ctaLabel: 'Continue',
       }),
     )
+  })
+
+  it('coalesces a burst of inbound messages into one reply turn', async () => {
+    // Three rapid messages since the last outbound → one combined customer turn.
+    pendingCoalesceRows = [
+      { id: 'm1', body: 'hello po', created_at: '2026-06-20T10:00:00Z' },
+      { id: 'm2', body: 'interested ako', created_at: '2026-06-20T10:00:01Z' },
+      { id: 'm3', body: 'magkano?', created_at: '2026-06-20T10:00:02Z' },
+    ]
+    const { admin } = makeWorkerAdminMock()
+    mocks.admin = admin
+
+    const res = await POST(makeWorkerRequest() as Parameters<typeof POST>[0])
+
+    expect(res.status).toBe(200)
+    expect(mocks.answerWithClassification).toHaveBeenCalledTimes(1)
+    const message = (mocks.answerWithClassification.mock.calls[0] as unknown[])[2]
+    expect(message).toBe('hello po\ninterested ako\nmagkano?')
+    // Exactly one text reply goes out for the whole burst.
+    expect(mocks.sendMessengerText).toHaveBeenCalledTimes(1)
+  })
+
+  it('falls back to the single inbound body when no burst rows are present', async () => {
+    // Default: pendingCoalesceRows empty → worker uses the job's inbound body.
+    const { admin } = makeWorkerAdminMock()
+    mocks.admin = admin
+
+    const res = await POST(makeWorkerRequest() as Parameters<typeof POST>[0])
+
+    expect(res.status).toBe(200)
+    const message = (mocks.answerWithClassification.mock.calls[0] as unknown[])[2]
+    expect(message).toBe('I want to continue')
   })
 
   it('realestate page chosen — sends carousel of active properties (2 of 3; sold filtered)', async () => {

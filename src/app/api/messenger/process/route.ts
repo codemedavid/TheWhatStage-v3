@@ -54,6 +54,7 @@ import { ensureNonEmptyReply } from '@/lib/chatbot/reply-guard'
 import { computePauseUntil } from '@/lib/chatbot/pause'
 import { resolveSourceImages } from '@/lib/chatbot/source-images'
 import { firstMentionGate, filterAttachableMedia, mediaAttachKey } from '@/lib/chatbot/attach-gate'
+import { coalesceInbound, MAX_COALESCED_MESSAGES, type CoalesceRow } from '@/lib/chatbot/coalesce'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -447,11 +448,26 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
       await refreshNames(admin, thread, pageToken)
     }
 
-    const message = inboundBody.trim()
+    // Coalesce the customer's recent burst into ONE turn: every inbound message
+    // since the last outbound (bot/operator) reply is concatenated, so a rapid
+    // sequence of messages gets a single combined answer instead of one robotic
+    // reply per message. Falls back to the job's own inbound body when the burst
+    // query returns nothing (e.g. attachment-only rows).
+    const coalesced = await loadCoalescedInbound(admin, thread.id).catch((e) => {
+      console.warn('[messenger.worker] loadCoalescedInbound failed', e)
+      return { combinedText: '', messageIds: [] }
+    })
+    const message = (coalesced.combinedText || inboundBody).trim()
     if (!message) {
       await markDone(admin, job.id, 'skipped', 'empty inbound body')
       return
     }
+    // Exclude every coalesced message from history so the burst isn't counted
+    // both as the current turn AND as prior history. Always include the job's
+    // own inbound id so the empty-burst fallback still excludes it.
+    const excludeMessageIds = Array.from(
+      new Set([...coalesced.messageIds, job.inbound_msg_id].filter((id): id is string => !!id)),
+    )
 
     // In-memory mutation so sendOutbound's 24h check sees a fresh value; the
     // DB write is deferred since the bot reply doesn't depend on its result.
@@ -480,7 +496,7 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
     // front of the LLM. Awaited further down (`const ctx = await ctxPromise`).
     const ctxPromise = loadReplyContext(admin, {
       thread,
-      inboundMsgId: job.inbound_msg_id,
+      excludeMessageIds,
     })
     // Neutralize the orphaned-rejection window: if an await BETWEEN here and
     // `await ctxPromise` (below) throws, we'd never attach a handler and a
@@ -565,6 +581,7 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
     const activeFunnel = campaign?.activeFunnel ?? null
     const sendablePages = ctx.sendablePages
     const leadContextBlock = ctx.leadContextBlock
+    const inActiveProject = ctx.inActiveProject
     const history = ctx.history
 
     const campaignPersona = campaign
@@ -734,6 +751,7 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
               preloadedConfig: config,
               leadId: thread.lead_id ?? null,
               threadId: thread.id,
+              inActiveProject,
               idempotencyKey: job.inbound_msg_id ?? job.id,
             },
           )
@@ -1229,6 +1247,9 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
             })
             const aiBtnText = (actionPageChoice.button_text ?? '').trim()
             let btnText = (aiBtnText || chosen.title).slice(0, 640)
+            // AI-customized button label (2-3 words) for higher CTR. Falls back
+            // to the page's configured cta_label when the model omits it.
+            const btnLabel = (actionPageChoice.button_label ?? '').trim() || chosen.cta_label
 
             // For catalog action pages, send a horizontally-scrollable
             // carousel of products (image + title + price/summary + per-card
@@ -1375,7 +1396,7 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
                 admin,
                 thread: { id: thread.id, psid: thread.psid, last_inbound_at: thread.last_inbound_at },
                 pageToken,
-                payload: { kind: 'button', text: btnText, url: targetUrl, ctaLabel: chosen.cta_label },
+                payload: { kind: 'button', text: btnText, url: targetUrl, ctaLabel: btnLabel },
                 kind: 'bot',
               })
               if (btnResult.sent) {
@@ -1406,12 +1427,12 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
                     .map((p) => `• ${p.title} (${p.price_label})`)
                     .join('\n') +
                   `\nView all → ${targetUrl}`
-              : `${btnText}\n${chosen.cta_label} → ${targetUrl}`
+              : `${btnText}\n${btnLabel} → ${targetUrl}`
             const previewText = carouselSent
               ? chosen.kind === 'realestate'
                 ? `${chosen.title} · ${realestateElements.length} listings`
                 : `${chosen.title} · ${carouselProducts.length} products`
-              : `${chosen.cta_label} · ${chosen.title}`
+              : `${btnLabel} · ${chosen.title}`
             const { error: btnInsertErr } = await admin
               .from('messenger_messages')
               .insert({
@@ -1591,6 +1612,8 @@ interface ReplyContext {
   campaign: CampaignBrief | null
   sendablePages: SendableActionPage[]
   leadContextBlock: string
+  /** Lead has an active (non-terminal) project — relaxes action-page re-asking. */
+  inActiveProject: boolean
 }
 
 /**
@@ -1605,9 +1628,9 @@ interface ReplyContext {
  */
 async function loadReplyContext(
   admin: AdminClient,
-  args: { thread: ThreadRow; inboundMsgId: string | null },
+  args: { thread: ThreadRow; excludeMessageIds: string[] },
 ): Promise<ReplyContext> {
-  const { thread, inboundMsgId } = args
+  const { thread, excludeMessageIds } = args
   const userId = thread.user_id
   const leadId = thread.lead_id
 
@@ -1623,7 +1646,7 @@ async function loadReplyContext(
     getChatbotConfig(admin, userId),
     fetchPipelineStages(admin, userId),
     leadId ? fetchLeadCore(admin, leadId) : Promise.resolve(null),
-    loadHistory(admin, thread.id, inboundMsgId),
+    loadHistory(admin, thread.id, excludeMessageIds),
     thread.auto_reply_enabled && leadId
       ? loadLeadContext(admin, leadId)
           .then((s) => s.block)
@@ -1656,6 +1679,9 @@ async function loadReplyContext(
   const leadContextBlock = [rawLeadContextBlock, projectContextBlock]
     .filter((b) => b && b.trim())
     .join('\n\n')
+  // A non-empty project block means the lead has an active project — used to
+  // relax action-page re-asking in the classifier.
+  const inActiveProject = Boolean(projectContextBlock && projectContextBlock.trim())
 
   const currentStageId = leadRow?.stage_id ?? null
   const campaignId = leadRow?.campaign_id ?? null
@@ -1701,7 +1727,7 @@ async function loadReplyContext(
     ? allSendablePages.filter((p) => p.id === targetActionPageId)
     : allSendablePages
 
-  return { config, history, stages, currentStageId, campaign, sendablePages, leadContextBlock }
+  return { config, history, stages, currentStageId, campaign, sendablePages, leadContextBlock, inActiveProject }
 }
 
 async function fetchPipelineStages(
@@ -1862,22 +1888,62 @@ async function ensureLead(
     .eq('id', thread.id)
 }
 
+/**
+ * Gather the customer's current "turn" — every inbound message since the last
+ * outbound (bot/operator) reply — and coalesce it into one combined text plus
+ * the id set to exclude from history. This is what makes a rapid burst of
+ * messages produce a single, natural reply instead of one-per-message.
+ *
+ * Boundary = the most recent outbound message's created_at. With no outbound yet
+ * (first contact) every inbound is included. Capped to the most recent
+ * MAX_COALESCED_MESSAGES so a flood can't blow up the prompt.
+ */
+async function loadCoalescedInbound(
+  admin: AdminClient,
+  threadId: string,
+): Promise<{ combinedText: string; messageIds: string[] }> {
+  const { data: lastOut } = await admin
+    .from('messenger_messages')
+    .select('created_at')
+    .eq('thread_id', threadId)
+    .eq('direction', 'outbound')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle<{ created_at: string }>()
+
+  let query = admin
+    .from('messenger_messages')
+    .select('id, body, created_at')
+    .eq('thread_id', threadId)
+    .eq('direction', 'inbound')
+    .order('created_at', { ascending: true })
+    .limit(MAX_COALESCED_MESSAGES + 5)
+  if (lastOut?.created_at) query = query.gt('created_at', lastOut.created_at)
+
+  const { data } = await query
+  return coalesceInbound((data ?? []) as CoalesceRow[])
+}
+
 async function loadHistory(
   admin: AdminClient,
   threadId: string,
-  excludeMessageId: string | null,
+  excludeMessageIds: string[],
 ): Promise<AnswerHistory> {
-  let query = admin
+  const query = admin
     .from('messenger_messages')
     .select('id, direction, sender, body, created_at')
     .eq('thread_id', threadId)
     .order('created_at', { ascending: false })
     .limit(HISTORY_LIMIT)
-  if (excludeMessageId) query = query.neq('id', excludeMessageId)
   const { data } = await query
   if (!data) return []
+  // Exclude the current turn's coalesced messages in JS — they are passed to the
+  // LLM as the combined `message`, so leaving them in history would double-count
+  // them. JS filtering avoids quoting a UUID set into a PostgREST `in` clause.
+  const excluded = new Set(excludeMessageIds)
   return data
     .reverse()
+    .filter((m) => !excluded.has(m.id as string))
     .filter((m) => (m.body as string)?.trim())
     .filter((m) => {
       if (m.direction === 'inbound') return true
