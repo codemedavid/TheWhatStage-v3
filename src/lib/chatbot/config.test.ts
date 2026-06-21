@@ -123,3 +123,47 @@ describe('upsertChatbotConfig — pause field persistence', () => {
     expect(payload.pause_ai_instructions.length).toBe(MAX_PAUSE_AI_INSTRUCTIONS_LENGTH)
   })
 })
+
+describe('upsertChatbotConfig — virtual_submission_mode persistence', () => {
+  const baseInput = {
+    name: 'Assistant',
+    persona: 'p',
+    instructions: 'i',
+    doRules: [],
+    dontRules: [],
+    fallbackMessage: 'fb',
+    temperature: 0.4,
+    maxContext: 6,
+    pauseAiInstructions: '',
+  }
+
+  it('writes a valid mode to the row', async () => {
+    const upsert = vi.fn().mockResolvedValue({ error: null })
+    const supabase = { from: vi.fn().mockReturnValue({ upsert }) } as never
+
+    await upsertChatbotConfig(supabase, 'u1', { ...baseInput, virtualSubmissionMode: 'auto' })
+
+    const payload = upsert.mock.calls[0][0] as Record<string, unknown>
+    expect(payload.virtual_submission_mode).toBe('auto')
+  })
+
+  it('coerces an invalid mode to the default (suggest)', async () => {
+    const upsert = vi.fn().mockResolvedValue({ error: null })
+    const supabase = { from: vi.fn().mockReturnValue({ upsert }) } as never
+
+    await upsertChatbotConfig(supabase, 'u1', { ...baseInput, virtualSubmissionMode: 'bogus' })
+
+    const payload = upsert.mock.calls[0][0] as Record<string, unknown>
+    expect(payload.virtual_submission_mode).toBe('suggest')
+  })
+
+  it('omits the column entirely when the mode is not provided (preserves existing setting)', async () => {
+    const upsert = vi.fn().mockResolvedValue({ error: null })
+    const supabase = { from: vi.fn().mockReturnValue({ upsert }) } as never
+
+    await upsertChatbotConfig(supabase, 'u1', baseInput)
+
+    const payload = upsert.mock.calls[0][0] as Record<string, unknown>
+    expect('virtual_submission_mode' in payload).toBe(false)
+  })
+})
