@@ -67,8 +67,22 @@ export type ChatbotConfigRow = {
   /** Quiet-window (seconds) the webhook waits before the bot replies, so a
    *  burst of rapid customer messages is coalesced into one reply. 0 = off. */
   message_debounce_seconds: number
+  /** How the bot reacts to detected proceed-intent: 'off'|'suggest'|'auto'.
+   *  Optional: older rows / partial selects may omit it (coerced to 'suggest'). */
+  virtual_submission_mode?: string | null
   created_at: string
   updated_at: string
+}
+
+/** How the bot reacts to a detected proceed-intent in chat (see
+ *  virtual-submission.ts). Defined here because it is a per-tenant config value.
+ *  - off     = never record a chat-implied submission
+ *  - suggest = record the submission as an operator review flag (no stage move)
+ *  - auto    = record AND advance the lead's stage forward */
+export type VirtualSubmissionMode = 'off' | 'suggest' | 'auto'
+
+export function coerceVirtualSubmissionMode(raw: unknown): VirtualSubmissionMode {
+  return raw === 'off' || raw === 'suggest' || raw === 'auto' ? raw : 'suggest'
 }
 
 export type ChatbotConfig = ChatbotPersona & {
@@ -84,6 +98,8 @@ export type ChatbotConfig = ChatbotPersona & {
   humanTakeoverMinutes: number
   /** Quiet-window (seconds) before the bot replies, coalescing rapid bursts. */
   messageDebounceSeconds: number
+  /** How the bot reacts to detected proceed-intent in chat. */
+  virtualSubmissionMode: VirtualSubmissionMode
   updatedAt: string
 }
 
@@ -110,6 +126,7 @@ export const DEFAULT_CHATBOT_CONFIG: ChatbotConfig = {
   // Mirrors the DB default in 20260604000000_human_takeover.sql.
   humanTakeoverMinutes: 60,
   messageDebounceSeconds: DEFAULT_MESSAGE_DEBOUNCE_SECONDS,
+  virtualSubmissionMode: 'suggest',
   updatedAt: '',
 }
 
@@ -210,6 +227,7 @@ export function rowToConfig(row: ChatbotConfigRow): ChatbotConfig {
     recommendationRules: parseRecommendationRules(row.recommendation_rules),
     followupSettings: parseFollowupSettings(row.followup_settings),
     primaryActionPageId: row.primary_action_page_id ?? null,
+    virtualSubmissionMode: coerceVirtualSubmissionMode(row.virtual_submission_mode),
     updatedAt: row.updated_at ?? '',
   }
 }

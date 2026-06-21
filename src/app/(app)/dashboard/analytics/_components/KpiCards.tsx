@@ -44,9 +44,15 @@ interface KpiCardsProps {
 export function KpiCards({ overview, previous, currency, from, to }: KpiCardsProps) {
   const avgLeadsDay = perDay(overview.totalLeads, from, to)
   const avgProjectsDay = perDay(overview.totalProjects, from, to)
-  const avgSubsDay = perDay(overview.totalSubmissions, from, to)
+  // Segment chat-implied submissions out of the headline: "form submissions" is
+  // real form submits only; chat-implied ones get their own card.
+  const formSubmissions = Math.max(0, overview.totalSubmissions - overview.virtualSubmissions)
+  const prevFormSubmissions = previous
+    ? Math.max(0, previous.totalSubmissions - previous.virtualSubmissions)
+    : undefined
+  const avgSubsDay = perDay(formSubmissions, from, to)
   const avgSubsPage =
-    overview.activeActionPages > 0 ? overview.totalSubmissions / overview.activeActionPages : 0
+    overview.activeActionPages > 0 ? formSubmissions / overview.activeActionPages : 0
   const avgValue =
     overview.projectValueCount > 0 ? formatMoney(overview.projectValueAvg, currency) : '—'
   const mixedCurrency = overview.currencyCount > 1
@@ -70,12 +76,20 @@ export function KpiCards({ overview, previous, currency, from, to }: KpiCardsPro
         accent="#16a34a"
       />
       <Metric
-        label="Total submissions"
-        value={formatCount(overview.totalSubmissions)}
+        label="Form submissions"
+        value={formatCount(formSubmissions)}
         hint={`${avgSubsDay.toFixed(1)} / day · ${avgSubsPage.toFixed(1)} / page`}
-        current={overview.totalSubmissions}
-        previous={previous?.totalSubmissions}
+        current={formSubmissions}
+        previous={prevFormSubmissions}
         accent="#d97706"
+      />
+      <Metric
+        label="Chat-implied"
+        value={formatCount(overview.virtualSubmissions)}
+        hint="conversational intent · review to convert"
+        current={overview.virtualSubmissions}
+        previous={previous?.virtualSubmissions}
+        accent="#7c3aed"
       />
       <Metric
         label="Avg project value"

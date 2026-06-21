@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { StageBrief, StageChange, ActionPageBrief } from './classify'
-import { applyStageChange, coerceActionPage, sanitizeReply, stageInstruction, stageList } from './classify'
+import { applyStageChange, coerceActionPage, coerceProceedIntent, sanitizeReply, stageInstruction, stageList } from './classify'
 
 // applyStageChange creates a fresh admin client after a successful move so
 // it can fire `dispatchStageEntered`. The real implementation pulls Supabase
@@ -56,6 +56,49 @@ describe('stageList', () => {
     expect(idxQ).toBeLessThan(idxB)
     expect(idxB).toBeLessThan(idxWon)
     expect(idxWon).toBeLessThan(idxLost)
+  })
+})
+
+describe('coerceProceedIntent', () => {
+  it('returns a normalized object for a valid signal', () => {
+    expect(
+      coerceProceedIntent({ confidence: 'high', quote: 'Kayo na po bahala', reason: 'defer to us' }),
+    ).toEqual({ confidence: 'high', quote: 'Kayo na po bahala', reason: 'defer to us' })
+  })
+
+  it('returns null when raw is null/undefined/non-object', () => {
+    expect(coerceProceedIntent(null)).toBeNull()
+    expect(coerceProceedIntent(undefined)).toBeNull()
+    expect(coerceProceedIntent('nope')).toBeNull()
+  })
+
+  it('returns null when confidence is missing or invalid (no default)', () => {
+    expect(coerceProceedIntent({ quote: 'sige', reason: 'x' })).toBeNull()
+    expect(coerceProceedIntent({ confidence: 'maybe', quote: 'sige' })).toBeNull()
+  })
+
+  it('tolerates missing quote/reason (empty strings)', () => {
+    expect(coerceProceedIntent({ confidence: 'medium' })).toEqual({
+      confidence: 'medium',
+      quote: '',
+      reason: '',
+    })
+  })
+
+  it('clamps over-long quote/reason', () => {
+    const long = 'x'.repeat(800)
+    const out = coerceProceedIntent({ confidence: 'low', quote: long, reason: long })
+    expect(out?.quote.length).toBe(500)
+    expect(out?.reason.length).toBe(500)
+  })
+})
+
+describe('stageInstruction includes proceed-intent guidance', () => {
+  it('static prefix documents the proceed_intent field + examples', () => {
+    const out = stageInstruction(stages, null, [], null, null)
+    expect(out).toContain('PROCEED INTENT')
+    expect(out).toContain('proceed_intent')
+    expect(out).toContain('Kayo na po bahala')
   })
 })
 

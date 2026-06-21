@@ -17,6 +17,8 @@ import {
   formatOutcomeLabel,
   getFilters,
   getScore,
+  impliedQuote,
+  isImpliedSubmission,
   submissionSource,
 } from './form-submissions.helpers'
 
@@ -294,6 +296,8 @@ function SubmissionCard({
   const fields = extractFormFields(row.data)
   const score = getScore(row.data)
   const preview = fields.slice(0, 3)
+  const implied = isImpliedSubmission(row)
+  const quote = implied ? impliedQuote(row.data) : null
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' || e.key === ' ') {
@@ -327,9 +331,14 @@ function SubmissionCard({
             {name}
           </span>
           <SourcePill source={source} />
-          {kind === 'qualification' && row.outcome && <OutcomePill outcome={row.outcome} />}
+          {implied && <ImpliedPill />}
+          {kind === 'qualification' && row.outcome && !implied && <OutcomePill outcome={row.outcome} />}
         </div>
-        {preview.length > 0 ? (
+        {implied ? (
+          <span className="line-clamp-1 text-[12.5px] italic" style={{ color: PALETTE.ink3 }}>
+            {quote ? `“${quote}”` : 'Signaled intent to proceed in chat — review and convert.'}
+          </span>
+        ) : preview.length > 0 ? (
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[12.5px]" style={{ color: PALETTE.ink3 }}>
             {preview.map((f) => (
               <span key={f.key} className="inline-flex items-center gap-1.5">
@@ -399,6 +408,8 @@ function SubmissionDrawer({
   const fields = extractFormFields(row.data)
   const answers = extractAnswers(row.data)
   const score = getScore(row.data)
+  const implied = isImpliedSubmission(row)
+  const quote = implied ? impliedQuote(row.data) : null
 
   return (
     <>
@@ -545,6 +556,32 @@ function SubmissionDrawer({
               ) : (
                 <EmptyBlock text="No answers were captured for this response." />
               )}
+            </DrawerSection>
+          ) : implied ? (
+            <DrawerSection num="02" title="Chat-implied intent">
+              <div
+                className="rounded-xl border p-4"
+                style={{ background: PALETTE.paper, borderColor: PALETTE.line }}
+              >
+                <div className="mb-2 flex items-center gap-2">
+                  <ImpliedPill />
+                  <span className="text-[12.5px]" style={{ color: PALETTE.ink3 }}>
+                    Detected from the conversation — no form was filled.
+                  </span>
+                </div>
+                {quote ? (
+                  <p
+                    className="m-0 text-[15px] italic leading-[1.5]"
+                    style={{ color: PALETTE.ink, fontFamily: "'Instrument Serif', Georgia, serif" }}
+                  >
+                    “{quote}”
+                  </p>
+                ) : (
+                  <span className="text-[13px]" style={{ color: PALETTE.ink3 }}>
+                    The customer signaled they want to proceed.
+                  </span>
+                )}
+              </div>
             </DrawerSection>
           ) : (
             <DrawerSection num="02" title="Form fields">
@@ -734,6 +771,18 @@ function SourcePill({ source }: { source: 'Messenger' | 'Web' }) {
       style={{ background: meta.bg, color: meta.ink, fontFamily: 'ui-monospace, monospace' }}
     >
       {meta.label}
+    </span>
+  )
+}
+
+function ImpliedPill() {
+  return (
+    <span
+      className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[10.5px] uppercase tracking-[0.06em]"
+      style={{ background: 'rgba(124,58,237,0.10)', color: '#6D28D9', fontFamily: 'ui-monospace, monospace' }}
+    >
+      <span className="h-1.5 w-1.5 rounded-full" style={{ background: 'currentColor' }} />
+      Chat-implied
     </span>
   )
 }

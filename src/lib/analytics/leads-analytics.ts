@@ -34,6 +34,9 @@ export interface AnalyticsOverview {
   totalLeads: number
   totalProjects: number
   totalSubmissions: number
+  /** Chat-implied submissions (subset of totalSubmissions). Segment, don't blend:
+   *  headline "form submissions" = totalSubmissions - virtualSubmissions. */
+  virtualSubmissions: number
   attributedSubmissions: number
   submissionsWithProject: number
   activeActionPages: number
@@ -53,6 +56,7 @@ export interface TimeseriesPoint {
   leads: number
   projects: number
   submissions: number
+  virtualSubmissions: number
 }
 
 export interface FunnelRow {
@@ -100,6 +104,7 @@ export async function getAnalyticsOverview(f: AnalyticsFilters): Promise<Analyti
     totalLeads: n(r.total_leads),
     totalProjects: n(r.total_projects),
     totalSubmissions: n(r.total_submissions),
+    virtualSubmissions: n(r.virtual_submissions),
     attributedSubmissions: n(r.attributed_submissions),
     submissionsWithProject: n(r.submissions_with_project),
     activeActionPages: n(r.active_action_pages),
@@ -126,6 +131,7 @@ export async function getAnalyticsTimeseries(f: AnalyticsFilters): Promise<Times
     leads: n(r.leads),
     projects: n(r.projects),
     submissions: n(r.submissions),
+    virtualSubmissions: n(r.virtual_submissions),
   }))
 }
 
