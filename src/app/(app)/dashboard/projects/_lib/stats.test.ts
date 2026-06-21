@@ -12,10 +12,11 @@ function card(over: Partial<ProjectCardRow>): ProjectCardRow {
     id: 'p', user_id: 'u', lead_id: 'l', origin_submission_id: null,
     stage_id: 's-open', title: 't', description: null, value: null,
     currency: 'PHP', ai_instructions: null, notes: null, position: 0,
-    created_at: '2026-06-01', updated_at: '2026-06-01',
+    archived_at: null, created_at: '2026-06-01', updated_at: '2026-06-01',
     lead_name: null, lead_email: null, lead_phone: null, lead_company: null,
     lead_picture_url: null, stage_name: null, stage_kind: 'open',
     origin_submission_kind: null, unread_count: 0, missed_count: 0,
+    is_archived: false,
     ...over,
   }
 }
@@ -101,5 +102,17 @@ describe('computeProjectStats', () => {
   it('picks the currency from the first row, falling back to PHP', () => {
     expect(computeProjectStats([card({ currency: 'USD' })], STAGES).currency).toBe('USD')
     expect(computeProjectStats([], STAGES).currency).toBe('PHP')
+  })
+
+  it('still counts archived cards in stage and KPI totals (they are only hidden from the board)', () => {
+    const rows = [
+      card({ id: '1', stage_id: 's-open', value: 100, is_archived: false, archived_at: null }),
+      card({ id: '2', stage_id: 's-open', value: 400, is_archived: true, archived_at: '2026-06-10' }),
+    ]
+    const s = computeProjectStats(rows, STAGES)
+    expect(s.total).toBe(2)
+    expect(s.open).toBe(2)
+    expect(s.openValue).toBe(500)
+    expect(s.perStage[0]).toMatchObject({ name: 'New', count: 2, subtotal: 500 })
   })
 })

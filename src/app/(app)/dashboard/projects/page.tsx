@@ -26,7 +26,7 @@ export default async function ProjectsPage({
 }) {
   const sp = await searchParams
   const params = ProjectsQuery.parse({
-    q: sp.q, range: sp.range, from: sp.from, to: sp.to, sort: sp.sort,
+    q: sp.q, range: sp.range, from: sp.from, to: sp.to, sort: sp.sort, archived: sp.archived,
   })
   const projectId =
     typeof sp.project === 'string' && UUID_RE.test(sp.project) ? sp.project : undefined
@@ -85,7 +85,7 @@ async function ProjectsBody({
       <ProjectsToolbar params={params} />
 
       <div className="mt-5">
-        <ProjectBoardClient columns={columns} stages={stages} />
+        <ProjectBoardClient columns={columns} stages={stages} showArchived={params.archived} />
       </div>
 
       {projectId && (

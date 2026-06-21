@@ -17,8 +17,9 @@ import {
   useSortable,
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { moveProject } from '../actions/projects'
+import { moveProject, unarchiveProject } from '../actions/projects'
 import { createProjectStage, reorderProjectStages } from '../actions/stages'
+import { splitStageProjects } from '../_lib/board-split'
 import { ProjectDrawer } from './ProjectDrawer'
 import { StageSettingsDrawer } from './StageSettingsDrawer'
 import type { ProjectCardRow } from '../_lib/queries'
@@ -45,9 +46,11 @@ type BoardAction =
 export function ProjectBoardClient({
   columns,
   stages,
+  showArchived,
 }: {
   columns: Column[]
   stages: ProjectStageRow[]
+  showArchived: boolean
 }) {
   const [creating, setCreating] = useState(false)
   // Open the edit drawer instantly from the in-memory row instead of doing a
@@ -158,6 +161,7 @@ export function ProjectBoardClient({
                 key={c.stage.id}
                 stage={c.stage}
                 projects={c.projects}
+                showArchived={showArchived}
                 onOpen={setSelected}
                 onSettings={setSettingsStage}
               />
@@ -200,14 +204,20 @@ export function ProjectBoardClient({
 function StageColumn({
   stage,
   projects,
+  showArchived,
   onOpen,
   onSettings,
 }: {
   stage: ProjectStageRow
   projects: ProjectCardRow[]
+  showArchived: boolean
   onOpen: (project: ProjectCardRow) => void
   onSettings: (stage: ProjectStageRow) => void
 }) {
+  // Archived cards never enter the sortable list; they render as static dimmed
+  // rows below it only when the operator reveals them. Count + subtotal still
+  // span the full set, so the header reflects archived value too.
+  const { active, archived, archivedCount } = splitStageProjects(projects, showArchived)
   // The column is a sortable item (for left/right reorder) AND the drop target
   // for cards landing in an empty column. Dragging is bound to the header grip
   // only, so clicking cards / the ⋯ button never starts a column drag.
@@ -270,6 +280,15 @@ function StageColumn({
             {stage.name}
           </span>
           <span className="text-[11px]" style={{ color: 'var(--lead-muted)' }}>{projects.length}</span>
+          {archivedCount > 0 && (
+            <span
+              className="rounded-full px-1.5 py-0.5 text-[10px] font-medium"
+              style={{ background: 'var(--lead-surface)', color: 'var(--lead-muted)', border: '1px solid var(--lead-line)' }}
+              title={`${archivedCount} archived card(s) — hidden from the board but still counted`}
+            >
+              {archivedCount} archived
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-1.5">
           {subtotal > 0 && (
@@ -291,13 +310,69 @@ function StageColumn({
         </div>
       </div>
 
-      <SortableContext items={projects.map((p) => p.id)} strategy={verticalListSortingStrategy}>
+      <SortableContext items={active.map((p) => p.id)} strategy={verticalListSortingStrategy}>
         <div className="flex flex-1 flex-col gap-2">
-          {projects.map((p) => (
+          {active.map((p) => (
             <ProjectCard key={p.id} project={p} onOpen={onOpen} />
           ))}
         </div>
       </SortableContext>
+
+      {archived.length > 0 && (
+        <div className="mt-3 flex flex-col gap-2 border-t pt-3" style={{ borderColor: 'var(--lead-line)' }}>
+          <div className="text-[10px] font-medium uppercase tracking-wide" style={{ color: 'var(--lead-muted)' }}>
+            Archived
+          </div>
+          {archived.map((p) => (
+            <ArchivedCard key={p.id} project={p} onOpen={onOpen} />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ArchivedCard({ project, onOpen }: { project: ProjectCardRow; onOpen: (project: ProjectCardRow) => void }) {
+  const [pending, start] = useTransition()
+
+  const restore = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    start(async () => {
+      try { await unarchiveProject(project.id) }
+      catch { /* surfaced on next load; revalidatePath refreshes the board */ }
+    })
+  }
+
+  return (
+    <div
+      onClick={() => onOpen(project)}
+      className="lead-focus cursor-pointer rounded-xl p-2.5"
+      style={{ background: 'var(--lead-surface)', border: '1px dashed var(--lead-line)', opacity: 0.6 }}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <span className="min-w-0 truncate text-[13px] font-medium leading-snug" style={{ color: 'var(--lead-ink)' }}>
+          {project.title}
+        </span>
+        {project.value != null && (
+          <span className="shrink-0 text-[12px] font-semibold" style={{ color: 'var(--lead-muted)' }}>
+            {formatMoney(project.value, project.currency)}
+          </span>
+        )}
+      </div>
+      <div className="mt-1.5 flex items-center justify-between gap-2">
+        <span className="truncate text-[11.5px]" style={{ color: 'var(--lead-muted)' }}>
+          {project.lead_name ?? 'Unknown customer'}
+        </span>
+        <button
+          type="button"
+          onClick={restore}
+          disabled={pending}
+          className="shrink-0 text-[11.5px] font-medium disabled:opacity-50"
+          style={{ color: 'var(--lead-accent)' }}
+        >
+          {pending ? 'Restoring…' : 'Unarchive'}
+        </button>
+      </div>
     </div>
   )
 }

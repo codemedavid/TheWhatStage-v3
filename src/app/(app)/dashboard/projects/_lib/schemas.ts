@@ -100,6 +100,12 @@ export const ProjectsQuery = z.object({
   from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   sort: z.enum(['recent', 'oldest', 'title_asc', 'value_desc']).default('recent'),
+  // Reveal archived cards on the board (dimmed, with Unarchive). Archived cards
+  // are hidden by default but always counted in stage/KPI totals.
+  archived: z
+    .union([z.literal('1'), z.literal('true'), z.literal('0'), z.literal('false')])
+    .optional()
+    .transform((v) => v === '1' || v === 'true'),
 })
 export type ProjectsQuery = z.infer<typeof ProjectsQuery>
 

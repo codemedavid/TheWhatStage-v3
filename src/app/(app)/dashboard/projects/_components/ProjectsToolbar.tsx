@@ -101,6 +101,20 @@ export function ProjectsToolbar({ params }: { params: ProjectsQuery }) {
         onChange={(v) => set({ range: 'custom', to: v || undefined })}
       />
 
+      <button
+        type="button"
+        onClick={() => set({ archived: params.archived ? undefined : '1' })}
+        aria-pressed={params.archived}
+        className="lead-focus h-8 cursor-pointer rounded-full px-3 text-[12.5px] font-medium transition-colors"
+        style={{
+          background: params.archived ? 'var(--lead-accent-tint)' : 'var(--lead-surface)',
+          color: params.archived ? 'var(--lead-accent)' : 'var(--lead-muted)',
+          border: `1px solid ${params.archived ? 'var(--lead-accent-ring)' : 'var(--lead-line)'}`,
+        }}
+      >
+        {params.archived ? 'Hide archived' : 'Show archived'}
+      </button>
+
       {hasFilters && (
         <button
           type="button"

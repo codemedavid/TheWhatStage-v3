@@ -27,6 +27,8 @@ export type ProjectRow = {
   ai_instructions: string | null
   notes: string | null
   position: number
+  /** Non-null when the card is archived: hidden from the board, still counted. */
+  archived_at: string | null
   created_at: string
   updated_at: string
 }

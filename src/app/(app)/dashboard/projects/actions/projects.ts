@@ -83,6 +83,34 @@ export async function deleteProject(id: string): Promise<void> {
   revalidatePath('/dashboard/projects', 'layout')
 }
 
+// Soft-hide a card from the board without deleting it. Archived projects still
+// count in every stage/KPI total — they are only filtered out of the board's
+// card rendering. Archiving also cancels any in-flight follow-up sequence so the
+// bot stops messaging a customer we've set aside.
+export async function archiveProject(id: string): Promise<void> {
+  const { supabase } = await requireUser()
+  const { error } = await supabase
+    .from('projects')
+    .update({ archived_at: new Date().toISOString() })
+    .eq('id', id)
+    .is('archived_at', null)
+  if (error) throw error
+  await cancelActiveProjectSequenceRuns(createAdminClient(), id, 'project archived')
+  revalidatePath('/dashboard/projects', 'layout')
+}
+
+// Restore an archived card to the board. Does not re-seed sequences — the
+// operator can move the card to re-trigger a stage's follow-up if desired.
+export async function unarchiveProject(id: string): Promise<void> {
+  const { supabase } = await requireUser()
+  const { error } = await supabase
+    .from('projects')
+    .update({ archived_at: null })
+    .eq('id', id)
+  if (error) throw error
+  revalidatePath('/dashboard/projects', 'layout')
+}
+
 export async function moveProject(id: string, toStageId: string, toPosition: number): Promise<void> {
   const { supabase, userId } = await requireUser()
 

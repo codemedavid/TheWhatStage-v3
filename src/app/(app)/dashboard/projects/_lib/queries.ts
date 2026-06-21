@@ -44,6 +44,8 @@ export type ProjectCardRow = ProjectRow & {
   unread_count: number
   /** Running "messages we missed" tally; resets only on explicit mark-as-read. */
   missed_count: number
+  /** True when `archived_at` is set: hidden from the board, still counted. */
+  is_archived: boolean
 }
 
 type ThreadJoinRow = { picture_url: string | null; unread_count: number | null; missed_count: number | null }
@@ -83,6 +85,7 @@ function flattenProject(row: ProjectRowWithJoins): ProjectCardRow {
     origin_submission_kind: null,
     unread_count: counts.unread_count,
     missed_count: counts.missed_count,
+    is_archived: rest.archived_at != null,
   }
 }
 
@@ -257,6 +260,7 @@ export type StageSequenceStep = {
   position: number
   delay_minutes: number
   instruction: string
+  manual_message: string | null
   fallback_message: string | null
   channel: 'messenger'
 }
@@ -284,7 +288,7 @@ export async function fetchStageSequence(
 
   const { data: steps, error: stepErr } = await supabase
     .from('project_stage_sequence_steps')
-    .select('id, position, delay_minutes, instruction, fallback_message, channel')
+    .select('id, position, delay_minutes, instruction, manual_message, fallback_message, channel')
     .eq('sequence_id', seq.id).order('position', { ascending: true })
   if (stepErr) throw stepErr
 
