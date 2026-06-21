@@ -166,7 +166,10 @@ describe('stageInstructionParts — chat-implied submission guidance', () => {
     const out = parts.staticPrefix
     expect(out).toContain('proceed_info')
     expect(out).toContain('CAPTURE USEFUL INFO')
-    expect(out).toContain('ACKNOWLEDGE IN THIS REPLY')
+    // Confirm-first acknowledgement policy: confirm + offer the form, proceed as fallback.
+    expect(out).toContain('CONFIRM FIRST')
+    expect(out).toContain('THEN OFFER THE FORM')
+    expect(out).toContain('PROCEED ANYWAY IF THEY SKIP IT')
     expect(out).toContain('Note their number')
   })
 

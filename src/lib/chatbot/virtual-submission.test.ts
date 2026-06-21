@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { ProceedIntent } from './classify'
-import { createVirtualSubmission, decideVirtualSubmission } from './virtual-submission'
+import {
+  createVirtualSubmission,
+  decideVirtualSubmission,
+  isProceedQuoteGrounded,
+} from './virtual-submission'
 
 // applyStageChange (auto mode) makes a fresh admin client + fires a dispatch;
 // stub both so the IO test never touches Supabase env.
@@ -16,36 +20,68 @@ const low: ProceedIntent = { confidence: 'low', quote: 'sige', reason: 'maybe' }
 
 describe('decideVirtualSubmission', () => {
   it('never creates when mode is off', () => {
-    const d = decideVirtualSubmission({ proceed: high, heuristicHit: true, mode: 'off', hasLead: true })
+    const d = decideVirtualSubmission({ proceed: high, heuristicHit: true, quoteGrounded: true, mode: 'off', hasLead: true })
     expect(d.create).toBe(false)
     expect(d.advanceStage).toBe(false)
   })
 
   it('never creates without an attributable lead', () => {
-    expect(decideVirtualSubmission({ proceed: high, heuristicHit: true, mode: 'suggest', hasLead: false }).create).toBe(false)
+    expect(decideVirtualSubmission({ proceed: high, heuristicHit: true, quoteGrounded: true, mode: 'suggest', hasLead: false }).create).toBe(false)
   })
 
   it('never creates when there is no proceed signal', () => {
-    expect(decideVirtualSubmission({ proceed: null, heuristicHit: true, mode: 'suggest', hasLead: true }).create).toBe(false)
+    expect(decideVirtualSubmission({ proceed: null, heuristicHit: true, quoteGrounded: true, mode: 'suggest', hasLead: true }).create).toBe(false)
   })
 
-  it('creates on high/medium LLM confidence alone (no heuristic needed)', () => {
-    expect(decideVirtualSubmission({ proceed: high, heuristicHit: false, mode: 'suggest', hasLead: true }).create).toBe(true)
-    expect(decideVirtualSubmission({ proceed: medium, heuristicHit: false, mode: 'suggest', hasLead: true }).create).toBe(true)
+  it('creates on high/medium LLM confidence when the quote is grounded', () => {
+    expect(decideVirtualSubmission({ proceed: high, heuristicHit: false, quoteGrounded: true, mode: 'suggest', hasLead: true }).create).toBe(true)
+    expect(decideVirtualSubmission({ proceed: medium, heuristicHit: false, quoteGrounded: true, mode: 'suggest', hasLead: true }).create).toBe(true)
   })
 
-  it('requires heuristic corroboration for low confidence', () => {
-    expect(decideVirtualSubmission({ proceed: low, heuristicHit: false, mode: 'suggest', hasLead: true }).create).toBe(false)
-    expect(decideVirtualSubmission({ proceed: low, heuristicHit: true, mode: 'suggest', hasLead: true }).create).toBe(true)
+  it('rejects a high/medium signal whose quote is NOT grounded in the customer words', () => {
+    // The model echoed the prompt's "Kayo na po bahala" example for a lead who
+    // never said it — fabricated consent. Reject regardless of confidence.
+    expect(decideVirtualSubmission({ proceed: high, heuristicHit: false, quoteGrounded: false, mode: 'suggest', hasLead: true }).create).toBe(false)
+    expect(decideVirtualSubmission({ proceed: medium, heuristicHit: true, quoteGrounded: false, mode: 'suggest', hasLead: true }).create).toBe(false)
+  })
+
+  it('requires heuristic corroboration for low confidence (grounding not required — heuristic is itself grounded)', () => {
+    expect(decideVirtualSubmission({ proceed: low, heuristicHit: false, quoteGrounded: true, mode: 'suggest', hasLead: true }).create).toBe(false)
+    expect(decideVirtualSubmission({ proceed: low, heuristicHit: true, quoteGrounded: false, mode: 'suggest', hasLead: true }).create).toBe(true)
   })
 
   it('advances stage only in auto mode with >= medium confidence', () => {
-    expect(decideVirtualSubmission({ proceed: high, heuristicHit: false, mode: 'auto', hasLead: true }).advanceStage).toBe(true)
-    expect(decideVirtualSubmission({ proceed: medium, heuristicHit: false, mode: 'auto', hasLead: true }).advanceStage).toBe(true)
+    expect(decideVirtualSubmission({ proceed: high, heuristicHit: false, quoteGrounded: true, mode: 'auto', hasLead: true }).advanceStage).toBe(true)
+    expect(decideVirtualSubmission({ proceed: medium, heuristicHit: false, quoteGrounded: true, mode: 'auto', hasLead: true }).advanceStage).toBe(true)
     // low+heuristic creates the row but must NOT auto-advance the stage
-    expect(decideVirtualSubmission({ proceed: low, heuristicHit: true, mode: 'auto', hasLead: true }).advanceStage).toBe(false)
+    expect(decideVirtualSubmission({ proceed: low, heuristicHit: true, quoteGrounded: false, mode: 'auto', hasLead: true }).advanceStage).toBe(false)
     // suggest mode never advances
-    expect(decideVirtualSubmission({ proceed: high, heuristicHit: true, mode: 'suggest', hasLead: true }).advanceStage).toBe(false)
+    expect(decideVirtualSubmission({ proceed: high, heuristicHit: true, quoteGrounded: true, mode: 'suggest', hasLead: true }).advanceStage).toBe(false)
+  })
+})
+
+describe('isProceedQuoteGrounded', () => {
+  it('accepts a quote that appears verbatim in the customer text', () => {
+    expect(isProceedQuoteGrounded('Kayo na po bahala', 'sige, kayo na po bahala diyan')).toBe(true)
+  })
+
+  it('is case-, punctuation- and diacritic-insensitive', () => {
+    expect(isProceedQuoteGrounded('Kayo na po bahala!', 'KAYO NA PO BAHALA')).toBe(true)
+    expect(isProceedQuoteGrounded('niño', 'si nino po')).toBe(true)
+  })
+
+  it('accepts a short fragment of what the customer said', () => {
+    expect(isProceedQuoteGrounded('go po', 'ok go po')).toBe(true)
+  })
+
+  it('rejects a fabricated/echoed example the customer never typed', () => {
+    // Niña only asked a question — the model parroted the example phrase.
+    expect(isProceedQuoteGrounded('Kayo na po bahala', 'Hi po, magkano po ang package?')).toBe(false)
+  })
+
+  it('rejects an empty quote (nothing to ground)', () => {
+    expect(isProceedQuoteGrounded('', 'ok go po')).toBe(false)
+    expect(isProceedQuoteGrounded('   ', 'ok go po')).toBe(false)
   })
 })
 
@@ -128,6 +164,8 @@ describe('createVirtualSubmission (IO)', () => {
     proceed: high,
     idempotencyAnchor: 'msg1',
     mode: 'suggest' as const,
+    // The customer actually said the quoted words — grounds the high signal.
+    customerText: 'sige, Kayo na po bahala',
   }
 
   it('inserts a virtual submission attributed to the primary page', async () => {
@@ -177,6 +215,21 @@ describe('createVirtualSubmission (IO)', () => {
     await createVirtualSubmission(admin as never, baseArgs)
     const data = admin.inserts[0].data as Record<string, unknown>
     expect('fields' in data).toBe(false)
+  })
+
+  it('does NOT insert when the proceed quote is fabricated (not in the customer text)', async () => {
+    // Niña repro: the model emitted a high-confidence "Kayo na po bahala" for a
+    // lead who only asked a question. No grounded quote → no chat-implied row.
+    const admin = makeFakeAdmin({
+      pages: { ap1: { user_id: 'u1', status: 'published' } },
+      primaryActionPageId: 'ap1',
+    })
+    const res = await createVirtualSubmission(admin as never, {
+      ...baseArgs,
+      customerText: 'Hi po, magkano po ang package?',
+    })
+    expect(res).toBeNull()
+    expect(admin.inserts).toHaveLength(0)
   })
 
   it('returns null when no owned/published page can be attributed', async () => {

@@ -481,4 +481,59 @@ describe('decideForceSend', () => {
     expect(llm.checkPrerequisites).not.toHaveBeenCalled()
     expect(r.overrideFired).toBe(true)
   })
+
+  // Tease-recovery: when the model teased a form/link in `reply` but left the
+  // structured action_page null, that tease IS the "send it now" signal. Attach
+  // the primary/fallback page, bypassing the qualification and readiness gates.
+  describe('tease recovery', () => {
+    it('fires for a tease even when unqualified AND no proceed signal', async () => {
+      const llm = { checkPrerequisites: vi.fn(async () => false), detectProceed: vi.fn(async () => false) }
+      const r = await decideForceSend(
+        ctx({
+          teasedLinkThisTurn: true,
+          currentStage: { id: 'nurt', name: 'Nurture', description: null, position: 1, kind: 'nurture' },
+          latestCustomerMessage: 'hmm interesting',
+          stageChangeThisTurn: null,
+          actionPages: [
+            { id: 'primary', title: 'Primary', cta_label: 'Go', bot_send_instructions: 'Ask budget first.' },
+          ],
+          llm,
+        }),
+      )
+      expect(r.overrideFired).toBe(true)
+      expect(r.reason).toBe('override:tease')
+      expect(r.actionPage?.action_page_id).toBe('primary')
+      expect(llm.checkPrerequisites).not.toHaveBeenCalled()
+      expect(llm.detectProceed).not.toHaveBeenCalled()
+    })
+
+    it('falls back to the first page when no primary configured', async () => {
+      const r = await decideForceSend(ctx({ teasedLinkThisTurn: true, primaryActionPageId: null }))
+      expect(r.overrideFired).toBe(true)
+      expect(r.reason).toBe('override:tease')
+      expect(r.actionPage?.action_page_id).toBe('primary')
+    })
+
+    it.each(['lost', 'dormant', 'won'] as const)(
+      'still respects the unsendable stage guard for kind %s',
+      async (k) => {
+        const r = await decideForceSend(
+          ctx({
+            teasedLinkThisTurn: true,
+            currentStage: { id: 'x', name: 'X', description: null, position: 5, kind: k },
+          }),
+        )
+        expect(r.overrideFired).toBe(false)
+        expect(r.reason).toBe('skip:stage')
+      },
+    )
+
+    it('does nothing when there is no page to send', async () => {
+      const r = await decideForceSend(
+        ctx({ teasedLinkThisTurn: true, primaryActionPageId: null, actionPages: [] }),
+      )
+      expect(r.overrideFired).toBe(false)
+      expect(r.reason).toBe('skip:no-page')
+    })
+  })
 })

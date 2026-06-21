@@ -201,6 +201,11 @@ export interface ForceSendContext {
   primaryActionPageId: string | null
   supabase: SupabaseClient
   llm?: LlmCheckClient & { detectProceed(args: { history: AnswerHistory }): Promise<boolean> }
+  /** True when the model teased a link/form in `reply` (e.g. "eto na po yung
+   *  form") but left the structured action_page null. The tease is itself an
+   *  explicit "send it now" decision, so we force-send the fallback page and
+   *  bypass the qualification + readiness gates. Stage/page guards still apply. */
+  teasedLinkThisTurn?: boolean
 }
 
 export interface ForceSendDecision {
@@ -219,6 +224,24 @@ export async function decideForceSend(ctx: ForceSendContext): Promise<ForceSendD
   const page = resolveFallbackFromList(ctx.primaryActionPageId, ctx.actionPages)
   if (!page) {
     return { actionPage: ctx.llmActionPage, overrideFired: false, reason: 'skip:no-page' }
+  }
+
+  // Tease recovery: the model already decided to send a form this turn (it
+  // teased it in prose) but forgot to fill the structured field. Attaching the
+  // fallback page now is the whole point — a missed action page kills the sale.
+  // Bypass the qualification + readiness gates; the stage + page guards above
+  // are the only safety we keep (never push on lost/won/dormant or with no page).
+  if (ctx.teasedLinkThisTurn) {
+    return {
+      actionPage: {
+        action_page_id: page.id,
+        reason: 'tease-recovery: model teased a form without attaching it',
+        button_text: '',
+        button_label: '',
+      },
+      overrideFired: true,
+      reason: 'override:tease',
+    }
   }
 
   const hadPriorCustomerTurn = ctx.history.some((m) => m.role === 'user')
