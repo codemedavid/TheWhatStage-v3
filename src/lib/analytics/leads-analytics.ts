@@ -1,5 +1,6 @@
 import 'server-only'
 import { createClient } from '@/lib/supabase/server'
+import type { CrosstabCell } from './metrics'
 
 /**
  * Per-tenant leads & revenue analytics data access. Thin typed wrappers over the
@@ -153,6 +154,101 @@ export async function getSubmissionToProject(f: Pick<AnalyticsFilters, 'from' | 
     await supabase.rpc('analytics_submission_to_project', { p_from: f.from ?? null, p_to: f.to ?? null }),
   )
   return mapFunnel(data, 'submissions_reached')
+}
+
+export interface DrilldownLead {
+  leadId: string
+  leadName: string
+  source: string | null
+  createdAt: string
+  projectCount: number
+  bestProjectStage: string | null
+  valueSum: number
+  currency: string | null
+}
+
+export interface ProjectStageValue {
+  stageId: string
+  name: string
+  kind: string
+  position: number
+  projectCount: number
+  valueCount: number
+  valueSum: number
+  valueAvg: number
+}
+
+/**
+ * Lead-stage x project-stage cross-tab — every (forward lead stage, forward
+ * project stage) cell, monotonic. Powers the "Lead → Project" explorer: pick a
+ * lead stage and a project stage to see the conversion between them.
+ */
+export async function getLeadProjectCrosstab(f: AnalyticsFilters): Promise<CrosstabCell[]> {
+  const supabase = await createClient()
+  const rows = unwrapRpc<Record<string, unknown>[]>(
+    'getLeadProjectCrosstab',
+    await supabase.rpc('analytics_lead_project_crosstab', rpcArgs(f)),
+  )
+  return rows.map((r) => ({
+    leadStageId: String(r.lead_stage_id),
+    leadStageName: String(r.lead_stage_name),
+    leadKind: String(r.lead_kind ?? ''),
+    leadRank: n(r.lead_rank),
+    leadStageTotal: n(r.lead_stage_total),
+    projectStageId: String(r.project_stage_id),
+    projectStageName: String(r.project_stage_name),
+    projectKind: String(r.project_kind ?? ''),
+    projectRank: n(r.project_rank),
+    leads: n(r.leads),
+  }))
+}
+
+/** The actual leads behind a cross-tab cell. projectRank < 0 = no project filter. */
+export async function getLeadProjectLeads(
+  f: AnalyticsFilters,
+  leadRank: number,
+  projectRank: number,
+  limit = 100,
+): Promise<DrilldownLead[]> {
+  const supabase = await createClient()
+  const rows = unwrapRpc<Record<string, unknown>[]>(
+    'getLeadProjectLeads',
+    await supabase.rpc('analytics_lead_project_leads', {
+      ...rpcArgs(f),
+      p_lead_rank: leadRank,
+      p_project_rank: projectRank,
+      p_limit: limit,
+    }),
+  )
+  return rows.map((r) => ({
+    leadId: String(r.lead_id),
+    leadName: String(r.lead_name ?? 'Unnamed lead'),
+    source: (r.source as string | null) ?? null,
+    createdAt: String(r.created_at),
+    projectCount: n(r.project_count),
+    bestProjectStage: (r.best_project_stage as string | null) ?? null,
+    valueSum: n(r.value_sum),
+    currency: (r.currency as string | null) ?? null,
+  }))
+}
+
+/** Value contribution per current project stage (lost included). */
+export async function getProjectStageValue(f: AnalyticsFilters): Promise<ProjectStageValue[]> {
+  const supabase = await createClient()
+  const rows = unwrapRpc<Record<string, unknown>[]>(
+    'getProjectStageValue',
+    await supabase.rpc('analytics_project_stage_value', rpcArgs(f)),
+  )
+  return rows.map((r) => ({
+    stageId: String(r.stage_id),
+    name: String(r.name),
+    kind: String(r.kind ?? ''),
+    position: n(r.position),
+    projectCount: n(r.project_count),
+    valueCount: n(r.value_count),
+    valueSum: n(r.value_sum),
+    valueAvg: n(r.value_avg),
+  }))
 }
 
 /** Tenant default currency for value display (mirrors projects' resolveDefaultCurrency). */

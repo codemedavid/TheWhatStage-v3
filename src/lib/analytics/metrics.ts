@@ -85,3 +85,119 @@ export function buildFunnel(rows: readonly FunnelInputRow[]): FunnelStep[] {
 export function reachedFor(rows: readonly FunnelInputRow[], stageId: string): number {
   return rows.find((r) => r.stageId === stageId)?.reached ?? 0
 }
+
+// ---- Period-over-period comparison -------------------------------------
+
+/** A YYYY-MM-DD date range. */
+export interface DateRange {
+  from: string
+  to: string
+}
+
+/**
+ * The immediately-preceding range of equal length, ending the day before
+ * `from`. Returns null for all-time / missing / inverted ranges (no prior
+ * period exists to compare against).
+ */
+export function previousPeriod(from?: string | null, to?: string | null): DateRange | null {
+  const days = daysInRange(from, to)
+  if (days <= 0 || !from) return null
+  const fromMs = Date.parse(`${from}T00:00:00Z`)
+  const prevToMs = fromMs - 86_400_000
+  const prevFromMs = prevToMs - (days - 1) * 86_400_000
+  return { from: isoDay(prevFromMs), to: isoDay(prevToMs) }
+}
+
+/** Format a UTC millisecond instant as a YYYY-MM-DD calendar day. */
+function isoDay(ms: number): string {
+  return new Date(ms).toISOString().slice(0, 10)
+}
+
+export type DeltaDirection = 'up' | 'down' | 'flat'
+
+export interface Delta {
+  /** current - previous. */
+  abs: number
+  /** Percentage change vs the baseline, or null when the baseline is 0. */
+  pct: number | null
+  direction: DeltaDirection
+}
+
+/** Absolute + percentage change of `current` against `previous`. */
+export function computeDelta(current: number, previous: number): Delta {
+  const abs = current - previous
+  const direction: DeltaDirection = abs > 0 ? 'up' : abs < 0 ? 'down' : 'flat'
+  const pct = previous > 0 ? (abs / previous) * 100 : null
+  return { abs, pct, direction }
+}
+
+/** "+20.0%" / "-12.5%" / "New" (no baseline) / "No change" (flat). */
+export function formatDelta(delta: Delta): string {
+  if (delta.direction === 'flat') return 'No change'
+  if (delta.pct === null) return 'New'
+  const sign = delta.pct > 0 ? '+' : ''
+  return `${sign}${delta.pct.toFixed(1)}%`
+}
+
+// ---- Lead-stage x project-stage cross-tab ------------------------------
+
+/**
+ * One cell of the lead-stage x project-stage cross-tab: the count of distinct
+ * leads whose furthest lead stage reached `leadRank` AND whose best project
+ * reached `projectRank` (monotonic, see the SQL). `leadStageTotal` is the count
+ * reaching `leadRank` regardless of any project — the conversion denominator.
+ */
+export interface CrosstabCell {
+  leadStageId: string
+  leadStageName: string
+  leadKind?: string
+  leadRank: number
+  leadStageTotal: number
+  projectStageId: string
+  projectStageName: string
+  projectKind: string
+  projectRank: number
+  leads: number
+}
+
+export interface CrosstabResult {
+  /** Leads at the chosen lead stage that also reached the chosen project stage. */
+  leads: number
+  /** Leads at the chosen lead stage (the denominator). */
+  total: number
+  /** leads / total * 100. */
+  pct: number
+  /** "how many leads per 1 conversion" — total / leads. */
+  ratio: number
+}
+
+/** Look up a cross-tab cell and derive its conversion percentage and ratio. */
+export function crosstabLookup(
+  cells: readonly CrosstabCell[],
+  leadRank: number,
+  projectRank: number,
+): CrosstabResult {
+  const cell = cells.find((c) => c.leadRank === leadRank && c.projectRank === projectRank)
+  if (!cell) return { leads: 0, total: 0, pct: 0, ratio: 0 }
+  return {
+    leads: cell.leads,
+    total: cell.leadStageTotal,
+    pct: conversionPct(cell.leads, cell.leadStageTotal),
+    ratio: ratio(cell.leadStageTotal, cell.leads),
+  }
+}
+
+// ---- CSV export --------------------------------------------------------
+
+/** Wrap a CSV field in quotes (escaping internal quotes) when it needs it. */
+function csvField(value: string | number): string {
+  const s = String(value)
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+}
+
+/** Serialize a header row + data rows into RFC-4180-style CSV text. */
+export function toCsv(headers: readonly string[], rows: readonly (string | number)[][]): string {
+  const lines = [headers.map(csvField).join(',')]
+  for (const row of rows) lines.push(row.map(csvField).join(','))
+  return lines.join('\n')
+}

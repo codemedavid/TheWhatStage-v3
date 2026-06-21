@@ -62,6 +62,9 @@ export async function resolveActiveProjectContext(
     .from('projects')
     .select('id, title, value, currency, ai_instructions, updated_at, stage_id, project_stages(name, kind)')
     .eq('lead_id', leadId)
+    // Archived projects are set aside — the bot must not align to or follow up on
+    // them, so they never become the lead's active project.
+    .is('archived_at', null)
     .order('updated_at', { ascending: false })
     .limit(20)
   if (error) throw error

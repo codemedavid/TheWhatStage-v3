@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState, useTransition } from 'react'
 import { createPortal } from 'react-dom'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { createProject, updateProject, deleteProject, searchLeads, type LeadOption } from '../actions/projects'
+import { createProject, updateProject, deleteProject, archiveProject, unarchiveProject, searchLeads, type LeadOption } from '../actions/projects'
 import { SubmissionsPanel } from '../../leads/_components/SubmissionsPanel'
 import { ConversationPanel } from '../../leads/_components/ConversationPanel'
 import { SequenceConfig } from './SequenceConfig'
@@ -154,6 +154,19 @@ function EditBody({ project, stages, onClose }: { project: ProjectCardRow; stage
     })
   }
 
+  const toggleArchive = () => {
+    start(async () => {
+      try {
+        if (project.is_archived) await unarchiveProject(project.id)
+        else await archiveProject(project.id)
+        onClose()
+        router.refresh()
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Failed to archive')
+      }
+    })
+  }
+
   return (
     <>
       <DrawerHeader title={project.title} onClose={onClose} />
@@ -244,7 +257,12 @@ function EditBody({ project, stages, onClose }: { project: ProjectCardRow; stage
             {error && <div className="text-[12px]" style={{ color: '#dc2626' }}>{error}</div>}
 
             <div className="flex items-center justify-between pt-1">
-              <button type="button" onClick={remove} disabled={pending} className="text-[12.5px] font-medium" style={{ color: '#dc2626' }}>Delete</button>
+              <div className="flex items-center gap-3">
+                <button type="button" onClick={remove} disabled={pending} className="text-[12.5px] font-medium" style={{ color: '#dc2626' }}>Delete</button>
+                <button type="button" onClick={toggleArchive} disabled={pending} className="text-[12.5px] font-medium" style={{ color: 'var(--lead-muted)' }}>
+                  {project.is_archived ? 'Unarchive' : 'Archive'}
+                </button>
+              </div>
               <button type="button" onClick={save} disabled={pending} className="rounded-md px-4 py-1.5 text-[13px] font-medium text-white disabled:opacity-50" style={{ background: 'var(--lead-accent)' }}>
                 {pending ? 'Saving…' : 'Save'}
               </button>
