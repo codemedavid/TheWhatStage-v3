@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { applyStageChange, type ProceedIntent, type StageBrief } from './classify'
+import { applyStageChange, type ProceedInfo, type ProceedIntent, type StageBrief } from './classify'
 import type { VirtualSubmissionMode } from './config'
 import { resolveDefaultStageId } from '@/lib/action-pages/default-stage'
 import { dispatchSubmissionReceived } from '@/lib/workflow/dispatcher'
@@ -57,14 +57,18 @@ export interface CreateVirtualSubmissionArgs {
    *  in scope this turn). Falls back to the tenant's primary action page. */
   preferredActionPageId?: string | null
   proceed: ProceedIntent
-  /** Per-turn idempotency anchor (the inbound message id). */
-  idempotencyAnchor: string
+  /** @deprecated No longer used for the idempotency key — dedup is now
+   *  per-thread (see idempotencyKey below). Kept optional for back-compat. */
+  idempotencyAnchor?: string
   mode: VirtualSubmissionMode
   /** Pipeline stages + current stage — required only when advancing (auto mode). */
   stages?: StageBrief[]
   currentStageId?: string | null
   /** Deterministic heuristic corroboration for low-confidence signals. */
   heuristicHit?: boolean
+  /** Useful info the customer already shared (distilled by the LLM). Stored as
+   *  `data.fields` so the submission detail renders it like a real form fill. */
+  info?: ProceedInfo | null
 }
 
 export interface VirtualSubmissionResult {
@@ -112,20 +116,34 @@ export async function createVirtualSubmission(
     return null
   }
 
-  // Deterministic per-turn key — worker retries re-run the LLM, so without this
-  // a retried turn would insert a duplicate. The global partial unique index on
-  // meta->>'idempotency_key' is the DB-level backstop.
-  const idempotencyKey = `chat-intent:${args.threadId}:${args.idempotencyAnchor}`
+  // Per-THREAD key — a single conversation is one consent event, so every
+  // proceed-intent message in the same thread maps to the same submission. This
+  // is what stops the doubling: a chatty lead who says "kayo na po bahala" then
+  // "Ok po gawan moko" gets ONE chat-implied submission, not one per message.
+  // (Worker retries of the same message land here too.) The global partial
+  // unique index on meta->>'idempotency_key' is the DB-level backstop.
+  const idempotencyKey = `chat-intent:${args.threadId}`
 
   const existing = await findByIdempotencyKey(admin, idempotencyKey)
-  if (existing) return { submissionId: existing, deduplicated: true, stageMoved: false }
+  if (existing) {
+    // Don't create a second row — instead fold any newly-captured info or a
+    // stronger signal into the row we already have, so deduping never loses
+    // detail the later message revealed. Best-effort; never throws.
+    await enrichExistingSubmission(admin, existing, args)
+    return { submissionId: existing.id, deduplicated: true, stageMoved: false }
+  }
 
+  // Map captured details into a flat record keyed by label, matching the shape
+  // a real form fill writes (`data.fields`), so the operator's submission detail
+  // view renders both identically (see form-submissions.helpers extractFormFields).
+  const fields = fieldsFromInfo(args.info ?? null)
   const data = {
     virtual: true,
     message_quote: args.proceed.quote,
     proceed_confidence: args.proceed.confidence,
     proceed_reason: args.proceed.reason,
     thread_id: args.threadId,
+    ...(fields ? { fields } : {}),
   }
   const meta = {
     virtual: true,
@@ -152,7 +170,7 @@ export async function createVirtualSubmission(
     // Concurrent identical turn won the unique index — treat as dedup success.
     if ((error as { code?: string } | null)?.code === '23505') {
       const won = await findByIdempotencyKey(admin, idempotencyKey)
-      if (won) return { submissionId: won, deduplicated: true, stageMoved: false }
+      if (won) return { submissionId: won.id, deduplicated: true, stageMoved: false }
     }
     console.error('[virtual-submission] insert failed', error?.message)
     return null
@@ -207,13 +225,76 @@ async function resolveAttributionPage(
   return null
 }
 
-async function findByIdempotencyKey(admin: SupabaseClient, key: string): Promise<string | null> {
+/** Flatten captured details into a label→value record, or null when there is
+ *  nothing to store. coerceProceedInfo guarantees a non-empty, label-deduped
+ *  list (or null), so a single null guard here covers the empty case. */
+function fieldsFromInfo(info: ProceedInfo | null): Record<string, string> | null {
+  if (!info || info.details.length === 0) return null
+  const out: Record<string, string> = {}
+  for (const d of info.details) out[d.label] = d.value
+  return out
+}
+
+interface ExistingSubmission {
+  id: string
+  data: Record<string, unknown> | null
+}
+
+async function findByIdempotencyKey(
+  admin: SupabaseClient,
+  key: string,
+): Promise<ExistingSubmission | null> {
   const { data } = await admin
     .from('action_page_submissions')
-    .select('id')
+    .select('id, data')
     .filter('meta->>idempotency_key', 'eq', key)
-    .maybeSingle<{ id: string }>()
-  return data?.id ?? null
+    .maybeSingle<ExistingSubmission>()
+  return data ?? null
+}
+
+const CONFIDENCE_RANK: Record<string, number> = { low: 0, medium: 1, high: 2 }
+
+/** Fold a later proceed-intent into the thread's existing chat-implied
+ *  submission: merge any newly-captured fields and, when the new signal is
+ *  stronger, upgrade the stored quote/confidence/reason. Writes only when
+ *  something actually changed, so repeated weak signals are no-ops. Best-effort;
+ *  a failed enrich must never turn a successful dedup into an error. */
+async function enrichExistingSubmission(
+  admin: SupabaseClient,
+  existing: ExistingSubmission,
+  args: CreateVirtualSubmissionArgs,
+): Promise<void> {
+  const prev = existing.data ?? {}
+  const prevFields = (prev.fields as Record<string, string> | undefined) ?? {}
+  const newFields = fieldsFromInfo(args.info ?? null) ?? {}
+  const addsField = Object.keys(newFields).some((k) => prevFields[k] !== newFields[k])
+
+  const prevConf = CONFIDENCE_RANK[String(prev.proceed_confidence)] ?? -1
+  const nextConf = CONFIDENCE_RANK[args.proceed.confidence] ?? -1
+  const upgrade = nextConf > prevConf
+
+  if (!addsField && !upgrade) return
+
+  const mergedFields = { ...prevFields, ...newFields }
+  const data = {
+    ...prev,
+    ...(upgrade
+      ? {
+          message_quote: args.proceed.quote,
+          proceed_confidence: args.proceed.confidence,
+          proceed_reason: args.proceed.reason,
+        }
+      : {}),
+    ...(Object.keys(mergedFields).length ? { fields: mergedFields } : {}),
+  }
+
+  const { error } = await admin
+    .from('action_page_submissions')
+    .update({ data })
+    .eq('id', existing.id)
+  if (error) {
+    console.warn('[virtual-submission] enrich update failed', error.message)
+  }
 }
 
 /** Forward-advance the lead to the first 'qualifying' stage via applyStageChange

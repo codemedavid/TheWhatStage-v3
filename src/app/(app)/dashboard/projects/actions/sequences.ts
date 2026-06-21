@@ -12,6 +12,7 @@ import {
 } from '../_lib/queries'
 import { seedStageProjectsImmediate, cancelStageSequenceRuns } from '@/lib/projects/sequences/seed'
 import { draftSequenceBatch, loadSequenceSendContext, retrieveKnowledge } from '@/lib/sequences/shared'
+import { manualOverride, aiDraftSteps } from '@/lib/sequences/manual'
 import { describeActionError, isRedirectError, type ActionResult } from '../_lib/action-result'
 
 async function requireUser() {
@@ -90,6 +91,7 @@ export async function saveStageSequence(raw: unknown): Promise<ActionResult<{ se
         position,
         delay_minutes: s.delay_minutes,
         instruction: s.instruction,
+        manual_message: s.manual_message?.trim() || null,
         fallback_message: s.fallback_message?.trim() || null,
         channel: s.channel,
       }))
@@ -190,6 +192,10 @@ export async function previewStageSequence(
       .filter(Boolean).join(' — '),
   ).catch(() => '')
 
+  // Manual steps are sent verbatim — they never reach the model. Only AI steps
+  // (no manual override) are drafted, keeping their absolute position so the
+  // batch result still keys correctly.
+  const positioned = input.steps.map((s, position) => ({ ...s, position }))
   const drafts = await draftSequenceBatch({
     leadName: ctx?.leadName ?? null,
     persona: ctx?.persona ?? null,
@@ -202,8 +208,8 @@ export async function previewStageSequence(
     stageInstructions: input.stage_instructions?.trim() || null,
     stageDoRules: input.do_rules,
     stageDontRules: input.dont_rules,
-    steps: input.steps.map((s, position) => ({
-      position,
+    steps: aiDraftSteps(positioned).map((s) => ({
+      position: s.position,
       delayMinutes: s.delay_minutes,
       instruction: s.instruction,
     })),
@@ -211,10 +217,12 @@ export async function previewStageSequence(
   })
 
   const byPosition = new Map(drafts.map((d) => [d.position, d.text]))
-  const touches = input.steps.map((s, position) => ({
-    position,
+  const touches = positioned.map((s) => ({
+    position: s.position,
     delay_minutes: s.delay_minutes,
-    text: byPosition.get(position) ?? null,
+    // Manual override wins; otherwise the AI draft for this position (null when
+    // the model produced nothing — the live engine would use the fallback).
+    text: manualOverride(s.manual_message) ?? byPosition.get(s.position) ?? null,
   }))
   return { ok: true, touches }
   } catch (e) {

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import {
   MAX_PAUSE_AI_INSTRUCTIONS_LENGTH,
+  MAX_VIRTUAL_SUBMISSION_INSTRUCTIONS_LENGTH,
   REPLY_MAX_TOKENS,
   REPLY_WITH_STRUCTURE_MAX_TOKENS,
   rowToConfig,
@@ -25,6 +26,7 @@ const baseRow = (overrides: Partial<ChatbotConfigRow> = {}): ChatbotConfigRow =>
   followup_settings: null,
   primary_action_page_id: null,
   pause_ai_instructions: 'pause when angry',
+  virtual_submission_instructions: 'always note their contact number',
   human_takeover_minutes: 90,
   message_debounce_seconds: 6,
   created_at: '',
@@ -58,6 +60,18 @@ describe('rowToConfig — pause + takeover fields', () => {
   it('defaults pauseAiInstructions to empty string when null/missing', () => {
     const cfg = rowToConfig(baseRow({ pause_ai_instructions: null as unknown as string }))
     expect(cfg.pauseAiInstructions).toBe('')
+  })
+
+  it('maps virtual_submission_instructions', () => {
+    const cfg = rowToConfig(baseRow())
+    expect(cfg.virtualSubmissionInstructions).toBe('always note their contact number')
+  })
+
+  it('defaults virtualSubmissionInstructions to empty string when null/missing', () => {
+    const cfg = rowToConfig(
+      baseRow({ virtual_submission_instructions: null as unknown as string }),
+    )
+    expect(cfg.virtualSubmissionInstructions).toBe('')
   })
 
   it('defaults humanTakeoverMinutes to 60 when null/missing', () => {
@@ -121,6 +135,58 @@ describe('upsertChatbotConfig — pause field persistence', () => {
 
     const payload = upsert.mock.calls[0][0] as Record<string, string>
     expect(payload.pause_ai_instructions.length).toBe(MAX_PAUSE_AI_INSTRUCTIONS_LENGTH)
+  })
+})
+
+describe('upsertChatbotConfig — virtual_submission_instructions persistence', () => {
+  const baseInput = {
+    name: 'Assistant',
+    persona: 'p',
+    instructions: 'i',
+    doRules: [],
+    dontRules: [],
+    fallbackMessage: 'fb',
+    temperature: 0.4,
+    maxContext: 6,
+    pauseAiInstructions: '',
+  }
+
+  it('writes trimmed virtual_submission_instructions to the row', async () => {
+    const upsert = vi.fn().mockResolvedValue({ error: null })
+    const supabase = { from: vi.fn().mockReturnValue({ upsert }) } as never
+
+    await upsertChatbotConfig(supabase, 'u1', {
+      ...baseInput,
+      virtualSubmissionInstructions: '  note their contact number  ',
+    })
+
+    const payload = upsert.mock.calls[0][0] as Record<string, unknown>
+    expect(payload.virtual_submission_instructions).toBe('note their contact number')
+  })
+
+  it('clamps virtual_submission_instructions to the max length', async () => {
+    const upsert = vi.fn().mockResolvedValue({ error: null })
+    const supabase = { from: vi.fn().mockReturnValue({ upsert }) } as never
+
+    await upsertChatbotConfig(supabase, 'u1', {
+      ...baseInput,
+      virtualSubmissionInstructions: 'x'.repeat(5000),
+    })
+
+    const payload = upsert.mock.calls[0][0] as Record<string, string>
+    expect(payload.virtual_submission_instructions.length).toBe(
+      MAX_VIRTUAL_SUBMISSION_INSTRUCTIONS_LENGTH,
+    )
+  })
+
+  it('omits the column entirely when not provided (preserves existing setting)', async () => {
+    const upsert = vi.fn().mockResolvedValue({ error: null })
+    const supabase = { from: vi.fn().mockReturnValue({ upsert }) } as never
+
+    await upsertChatbotConfig(supabase, 'u1', baseInput)
+
+    const payload = upsert.mock.calls[0][0] as Record<string, unknown>
+    expect('virtual_submission_instructions' in payload).toBe(false)
   })
 })
 

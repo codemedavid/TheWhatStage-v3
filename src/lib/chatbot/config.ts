@@ -21,6 +21,10 @@ export interface RecommendationRulesMap {
  *  Pause rules are short by nature; this is a generous ceiling, not a target. */
 export const MAX_PAUSE_AI_INSTRUCTIONS_LENGTH = 2000
 
+/** Upper bound on stored chat-implied-submission instruction text. Same ceiling
+ *  as pause rules — these are short operator directives, not prose. */
+export const MAX_VIRTUAL_SUBMISSION_INSTRUCTIONS_LENGTH = 2000
+
 /**
  * Output-token ceilings for customer-reply generation.
  *
@@ -70,6 +74,9 @@ export type ChatbotConfigRow = {
   /** How the bot reacts to detected proceed-intent: 'off'|'suggest'|'auto'.
    *  Optional: older rows / partial selects may omit it (coerced to 'suggest'). */
   virtual_submission_mode?: string | null
+  /** Operator instructions guiding chat-implied submissions: what info is worth
+   *  noting and how to acknowledge once recorded. Optional on older/partial rows. */
+  virtual_submission_instructions?: string | null
   created_at: string
   updated_at: string
 }
@@ -100,6 +107,9 @@ export type ChatbotConfig = ChatbotPersona & {
   messageDebounceSeconds: number
   /** How the bot reacts to detected proceed-intent in chat. */
   virtualSubmissionMode: VirtualSubmissionMode
+  /** Operator instructions guiding chat-implied submissions (info to note +
+   *  how to acknowledge). Empty string = no extra guidance. */
+  virtualSubmissionInstructions: string
   updatedAt: string
 }
 
@@ -127,6 +137,7 @@ export const DEFAULT_CHATBOT_CONFIG: ChatbotConfig = {
   humanTakeoverMinutes: 60,
   messageDebounceSeconds: DEFAULT_MESSAGE_DEBOUNCE_SECONDS,
   virtualSubmissionMode: 'suggest',
+  virtualSubmissionInstructions: '',
   updatedAt: '',
 }
 
@@ -228,6 +239,7 @@ export function rowToConfig(row: ChatbotConfigRow): ChatbotConfig {
     followupSettings: parseFollowupSettings(row.followup_settings),
     primaryActionPageId: row.primary_action_page_id ?? null,
     virtualSubmissionMode: coerceVirtualSubmissionMode(row.virtual_submission_mode),
+    virtualSubmissionInstructions: row.virtual_submission_instructions ?? '',
     updatedAt: row.updated_at ?? '',
   }
 }
@@ -259,6 +271,9 @@ export type ChatbotConfigInput = {
   /** Optional: when provided, persists the proceed-intent mode (coerced).
    *  Omit to leave the existing setting untouched. Accepts a raw form string. */
   virtualSubmissionMode?: VirtualSubmissionMode | string
+  /** Optional: operator instructions for chat-implied submissions. Omit to
+   *  leave the existing value untouched; trimmed + length-capped when provided. */
+  virtualSubmissionInstructions?: string
 }
 
 export async function upsertChatbotConfig(
@@ -282,6 +297,13 @@ export async function upsertChatbotConfig(
   // that don't manage this setting never clobber the stored value.
   if (input.virtualSubmissionMode !== undefined) {
     payload.virtual_submission_mode = coerceVirtualSubmissionMode(input.virtualSubmissionMode)
+  }
+  // Same omit-when-absent contract as the mode above, so callers that don't
+  // manage this field never clobber the stored instructions.
+  if (input.virtualSubmissionInstructions !== undefined) {
+    payload.virtual_submission_instructions = input.virtualSubmissionInstructions
+      .trim()
+      .slice(0, MAX_VIRTUAL_SUBMISSION_INSTRUCTIONS_LENGTH)
   }
   const { error } = await supabase.from('chatbot_configs').upsert(payload, { onConflict: 'user_id' })
   if (error) throw new Error(`upsertChatbotConfig: ${error.message}`)

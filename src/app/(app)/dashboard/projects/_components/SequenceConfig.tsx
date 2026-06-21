@@ -8,7 +8,7 @@ import {
 } from '../actions/sequences'
 import type { StagePreviewProject } from '../_lib/queries'
 
-type Step = { delay_minutes: number; instruction: string; fallback_message: string }
+type Step = { delay_minutes: number; instruction: string; manual_message: string; fallback_message: string }
 
 const PRESETS: { label: string; minutes: number }[] = [
   { label: '5 min', minutes: 5 },
@@ -56,6 +56,7 @@ export function SequenceConfig({ stageId, stageName }: { stageId: string; stageN
         setSteps(seq.steps.map((s) => ({
           delay_minutes: s.delay_minutes,
           instruction: s.instruction,
+          manual_message: s.manual_message ?? '',
           fallback_message: s.fallback_message ?? '',
         })))
         setStageInstructions(seq.stage_instructions ?? '')
@@ -76,7 +77,7 @@ export function SequenceConfig({ stageId, stageName }: { stageId: string; stageN
     return () => { cancelled = true }
   }, [stageId])
 
-  const addStep = () => setSteps((s) => [...s, { delay_minutes: 1440, instruction: '', fallback_message: '' }])
+  const addStep = () => setSteps((s) => [...s, { delay_minutes: 1440, instruction: '', manual_message: '', fallback_message: '' }])
   const removeStep = (i: number) => setSteps((s) => s.filter((_, idx) => idx !== i))
   const updateStep = (i: number, patch: Partial<Step>) =>
     setSteps((s) => s.map((st, idx) => (idx === i ? { ...st, ...patch } : st)))
@@ -97,6 +98,7 @@ export function SequenceConfig({ stageId, stageName }: { stageId: string; stageN
           steps: clean.map((s) => ({
             delay_minutes: s.delay_minutes,
             instruction: s.instruction.trim(),
+            manual_message: s.manual_message.trim() || null,
             fallback_message: s.fallback_message.trim() || null,
             channel: 'messenger' as const,
           })),
@@ -126,6 +128,7 @@ export function SequenceConfig({ stageId, stageName }: { stageId: string; stageN
           steps: clean.map((s) => ({
             delay_minutes: s.delay_minutes,
             instruction: s.instruction.trim(),
+            manual_message: s.manual_message.trim() || null,
             fallback_message: s.fallback_message.trim() || null,
             channel: 'messenger' as const,
           })),
@@ -144,9 +147,9 @@ export function SequenceConfig({ stageId, stageName }: { stageId: string; stageN
     <div className="space-y-3">
       <p className="text-[12.5px]" style={{ color: 'var(--lead-muted)' }}>
         Follow-up sequence for the <strong>{stageName}</strong> stage. Each step is timed from when a project enters
-        the stage and is written by the assistant from your instruction plus the project&apos;s AI instructions.
-        Saving also enrolls projects already in this stage. If the assistant can&apos;t draft a step, its fallback
-        message is sent instead.
+        the stage and is written by the assistant from your instruction plus the project&apos;s AI instructions — or you
+        can write a manual message to send exactly as typed instead. Saving also enrolls projects already in this stage.
+        If the assistant can&apos;t draft a step, its fallback message is sent instead.
       </p>
       <p className="text-[12px]" style={{ color: 'var(--lead-muted)' }}>
         <strong>Keep step instructions generic</strong> — they apply to <em>every</em> card in this stage. Put
@@ -232,6 +235,19 @@ export function SequenceConfig({ stageId, stageName }: { stageId: string; stageN
               className="w-full rounded-md border px-2.5 py-1.5 text-[13px]"
               style={{ borderColor: 'var(--lead-line)', background: 'var(--lead-surface)', color: 'var(--lead-ink)' }}
             />
+            <textarea
+              value={s.manual_message}
+              onChange={(e) => updateStep(i, { manual_message: e.target.value })}
+              rows={2}
+              placeholder="Write your own message to send instead of the AI draft (optional). Sent exactly as typed to every card in this stage — leave blank to let the assistant write it."
+              className="mt-1.5 w-full rounded-md border px-2.5 py-1.5 text-[13px]"
+              style={{ borderColor: 'var(--lead-accent)', background: 'var(--lead-surface)', color: 'var(--lead-ink)' }}
+            />
+            {s.manual_message.trim() !== '' && (
+              <div className="mt-1 text-[11px]" style={{ color: 'var(--lead-accent)' }}>
+                Manual message — this touch is sent exactly as written; the AI won&apos;t rewrite it.
+              </div>
+            )}
             <textarea
               value={s.fallback_message}
               onChange={(e) => updateStep(i, { fallback_message: e.target.value })}

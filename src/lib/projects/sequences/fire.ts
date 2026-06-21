@@ -20,6 +20,7 @@ import {
   type BatchDraft,
 } from '@/lib/sequences/shared'
 import type { SequenceSendContext } from '@/lib/sequences/shared'
+import { manualOverride, aiDraftSteps } from '@/lib/sequences/manual'
 
 // Last-resort line when a step has no fallback_message and the LLM draft is
 // empty/errors. Generic and safe in any context so a touch still goes out.
@@ -68,6 +69,7 @@ interface StepRow {
   position: number
   delay_minutes: number
   instruction: string
+  manual_message: string | null
   fallback_message: string | null
 }
 
@@ -131,7 +133,7 @@ export async function handleProjectSequenceRun(
 
   const { data: steps } = await admin
     .from('project_stage_sequence_steps')
-    .select('position, delay_minutes, instruction, fallback_message')
+    .select('position, delay_minutes, instruction, manual_message, fallback_message')
     .eq('sequence_id', run.sequence_id)
     .order('position', { ascending: true })
   const stepRows = (steps ?? []) as StepRow[]
@@ -146,40 +148,46 @@ export async function handleProjectSequenceRun(
   if (!loaded.ok) { await markFailed(admin, run.id, loaded.reason); return { outcome: 'failed', reason: loaded.reason } }
   const { ctx } = loaded
 
-  // Pull knowledge relevant to THIS project + sequence (best-effort,
-  // time-bounded). Shared by the one-shot batch and the per-step fallback so we
-  // never retrieve twice in the same run.
-  const knowledge = await withTimeout(
-    retrieveKnowledge(admin, run.user_id, knowledgeQuery(stepRows, project)),
-    DRAFT_TIMEOUT_MS,
-  ).catch(() => '')
-
   // Resolve the touch text. Preference order (a touch is NEVER dropped):
+  //   0. a MANUAL override — sent verbatim, no LLM and no knowledge retrieval;
   //   1. the ONE-SHOT batch draft for this position (generated once per lead);
   //   2. a live single-step draft (only if the batch lacks this position);
   //   3. the step's fallback_message;
   //   4. the built-in default.
-  const drafts = await resolveBatchDrafts(admin, run, stepRows, ctx, project, knowledge)
-  let text = drafts.find((d) => d.position === run.next_step_idx)?.text ?? ''
+  let text = manualOverride(step.manual_message) ?? ''
 
   if (!text) {
-    try {
-      text = await withTimeout(draftSequenceStep({
-        leadName: ctx.leadName,
-        persona: ctx.persona,
-        instructions: ctx.instructions,
-        doRules: ctx.doRules,
-        dontRules: ctx.dontRules,
-        knowledge,
-        contextTitle: project.title,
-        aiInstructions: project.ai_instructions,
-        stepInstruction: step.instruction,
-        recentMessages: ctx.recentMessages,
-      }), DRAFT_TIMEOUT_MS)
-    } catch (e) {
-      console.warn('[project.sequence] draft failed, using fallback', run.id, e instanceof Error ? e.message : String(e))
+    // Pull knowledge relevant to THIS project + sequence (best-effort,
+    // time-bounded). Shared by the one-shot batch and the per-step fallback so
+    // we never retrieve twice in the same run. Skipped above for manual touches.
+    const knowledge = await withTimeout(
+      retrieveKnowledge(admin, run.user_id, knowledgeQuery(stepRows, project)),
+      DRAFT_TIMEOUT_MS,
+    ).catch(() => '')
+
+    const drafts = await resolveBatchDrafts(admin, run, stepRows, ctx, project, knowledge)
+    text = drafts.find((d) => d.position === run.next_step_idx)?.text ?? ''
+
+    if (!text) {
+      try {
+        text = await withTimeout(draftSequenceStep({
+          leadName: ctx.leadName,
+          persona: ctx.persona,
+          instructions: ctx.instructions,
+          doRules: ctx.doRules,
+          dontRules: ctx.dontRules,
+          knowledge,
+          contextTitle: project.title,
+          aiInstructions: project.ai_instructions,
+          stepInstruction: step.instruction,
+          recentMessages: ctx.recentMessages,
+        }), DRAFT_TIMEOUT_MS)
+      } catch (e) {
+        console.warn('[project.sequence] draft failed, using fallback', run.id, e instanceof Error ? e.message : String(e))
+      }
     }
   }
+
   if (!text) {
     text = step.fallback_message?.trim() || DEFAULT_FALLBACK
   }
@@ -237,7 +245,9 @@ async function resolveBatchDrafts(
       stageInstructions: rules?.stage_instructions ?? null,
       stageDoRules: rules?.do_rules ?? [],
       stageDontRules: rules?.dont_rules ?? [],
-      steps: steps.map((s) => ({ position: s.position, delayMinutes: s.delay_minutes, instruction: s.instruction })),
+      // Manual-override steps are sent verbatim, so never draft them — filter
+      // them out while keeping every AI step's absolute position intact.
+      steps: aiDraftSteps(steps).map((s) => ({ position: s.position, delayMinutes: s.delay_minutes, instruction: s.instruction })),
       recentMessages: ctx.recentMessages,
     }), BATCH_TIMEOUT_MS)
   } catch (e) {
