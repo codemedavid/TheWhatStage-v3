@@ -7,14 +7,15 @@ import { createProject, updateProject, deleteProject, archiveProject, unarchiveP
 import { SubmissionsPanel } from '../../leads/_components/SubmissionsPanel'
 import { ConversationPanel } from '../../leads/_components/ConversationPanel'
 import { SequenceConfig } from './SequenceConfig'
+import { resolveInitialDrawerTab, type DrawerTab } from '../_lib/project-toolbar'
 import type { ProjectCardRow } from '../_lib/queries'
 import type { ProjectStageRow } from '@/lib/projects/types'
 
 type Props =
   | { mode: 'create'; stages: ProjectStageRow[]; createStageId: string; onClose: () => void }
-  | { mode: 'edit'; project: ProjectCardRow; stages: ProjectStageRow[]; onClose: () => void }
+  | { mode: 'edit'; project: ProjectCardRow; stages: ProjectStageRow[]; initialTab?: DrawerTab; onClose: () => void }
 
-type Tab = 'overview' | 'submissions' | 'conversation' | 'followup'
+type Tab = DrawerTab
 
 const CLOSE_ANIM_MS = 200
 
@@ -91,7 +92,7 @@ export function ProjectDrawer(props: Props) {
       >
         {props.mode === 'create'
           ? <CreateBody stages={props.stages} createStageId={props.createStageId} onClose={requestClose} />
-          : <EditBody project={props.project} stages={props.stages} onClose={requestClose} />}
+          : <EditBody project={props.project} stages={props.stages} initialTab={props.initialTab} onClose={requestClose} />}
       </div>
     </div>,
     document.body,
@@ -115,9 +116,9 @@ const inputStyle = { borderColor: 'var(--lead-line)', background: 'var(--lead-su
 const inputCls = 'w-full rounded-md border px-2.5 py-1.5 text-[13px]'
 const labelCls = 'mb-1 block text-[12px] font-medium'
 
-function EditBody({ project, stages, onClose }: { project: ProjectCardRow; stages: ProjectStageRow[]; onClose: () => void }) {
+function EditBody({ project, stages, initialTab, onClose }: { project: ProjectCardRow; stages: ProjectStageRow[]; initialTab?: DrawerTab; onClose: () => void }) {
   const router = useRouter()
-  const [tab, setTab] = useState<Tab>('overview')
+  const [tab, setTab] = useState<Tab>(() => resolveInitialDrawerTab(initialTab))
   const [title, setTitle] = useState(project.title)
   const [value, setValue] = useState(project.value != null ? String(project.value) : '')
   const [description, setDescription] = useState(project.description ?? '')
