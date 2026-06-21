@@ -376,6 +376,9 @@ export async function answerWithClassification(
   let pause: PauseDecision | null = null
   let proceedIntent: ProceedIntent | null = null
   let proceedInfo: ProceedInfo | null = null
+  // True when the model teased a link/form in prose but attached no action_page.
+  // Fed into decideForceSend so we recover the page instead of dropping it.
+  let teasedLink = false
   if (parsed && typeof parsed === 'object') {
     const r = parsed as {
       reply?: unknown
@@ -408,7 +411,11 @@ export async function answerWithClassification(
     // a broken promise. sanitizeReply strips the tease sentence, but we log
     // every detection so we can track how often the model misbehaves.
     if (!actionPage && rawReply && rawReply !== text && LINK_TEASE_RE.test(rawReply)) {
-      console.warn('[classify.tease] model teased a link with no action_page attached', {
+      // The tease is an explicit "send the form now" decision. Flag it so
+      // decideForceSend below recovers the fallback action page instead of
+      // letting the sanitized reply go out button-less (a dropped sale).
+      teasedLink = true
+      console.warn('[classify.tease] model teased a link with no action_page — recovering via force-send', {
         userId,
         actionPagesAvailable: actionPages.length,
         rawPreview: rawReply.slice(0, 200),
@@ -498,6 +505,7 @@ export async function answerWithClassification(
           actionPages,
           primaryActionPageId: config.primaryActionPageId ?? null,
           supabase,
+          teasedLinkThisTurn: teasedLink,
         })
         if (forced.overrideFired) {
           console.info('[force-send] override fired', {
@@ -896,16 +904,19 @@ export function stageInstructionParts(
   // even when no row lands (the conversation itself is the operator's record).
   const ackBlock = virtualSubmissionsOn
     ? '\n' +
-      '- ACKNOWLEDGE IN THIS REPLY: when you set `proceed_intent` at "high" or "medium" confidence, briefly confirm in `reply` that you have got it and will take care of it, in the customer\'s language and your persona (e.g. "Sige po, ako na po bahala dito — aasikasuhin ko na po 💚"). Promise YOUR / the team\'s follow-through, NOT that it is "submitted"/"recorded"/"in the system". Follow the operator instructions above for tone/wording. Keep it to one short, natural sentence folded into your normal reply — never a separate message.\n' +
-      '- Only ask the customer for more info here if the operator instructions explicitly require a specific detail (e.g. a contact number) AND it is genuinely missing. If so, add it as a brief, OPTIONAL request inside the same confirmation sentence — never withhold or delay the confirmation to get it, never make it a separate turn, and drop it if it would feel pushy.'
+      '- CONFIRM FIRST — DO NOT ASSUME: a first go-ahead is a cue to CONFIRM what they are agreeing to, not a finished deal. In `reply`, warmly acknowledge and gently confirm (e.g. "Sige po! Para ma-lock natin \'to ng tama…"). Do NOT yet claim it is "done"/"handled"/"submitted".\n' +
+      '- THEN OFFER THE FORM: when an action page fits this request (its prerequisites are met), prefer routing the customer to it so their details are captured properly — set `action_page` and let your `reply` confirm + invite them to tap the button and fill the short form. The real form beats a chat-only record.\n' +
+      '- PROCEED ANYWAY IF THEY SKIP IT: if the customer was already pointed to the form earlier and still has not filled it, or tells you to just go ahead / not bother with the form, do NOT keep insisting. Disregard the form and proceed on their behalf — confirm warmly that YOU / the team will take care of it (e.g. "Sige po, ako na po bahala dito — aasikasuhin ko na po 💚"). Promise YOUR follow-through, NOT that it is "submitted"/"recorded"/"in the system". The chat-implied record is the fallback for customers who will not fill the form.\n' +
+      '- Keep every acknowledgement to one short, natural sentence folded into your normal reply — never a separate message. Follow the operator instructions above for tone/wording.\n' +
+      '- Only ask the customer for more info here if the operator instructions explicitly require a specific detail (e.g. a contact number) AND it is genuinely missing. If so, add it as a brief, OPTIONAL request inside the same sentence — never withhold or delay the confirmation to get it, never make it a separate turn, and drop it if it would feel pushy.'
     : '\n- INTERNAL routing only — never mention `proceed_intent` in `reply`, and setting it does NOT change your reply. Keep replying naturally.'
   const proceedIntentBlock =
     '\n\n' +
     'PROCEED INTENT — detect when the customer signals they want to MOVE FORWARD without filling a form:\n' +
     '- Set `proceed_intent` when the customer hands the decision to you, tells you to go ahead, or says they have already given what you need — even though they never submitted a form. This is a HIGH-VALUE signal: they consider themselves in.\n' +
-    '- Examples (any language; paraphrases and translations count): "Kayo na po bahala" (you take care of it), "Ikaw na bahala", "Check niyo na lang po page namin" (just use our page), "Sige, ituloy na natin", "Go ahead po", "Proceed na tayo", "Push na natin", "Trust ko na po sa inyo", "Okay na po, kayo na magdesisyon".\n' +
-    '- `confidence`: "high" = explicit go-ahead/defer; "medium" = clear forward consent in context; "low" = implicit or ambiguous. Use "high"/"medium" ONLY when there is something concrete to proceed WITH (a product, service, or qualification already discussed in this thread). A bare "sige"/"ok" with no prior context is "low" or null.\n' +
-    '- `quote`: copy the customer\'s exact words that signaled this (for the operator to review). `reason`: one short phrase.\n' +
+    '- Illustrations of the KIND of phrase (any language; do NOT copy these — they are not the customer\'s words): "Kayo na po bahala" (you take care of it), "Ikaw na bahala", "Check niyo na lang po page namin" (just use our page), "Sige, ituloy na natin", "Go ahead po", "Proceed na tayo", "Push na natin", "Trust ko na po sa inyo", "Okay na po, kayo na magdesisyon".\n' +
+    '- `confidence`: "high" = explicit go-ahead/defer; "medium" = clear forward consent in context; "low" = implicit or ambiguous. Use "high"/"medium" ONLY when there is something concrete to proceed WITH (a product, service, or qualification already discussed in this thread). A bare "sige"/"ok"/"go po"/"go ahead" with no prior context is "low" or null — never high/medium.\n' +
+    '- `quote`: copy the customer\'s EXACT words from THIS conversation, verbatim and in their own language — the literal text they typed that signaled intent. NEVER paraphrase, translate, summarize, or copy any example phrase from these instructions. If you cannot point to specific words the customer actually typed this thread, you have no proceed-intent: set `proceed_intent` to null. `reason`: one short phrase.\n' +
     '- Set `proceed_intent` to null when the customer is only asking questions, greeting, objecting, deferring a decision ("iisipin ko muna"), or disengaging ("ayaw na", "hindi na").' +
     captureBlock +
     proceedRulesBlock +

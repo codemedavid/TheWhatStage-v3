@@ -1,14 +1,13 @@
 import { vi, describe, it, expect, beforeEach } from 'vitest'
 
+// Mutable reply the mock LLM returns, so individual tests can simulate a tease.
+let mockReplyText = JSON.stringify({ reply: 'Sounds good!', stage_change: null, action_page: null })
+
 vi.mock('@/lib/rag', () => ({
   HfRouterLlm: class {
     async completeWithUsage() {
       return {
-        text: JSON.stringify({
-          reply: 'Sounds good!',
-          stage_change: null,
-          action_page: null,
-        }),
+        text: mockReplyText,
         model: 'fake',
         finishReason: 'stop',
         usage: { promptTokens: 0, completionTokens: 0 },
@@ -43,6 +42,7 @@ import { decideForceSend } from '@/lib/action-pages/force-send'
 describe('answerWithClassification force-send wiring', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockReplyText = JSON.stringify({ reply: 'Sounds good!', stage_change: null, action_page: null })
   })
 
   it('replaces actionPage with the force-send decision when override fires', async () => {
@@ -72,5 +72,70 @@ describe('answerWithClassification force-send wiring', () => {
 
     expect(decideForceSend).toHaveBeenCalledTimes(1)
     expect(r.actionPage?.action_page_id).toBe('forced')
+  })
+
+  it('passes teasedLinkThisTurn=true to decideForceSend when the model teases a form with no action_page', async () => {
+    // Model teases a form/link in prose but leaves action_page null — exactly
+    // the production [classify.tease] case. The tease sentence is stripped, but
+    // the signal must reach decideForceSend so the page is recovered.
+    mockReplyText = JSON.stringify({
+      reply: 'Perfect po! Sige, eto na po yung form para masimulan na natin 🎶',
+      stage_change: null,
+      action_page: null,
+    })
+    const supabase = {
+      from: () => ({
+        select: () => ({
+          eq: () => ({ maybeSingle: async () => ({ data: null, error: null }) }),
+        }),
+      }),
+    } as unknown as Parameters<typeof answerWithClassification>[0]
+
+    await answerWithClassification(
+      supabase,
+      'u1',
+      'sige po',
+      [{ role: 'user', content: 'earlier' }],
+      [],
+      null,
+      {
+        actionPages: [
+          { id: 'forced', title: 'P', cta_label: 'go', bot_send_instructions: '' },
+        ],
+        leadId: 'lead-1',
+        threadId: 't1',
+      },
+    )
+
+    expect(decideForceSend).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(decideForceSend).mock.calls[0][0]).toMatchObject({ teasedLinkThisTurn: true })
+  })
+
+  it('passes teasedLinkThisTurn=false when the reply has no tease', async () => {
+    const supabase = {
+      from: () => ({
+        select: () => ({
+          eq: () => ({ maybeSingle: async () => ({ data: null, error: null }) }),
+        }),
+      }),
+    } as unknown as Parameters<typeof answerWithClassification>[0]
+
+    await answerWithClassification(
+      supabase,
+      'u1',
+      'sige po',
+      [{ role: 'user', content: 'earlier' }],
+      [],
+      null,
+      {
+        actionPages: [
+          { id: 'forced', title: 'P', cta_label: 'go', bot_send_instructions: '' },
+        ],
+        leadId: 'lead-1',
+        threadId: 't1',
+      },
+    )
+
+    expect(vi.mocked(decideForceSend).mock.calls[0][0]).toMatchObject({ teasedLinkThisTurn: false })
   })
 })
