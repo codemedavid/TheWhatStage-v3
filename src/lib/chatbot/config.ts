@@ -256,6 +256,9 @@ export type ChatbotConfigInput = {
   temperature: number
   maxContext: number
   pauseAiInstructions: string
+  /** Optional: when provided, persists the proceed-intent mode (coerced).
+   *  Omit to leave the existing setting untouched. Accepts a raw form string. */
+  virtualSubmissionMode?: VirtualSubmissionMode | string
 }
 
 export async function upsertChatbotConfig(
@@ -263,21 +266,24 @@ export async function upsertChatbotConfig(
   userId: string,
   input: ChatbotConfigInput,
 ): Promise<void> {
-  const { error } = await supabase.from('chatbot_configs').upsert(
-    {
-      user_id: userId,
-      name: input.name.trim() || DEFAULT_CHATBOT_CONFIG.name,
-      persona: input.persona.trim(),
-      instructions: input.instructions.trim(),
-      pause_ai_instructions: input.pauseAiInstructions.trim().slice(0, MAX_PAUSE_AI_INSTRUCTIONS_LENGTH),
-      do_rules: input.doRules.map((s) => s.trim()).filter(Boolean),
-      dont_rules: input.dontRules.map((s) => s.trim()).filter(Boolean),
-      fallback_message: input.fallbackMessage.trim() || DEFAULT_CHATBOT_CONFIG.fallbackMessage,
-      temperature: clamp(input.temperature, 0, 1),
-      max_context: clamp(Math.round(input.maxContext), 1, 40),
-    },
-    { onConflict: 'user_id' },
-  )
+  const payload: Record<string, unknown> = {
+    user_id: userId,
+    name: input.name.trim() || DEFAULT_CHATBOT_CONFIG.name,
+    persona: input.persona.trim(),
+    instructions: input.instructions.trim(),
+    pause_ai_instructions: input.pauseAiInstructions.trim().slice(0, MAX_PAUSE_AI_INSTRUCTIONS_LENGTH),
+    do_rules: input.doRules.map((s) => s.trim()).filter(Boolean),
+    dont_rules: input.dontRules.map((s) => s.trim()).filter(Boolean),
+    fallback_message: input.fallbackMessage.trim() || DEFAULT_CHATBOT_CONFIG.fallbackMessage,
+    temperature: clamp(input.temperature, 0, 1),
+    max_context: clamp(Math.round(input.maxContext), 1, 40),
+  }
+  // Only write the proceed-intent mode when the caller supplied it, so callers
+  // that don't manage this setting never clobber the stored value.
+  if (input.virtualSubmissionMode !== undefined) {
+    payload.virtual_submission_mode = coerceVirtualSubmissionMode(input.virtualSubmissionMode)
+  }
+  const { error } = await supabase.from('chatbot_configs').upsert(payload, { onConflict: 'user_id' })
   if (error) throw new Error(`upsertChatbotConfig: ${error.message}`)
 }
 

@@ -274,6 +274,24 @@ export function ConfigForm({
               <div className="cb-field-help">Knowledge passages per reply.</div>
             </div>
           </div>
+
+          <div className="cb-field">
+            <label className="cb-field-label" htmlFor="virtualSubmissionMode">Chat-implied submissions</label>
+            <select
+              id="virtualSubmissionMode"
+              name="virtualSubmissionMode"
+              defaultValue={initial.virtualSubmissionMode}
+              className="cb-input"
+            >
+              <option value="suggest">Suggest — record as a review flag (recommended)</option>
+              <option value="auto">Auto — record and advance the lead&rsquo;s stage</option>
+              <option value="off">Off — do nothing</option>
+            </select>
+            <div className="cb-field-help">
+              When a customer signals they want to proceed in chat without filling a form
+              (e.g. &ldquo;kayo na po bahala&rdquo;), record it as a submission you can turn into a project.
+            </div>
+          </div>
         </div>
       </div>
 
