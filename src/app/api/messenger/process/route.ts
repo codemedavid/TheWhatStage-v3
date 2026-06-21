@@ -46,6 +46,8 @@ import {
   type StageBrief,
 } from '@/lib/chatbot/classify'
 import { getChatbotConfig, type ChatbotConfig } from '@/lib/chatbot/config'
+import { hasProceedIntent } from '@/lib/chatbot/intent'
+import { createVirtualSubmission } from '@/lib/chatbot/virtual-submission'
 import { loadLeadContext } from '@/lib/chatbot/leadContext'
 import { resolveActiveProjectContext, renderProjectContextBlock } from '@/lib/projects/active-project'
 import { interruptWorkflowRun } from '@/lib/workflow/trigger'
@@ -720,6 +722,9 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
       // AI self-pause decision for this turn (null unless the model matched a
       // configured Auto-Pause Rule). Stamped onto bot_paused_until after send.
       let pauseDecision: Awaited<ReturnType<typeof answerWithClassification>>['pause'] = null
+      // Proceed/consent signal detected this turn (e.g. "kayo na po bahala").
+      // Drives chat-implied ("virtual") submission creation after the reply.
+      let proceedIntent: Awaited<ReturnType<typeof answerWithClassification>>['proceedIntent'] = null
       const activeCatalogPageId = sendablePages.find((p) => p.kind === 'catalog')?.id ?? null
       const activeRealestatePageId = sendablePages.find((p) => p.kind === 'realestate')?.id ?? null
       const conversationSummary = thread.conversation_summary ?? undefined
@@ -765,6 +770,7 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
           attachImages = r.attachImages
           topChunks = r.topChunks
           pauseDecision = r.pause
+          proceedIntent = r.proceedIntent
         } catch (e) {
           console.error('[messenger.worker] combined call failed, falling back', e)
         }
@@ -1473,6 +1479,37 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
           stages,
           idempotencySuffix: job.inbound_msg_id,
         })
+      }
+
+      // Chat-implied ("virtual") submission. When the customer signaled intent
+      // to proceed WITHOUT filling a form (e.g. "kayo na po bahala"), record a
+      // submission so the lead enters the same submissions → project → analytics
+      // pipeline a real form would. Gated by the tenant's virtual_submission_mode
+      // and only when a lead exists to attribute to. Best-effort — runs after the
+      // reply is sent and never blocks or duplicates it.
+      if (
+        proceedIntent &&
+        thread.lead_id &&
+        config.virtualSubmissionMode !== 'off'
+      ) {
+        try {
+          await createVirtualSubmission(admin, {
+            userId: thread.user_id,
+            leadId: thread.lead_id,
+            threadId: thread.id,
+            psid: thread.psid,
+            pageId: thread.page_id,
+            preferredActionPageId: activeCatalogPageId ?? activeRealestatePageId ?? null,
+            proceed: proceedIntent,
+            idempotencyAnchor: job.inbound_msg_id ?? job.id,
+            mode: config.virtualSubmissionMode,
+            stages,
+            currentStageId,
+            heuristicHit: hasProceedIntent(message),
+          })
+        } catch (e) {
+          console.error('[messenger.worker] createVirtualSubmission threw', e)
+        }
       }
 
       // Layer 2: deep re-evaluation. Fire-and-forget.

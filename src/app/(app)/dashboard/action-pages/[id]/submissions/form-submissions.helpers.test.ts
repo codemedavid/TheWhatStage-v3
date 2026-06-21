@@ -10,6 +10,8 @@ import {
   computeStats,
   getFilters,
   filterSubmissions,
+  isImpliedSubmission,
+  impliedQuote,
 } from './form-submissions.helpers'
 
 function makeSubmission(
@@ -203,5 +205,24 @@ describe('filterSubmissions', () => {
     ]
     expect(filterSubmissions(withFields, 'form', 'all', 'paris').map((s) => s.id)).toEqual(['a'])
     expect(filterSubmissions(withFields, 'form', 'all', 'bob').map((s) => s.id)).toEqual(['b'])
+  })
+})
+
+describe('isImpliedSubmission / impliedQuote', () => {
+  it('detects the implied_proceed outcome', () => {
+    expect(isImpliedSubmission({ outcome: 'implied_proceed' })).toBe(true)
+    expect(isImpliedSubmission({ outcome: 'submitted' })).toBe(false)
+    expect(isImpliedSubmission({ outcome: null })).toBe(false)
+  })
+
+  it('labels implied_proceed as "Chat-implied"', () => {
+    expect(formatOutcomeLabel('implied_proceed')).toBe('Chat-implied')
+  })
+
+  it('extracts the message quote from virtual submission data', () => {
+    expect(impliedQuote({ message_quote: 'Kayo na po bahala' })).toBe('Kayo na po bahala')
+    expect(impliedQuote({ message_quote: '   ' })).toBeNull()
+    expect(impliedQuote({})).toBeNull()
+    expect(impliedQuote(null)).toBeNull()
   })
 })

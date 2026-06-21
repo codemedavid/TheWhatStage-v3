@@ -34,6 +34,10 @@ export interface FilterDef {
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000
 
+/** Outcome marking a chat-implied ("virtual") submission — created by the bot
+ *  when it detects proceed-intent without a form fill (see virtual-submission.ts). */
+export const IMPLIED_PROCEED_OUTCOME = 'implied_proceed'
+
 const OUTCOME_LABELS: Record<string, string> = {
   qualified: 'Qualified',
   disqualified: 'Disqualified',
@@ -42,10 +46,23 @@ const OUTCOME_LABELS: Record<string, string> = {
   booked: 'Booked',
   checked_out: 'Checked out',
   invalid: 'Invalid',
+  [IMPLIED_PROCEED_OUTCOME]: 'Chat-implied',
 }
 
 export function submissionSource(s: Pick<SubmissionListItem, 'psid'>): SubmissionSource {
   return s.psid ? 'Messenger' : 'Web'
+}
+
+/** True when this row is a chat-implied submission rather than a real form fill. */
+export function isImpliedSubmission(s: Pick<SubmissionListItem, 'outcome'>): boolean {
+  return s.outcome === IMPLIED_PROCEED_OUTCOME
+}
+
+/** The customer quote captured on a chat-implied submission, if any. */
+export function impliedQuote(data: unknown): string | null {
+  if (!data || typeof data !== 'object') return null
+  const q = (data as { message_quote?: unknown }).message_quote
+  return typeof q === 'string' && q.trim() ? q.trim() : null
 }
 
 export function displayName(

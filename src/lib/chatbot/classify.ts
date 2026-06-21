@@ -46,6 +46,16 @@ export interface StageChange {
   reason: string
 }
 
+export interface ProceedIntent {
+  /** How strong the go-ahead/defer signal is. */
+  confidence: 'low' | 'medium' | 'high'
+  /** The customer's own words that signaled intent — stored verbatim for the
+   *  operator to review the chat-implied submission. */
+  quote: string
+  /** One short phrase explaining why this counts as proceed-intent. */
+  reason: string
+}
+
 export interface ActionPageBrief {
   id: string
   title: string
@@ -90,6 +100,12 @@ export interface AnswerWithClassificationResult extends AnswerResult {
    *  worker stamps bot_paused_until on this. Always null on the JSON-parse-fail
    *  fallback path (no structured envelope) and when no pause rules are set. */
   pause: PauseDecision | null
+  /** Customer expressed intent to proceed / consent in the conversation (e.g.
+   *  "kayo na po bahala", "check niyo na lang po page namin") WITHOUT filling a
+   *  form. Drives chat-implied ("virtual") submission creation downstream. Null
+   *  when no such signal, on the JSON-parse-fail fallback path, or when the
+   *  model omitted/under-specified the field. */
+  proceedIntent: ProceedIntent | null
   /** All retrieved chunks (useful + ambiguous + reject) from this turn's RAG
    *  retrieval. Used downstream for source-image attachment. */
   topChunks: Array<{
@@ -336,6 +352,7 @@ export async function answerWithClassification(
   let propertyRecommendation: PropertyRecommendationRequest | null = null
   let attachImages = false
   let pause: PauseDecision | null = null
+  let proceedIntent: ProceedIntent | null = null
   if (parsed && typeof parsed === 'object') {
     const r = parsed as {
       reply?: unknown
@@ -345,6 +362,7 @@ export async function answerWithClassification(
       recommend_property?: unknown
       attach_images?: unknown
       pause?: unknown
+      proceed_intent?: unknown
     }
     const rawReply = typeof r.reply === 'string' ? r.reply : ''
     if (rawReply) {
@@ -357,6 +375,7 @@ export async function answerWithClassification(
     // Only honor `pause` when the user actually configured Auto-Pause Rules, so
     // a hallucinated field on an unconfigured bot can never take it offline.
     pause = hasPauseRules ? coercePauseDecision(r.pause) : null
+    proceedIntent = coerceProceedIntent(r.proceed_intent)
     // The model occasionally announces a link in `reply` ("Eto na yung link…")
     // but doesn't set the structured `action_page` field, so the customer sees
     // a broken promise. sanitizeReply strips the tease sentence, but we log
@@ -423,6 +442,8 @@ export async function answerWithClassification(
     // still gets the "# Auto-Pause Rules" prose in its prompt, but cannot emit
     // a structured pause this turn.
     pause = null
+    // No structured envelope on the fallback path → no proceed-intent signal.
+    proceedIntent = null
     // The fallback model didn't produce a structured envelope, so it never
     // reasoned about image attachment. Fall back to the same rule as
     // `answer()`: trust operator-tagged @asset/#folder refs.
@@ -488,7 +509,7 @@ export async function answerWithClassification(
   // Without this gate the Messenger worker re-sent the same proof/screenshot
   // assets on every turn, even when the message was unrelated.
   const gatedMedia = attachImages ? media : []
-  return { text, sourceTitles, media: gatedMedia, attachImages, stageChange, actionPage, productRecommendation, propertyRecommendation, pause, topChunks }
+  return { text, sourceTitles, media: gatedMedia, attachImages, stageChange, actionPage, productRecommendation, propertyRecommendation, pause, proceedIntent, topChunks }
 }
 
 /**
@@ -708,6 +729,7 @@ export function stageInstructionParts(
     '"reply": string',
     '"stage_change": {"to_stage_id": string, "confidence": "low"|"medium"|"high", "reason": string} | null',
     '"attach_images": boolean',
+    '"proceed_intent": {"confidence": "low"|"medium"|"high", "quote": string, "reason": string} | null',
   ]
   if (hasPauseRules) {
     schemaParts.push('"pause": {"reason": string} | null')
@@ -804,6 +826,17 @@ export function stageInstructionParts(
       '- When you set `pause`, still write a brief, warm `reply` that tells the customer a teammate will take over shortly (e.g. "Let me get a teammate to help you with this, one moment."). Do NOT promise a specific time, and do NOT keep trying to resolve the issue yourself.\n' +
       '- Only pause when a rule GENUINELY matches. When in doubt, set `pause` to null and keep helping.'
     : ''
+  // Proceed-intent detection — ALWAYS in the schema (like stage_change), so it
+  // is byte-stable across turns and joins the cacheable static prefix.
+  const proceedIntentBlock =
+    '\n\n' +
+    'PROCEED INTENT — detect when the customer signals they want to MOVE FORWARD without filling a form:\n' +
+    '- Set `proceed_intent` when the customer hands the decision to you, tells you to go ahead, or says they have already given what you need — even though they never submitted a form. This is a HIGH-VALUE signal: they consider themselves in.\n' +
+    '- Examples (any language; paraphrases and translations count): "Kayo na po bahala" (you take care of it), "Ikaw na bahala", "Check niyo na lang po page namin" (just use our page), "Sige, ituloy na natin", "Go ahead po", "Proceed na tayo", "Push na natin", "Trust ko na po sa inyo", "Okay na po, kayo na magdesisyon".\n' +
+    '- `confidence`: "high" = explicit go-ahead/defer; "medium" = clear forward consent in context; "low" = implicit or ambiguous. Use "high"/"medium" ONLY when there is something concrete to proceed WITH (a product, service, or qualification already discussed in this thread). A bare "sige"/"ok" with no prior context is "low" or null.\n' +
+    '- `quote`: copy the customer\'s exact words that signaled this (for the operator to review). `reason`: one short phrase.\n' +
+    '- Set `proceed_intent` to null when the customer is only asking questions, greeting, objecting, deferring a decision ("iisipin ko muna"), or disengaging ("ayaw na", "hindi na").\n' +
+    '- INTERNAL routing only — never mention it in `reply`, and setting it does NOT change your reply. Keep replying naturally.'
   const apListSection = hasActionPages ? '\n\n' + actionPageList(actionPages) : ''
   const recommendSection = hasRecommend ? recommendInstruction(recommendRules!, 'product') : ''
   const recommendPropertySection = hasRecommendProperty
@@ -871,6 +904,7 @@ export function stageInstructionParts(
     '\n\n' +
     attachImagesBlock +
     pauseBlock +
+    proceedIntentBlock +
     apPreamble +
     recommendSection +
     recommendPropertySection
@@ -1207,6 +1241,26 @@ function coerceStageChange(
       : 'medium'
   const reason = typeof r.reason === 'string' ? r.reason : ''
   return { to_stage_id: id, confidence, reason }
+}
+
+/**
+ * Coerce the model's `proceed_intent` field into a {@link ProceedIntent} or null.
+ * Unlike {@link coerceStageChange}, a missing/invalid confidence yields null
+ * (no default): the PRESENCE of a valid confidence is the signal, so an empty
+ * or malformed object is treated as "no proceed-intent this turn". quote/reason
+ * are optional and clamped for storage safety.
+ */
+export function coerceProceedIntent(raw: unknown): ProceedIntent | null {
+  if (!raw || typeof raw !== 'object') return null
+  const r = raw as { confidence?: unknown; quote?: unknown; reason?: unknown }
+  const confidence =
+    r.confidence === 'high' || r.confidence === 'medium' || r.confidence === 'low'
+      ? r.confidence
+      : null
+  if (!confidence) return null
+  const quote = typeof r.quote === 'string' ? r.quote.trim().slice(0, 500) : ''
+  const reason = typeof r.reason === 'string' ? r.reason.trim().slice(0, 500) : ''
+  return { confidence, quote, reason }
 }
 
 async function resolveSourceTitles(
