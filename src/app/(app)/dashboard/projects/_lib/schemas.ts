@@ -40,6 +40,9 @@ export const MAX_INSTRUCTION_LEN = 2000
 export const SequenceStepInput = z.object({
   delay_minutes: z.number().int().min(0).max(525600),
   instruction: z.string().min(1).max(MAX_INSTRUCTION_LEN, `must be ${MAX_INSTRUCTION_LEN} characters or fewer`),
+  // Operator-authored text sent VERBATIM for this touch (no LLM), overriding the
+  // AI draft. Blank/null => the step is drafted by the assistant as usual.
+  manual_message: z.string().max(MAX_INSTRUCTION_LEN, `must be ${MAX_INSTRUCTION_LEN} characters or fewer`).optional().nullable(),
   // Sent verbatim when the AI draft for this step is empty or errors, so a
   // follow-up touch is never silently dropped. Blank => engine uses a default.
   fallback_message: z.string().max(MAX_INSTRUCTION_LEN, `must be ${MAX_INSTRUCTION_LEN} characters or fewer`).optional().nullable(),
