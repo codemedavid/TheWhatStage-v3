@@ -17,9 +17,11 @@ import {
   useSortable,
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { moveProject, unarchiveProject } from '../actions/projects'
+import { moveProject, archiveProject, unarchiveProject } from '../actions/projects'
+import { markThreadRead } from '../../leads/actions/messenger'
 import { createProjectStage, reorderProjectStages } from '../actions/stages'
 import { splitStageProjects } from '../_lib/board-split'
+import { buildProjectToolbarModel, type DrawerTab, type ProjectToolbarModel } from '../_lib/project-toolbar'
 import { ProjectDrawer } from './ProjectDrawer'
 import { StageSettingsDrawer } from './StageSettingsDrawer'
 import type { ProjectCardRow } from '../_lib/queries'
@@ -57,7 +59,26 @@ export function ProjectBoardClient({
   // `router.push(?project=)` round-trip — the server refetch was what made the
   // drawer feel laggy. Mirrors the leads board's local `editing` state.
   const [selected, setSelected] = useState<ProjectCardRow | null>(null)
+  // Which tab the edit drawer opens on. A normal card click lands on 'overview';
+  // the card's Read button opens straight into 'conversation'.
+  const [selectedTab, setSelectedTab] = useState<DrawerTab>('overview')
   const [settingsStage, setSettingsStage] = useState<ProjectStageRow | null>(null)
+
+  const openProject = (project: ProjectCardRow) => {
+    setSelectedTab('overview')
+    setSelected(project)
+  }
+
+  // Card "Read messages" fast path: jump into the conversation and clear the
+  // unread/missed badges in one click. The board refreshes via revalidatePath.
+  const openMessages = (project: ProjectCardRow) => {
+    setSelectedTab('conversation')
+    setSelected(project)
+    startTransition(async () => {
+      try { await markThreadRead(project.lead_id) }
+      catch { /* badge state refreshes on next load */ }
+    })
+  }
   const [optimistic, setOptimistic] = useOptimistic(
     columns,
     (state, action: BoardAction) => {
@@ -162,7 +183,8 @@ export function ProjectBoardClient({
                 stage={c.stage}
                 projects={c.projects}
                 showArchived={showArchived}
-                onOpen={setSelected}
+                onOpen={openProject}
+                onReadMessages={openMessages}
                 onSettings={setSettingsStage}
               />
             ))}
@@ -186,6 +208,7 @@ export function ProjectBoardClient({
           mode="edit"
           project={selected}
           stages={stages}
+          initialTab={selectedTab}
           onClose={() => setSelected(null)}
         />
       )}
@@ -206,12 +229,14 @@ function StageColumn({
   projects,
   showArchived,
   onOpen,
+  onReadMessages,
   onSettings,
 }: {
   stage: ProjectStageRow
   projects: ProjectCardRow[]
   showArchived: boolean
   onOpen: (project: ProjectCardRow) => void
+  onReadMessages: (project: ProjectCardRow) => void
   onSettings: (stage: ProjectStageRow) => void
 }) {
   // Archived cards never enter the sortable list; they render as static dimmed
@@ -313,7 +338,7 @@ function StageColumn({
       <SortableContext items={active.map((p) => p.id)} strategy={verticalListSortingStrategy}>
         <div className="flex flex-1 flex-col gap-2">
           {active.map((p) => (
-            <ProjectCard key={p.id} project={p} onOpen={onOpen} />
+            <ProjectCard key={p.id} project={p} onOpen={onOpen} onReadMessages={onReadMessages} />
           ))}
         </div>
       </SortableContext>
@@ -377,8 +402,101 @@ function ArchivedCard({ project, onOpen }: { project: ProjectCardRow; onOpen: (p
   )
 }
 
-function ProjectCard({ project, onOpen }: { project: ProjectCardRow; onOpen: (project: ProjectCardRow) => void }) {
+// Hover-revealed action cluster pinned to a card's bottom-right corner: a green
+// Archive toggle and (when messages are waiting) a quick Read button. Kept off
+// the default paint so it doesn't clutter the dense board, and every button
+// stops pointer/click propagation so it never starts a drag or opens the drawer.
+function CardQuickActions({
+  archive,
+  read,
+  archiving,
+  onArchive,
+  onRead,
+  stop,
+}: {
+  archive: ProjectToolbarModel['archive']
+  read: ProjectToolbarModel['read']
+  archiving: boolean
+  onArchive: (e: React.MouseEvent) => void
+  onRead: (e: React.MouseEvent) => void
+  stop: (e: React.SyntheticEvent) => void
+}) {
+  const readStyle =
+    read.variant === 'unread'
+      ? { background: '#dc2626', color: '#ffffff', border: '1px solid #dc2626' }
+      : { background: '#fffbeb', color: '#b45309', border: '1px solid #fcd34d' }
+
+  return (
+    <div
+      className="absolute bottom-1.5 right-1.5 z-10 flex items-center gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100"
+      onPointerDown={stop}
+    >
+      {read.show && (
+        <button
+          type="button"
+          onPointerDown={stop}
+          onClick={onRead}
+          title={`${read.label} — open conversation`}
+          aria-label={`${read.label} — open conversation`}
+          className="lead-focus inline-flex h-6 items-center gap-1 rounded-full px-1.5 text-[10.5px] font-semibold shadow-sm"
+          style={readStyle}
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <rect x="3" y="5" width="18" height="14" rx="2" />
+            <path d="m3 7 9 6 9-6" />
+          </svg>
+          {read.count}
+        </button>
+      )}
+      <button
+        type="button"
+        onPointerDown={stop}
+        onClick={onArchive}
+        disabled={archiving}
+        title={archive.isArchived ? 'Unarchive' : 'Archive — declutter the board, totals still counted'}
+        aria-label={archive.isArchived ? 'Unarchive project' : 'Archive project'}
+        className="lead-focus inline-flex h-6 items-center gap-1 rounded-full px-2 text-[10.5px] font-semibold shadow-sm disabled:opacity-50"
+        style={{ background: '#f0fdf4', color: '#15803d', border: '1px solid #bbf7d0' }}
+      >
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <rect x="3" y="4" width="18" height="4" rx="1" />
+          <path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8M9 12h6" />
+        </svg>
+        {archiving ? '…' : archive.label}
+      </button>
+    </div>
+  )
+}
+
+function ProjectCard({
+  project,
+  onOpen,
+  onReadMessages,
+}: {
+  project: ProjectCardRow
+  onOpen: (project: ProjectCardRow) => void
+  onReadMessages: (project: ProjectCardRow) => void
+}) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: project.id })
+  const [archiving, startArchive] = useTransition()
+  const { archive, read } = buildProjectToolbarModel(project)
+
+  // Stop the click/pointer from reaching the card (which opens the drawer) or
+  // dnd-kit (which would start a drag) when an action button is pressed.
+  const stop = (e: React.SyntheticEvent) => e.stopPropagation()
+
+  const onArchive = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    startArchive(async () => {
+      try { await archiveProject(project.id) }
+      catch { /* surfaced on next load; revalidatePath refreshes the board */ }
+    })
+  }
+
+  const onRead = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    onReadMessages(project)
+  }
 
   // dnd-kit's `attributes` include an `aria-describedby` ID from a global
   // counter that drifts between SSR and the client. Gate sortable wiring until
@@ -409,8 +527,16 @@ function ProjectCard({ project, onOpen }: { project: ProjectCardRow; onOpen: (pr
         e.stopPropagation()
         onOpen(project)
       }}
-      className="lead-focus cursor-grab rounded-xl p-2.5 transition-shadow active:cursor-grabbing"
+      className="lead-focus group relative cursor-grab rounded-xl p-2.5 transition-shadow active:cursor-grabbing"
     >
+      <CardQuickActions
+        archive={archive}
+        read={read}
+        archiving={archiving}
+        onArchive={onArchive}
+        onRead={onRead}
+        stop={stop}
+      />
       <div className="flex items-start justify-between gap-2">
         <span className="flex min-w-0 items-center gap-1.5 text-[13px] font-medium leading-snug" style={{ color: 'var(--lead-ink)' }}>
           <span className="truncate">{project.title}</span>
