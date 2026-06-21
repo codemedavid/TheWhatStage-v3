@@ -1507,6 +1507,12 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
             stages,
             currentStageId,
             heuristicHit: hasProceedIntent(message),
+            // The customer's own words this thread — verifies the proceed quote
+            // is real, not a fabricated echo of a prompt example phrase.
+            customerText: [
+              ...history.filter((h) => h.role === 'user').map((h) => h.content),
+              message,
+            ].join('\n'),
             info: proceedInfo,
           })
         } catch (e) {

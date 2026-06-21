@@ -10,6 +10,10 @@ export interface ProceedGateInput {
   proceed: ProceedIntent | null
   /** hasProceedIntent() on the raw inbound message — deterministic corroboration. */
   heuristicHit: boolean
+  /** Whether `proceed.quote` actually appears in the customer's own words this
+   *  thread (see {@link isProceedQuoteGrounded}). Guards against the model
+   *  fabricating consent by echoing a prompt example phrase the lead never typed. */
+  quoteGrounded: boolean
   mode: VirtualSubmissionMode
   /** Whether the thread has a lead to attribute the submission to. */
   hasLead: boolean
@@ -28,8 +32,11 @@ export interface ProceedGateDecision {
  *
  * Guardrails encoded here:
  *  - never without a lead to attribute to, never when mode is off, never on no signal
- *  - medium/high LLM confidence stands alone; low confidence requires the
- *    deterministic heuristic to also fire (suppresses ambiguous-phrase false positives)
+ *  - medium/high LLM confidence stands alone, BUT only when its quote is grounded
+ *    in the customer's actual words (an ungrounded medium/high quote means the
+ *    model fabricated consent — e.g. parroting a prompt example — so reject it)
+ *  - low confidence requires the deterministic heuristic to also fire (the
+ *    heuristic runs on the real inbound, so it is grounded by construction)
  *  - stage auto-advance only in auto mode and only on >= medium confidence
  */
 export function decideVirtualSubmission(input: ProceedGateInput): ProceedGateDecision {
@@ -39,12 +46,53 @@ export function decideVirtualSubmission(input: ProceedGateInput): ProceedGateDec
   if (!input.proceed) return no('no_signal')
 
   const { confidence } = input.proceed
+  // Fabrication guard: a medium/high signal must quote words the customer really
+  // typed. Without a grounded quote the consent is hallucinated (the classic
+  // failure is the model echoing the prompt's "Kayo na po bahala" example for a
+  // lead who only asked a question), so it must never become a submission.
+  if ((confidence === 'high' || confidence === 'medium') && !input.quoteGrounded) {
+    return no('ungrounded_quote')
+  }
   const create =
     confidence === 'high' || confidence === 'medium' || (confidence === 'low' && input.heuristicHit)
   if (!create) return no('low_confidence_uncorroborated')
 
   const advanceStage = input.mode === 'auto' && (confidence === 'high' || confidence === 'medium')
   return { create: true, advanceStage, reason: 'proceed_intent' }
+}
+
+/** Normalize for verbatim-ish comparison: lowercase, strip diacritics (so
+ *  "niño" matches "nino"), reduce every non-alphanumeric run to a single space,
+ *  and trim. Keeps Tagalog/English words intact while ignoring case + accents +
+ *  punctuation differences between the LLM's quote and the raw transcript. */
+function normalizeForGrounding(s: string): string {
+  return s
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+}
+
+/**
+ * True when `quote` is grounded in `customerText` — i.e. the customer actually
+ * typed those words this thread. Used to reject a fabricated proceed-intent
+ * where the model echoes a prompt example (e.g. "Kayo na po bahala") for a lead
+ * who never said it.
+ *
+ * Deliberately strict (normalized substring containment, no token-overlap
+ * fuzzing): common Tagalog fillers ("kayo", "na", "po") overlap heavily across
+ * unrelated messages, so a fuzzy match would wave fabricated phrases through.
+ * The prompt instructs the model to copy the customer's words verbatim, so a
+ * genuine quote is always a substring of the transcript. Empty quote → false
+ * (nothing to ground). Pure, never throws.
+ */
+export function isProceedQuoteGrounded(quote: string, customerText: string): boolean {
+  const q = normalizeForGrounding(quote)
+  if (!q) return false
+  const corpus = normalizeForGrounding(customerText)
+  if (!corpus) return false
+  return corpus.includes(q)
 }
 
 export interface CreateVirtualSubmissionArgs {
@@ -66,6 +114,11 @@ export interface CreateVirtualSubmissionArgs {
   currentStageId?: string | null
   /** Deterministic heuristic corroboration for low-confidence signals. */
   heuristicHit?: boolean
+  /** The customer's own words this thread (prior inbound turns + the current
+   *  message). Used to verify `proceed.quote` is real, not a fabricated echo of
+   *  a prompt example. Absent → an empty corpus → medium/high signals are
+   *  treated as ungrounded and rejected (fail-closed). */
+  customerText?: string
   /** Useful info the customer already shared (distilled by the LLM). Stored as
    *  `data.fields` so the submission detail renders it like a real form fill. */
   info?: ProceedInfo | null
@@ -98,6 +151,7 @@ export async function createVirtualSubmission(
   const decision = decideVirtualSubmission({
     proceed: args.proceed,
     heuristicHit: args.heuristicHit ?? false,
+    quoteGrounded: isProceedQuoteGrounded(args.proceed.quote, args.customerText ?? ''),
     mode: args.mode,
     hasLead: !!args.leadId,
   })
