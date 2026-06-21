@@ -14,6 +14,7 @@ import {
   REPLY_MAX_TOKENS,
   REPLY_WITH_STRUCTURE_MAX_TOKENS,
   type ActionPageRecommendationRules,
+  type VirtualSubmissionMode,
 } from './config'
 import { selectMediaForReply, type SelectedMediaAsset } from '@/lib/media/selector'
 import { buildMediaContextBlock } from '@/lib/media/prompt'
@@ -54,6 +55,21 @@ export interface ProceedIntent {
   quote: string
   /** One short phrase explaining why this counts as proceed-intent. */
   reason: string
+}
+
+/** A single useful detail the customer already shared in conversation (e.g.
+ *  {label: "Contact number", value: "0917…"}, {label: "Business", value: "…"}).
+ *  Mirrors a form field so it renders in the submission detail like a real fill. */
+export interface ProceedDetail {
+  label: string
+  value: string
+}
+
+/** Useful info captured PASSIVELY from the conversation to enrich a chat-implied
+ *  submission. Never the trigger for asking new questions — only what the
+ *  customer already volunteered, distilled by the LLM. */
+export interface ProceedInfo {
+  details: ProceedDetail[]
 }
 
 export interface ActionPageBrief {
@@ -106,6 +122,10 @@ export interface AnswerWithClassificationResult extends AnswerResult {
    *  when no such signal, on the JSON-parse-fail fallback path, or when the
    *  model omitted/under-specified the field. */
   proceedIntent: ProceedIntent | null
+  /** Useful info the customer already shared (business, contact, what they sell)
+   *  distilled from the conversation, attached to the chat-implied submission as
+   *  readable fields. Null when nothing usable or on the fallback path. */
+  proceedInfo: ProceedInfo | null
   /** All retrieved chunks (useful + ambiguous + reject) from this turn's RAG
    *  retrieval. Used downstream for source-image attachment. */
   topChunks: Array<{
@@ -232,6 +252,8 @@ export async function answerWithClassification(
     recommendPropertyRules,
     hasPauseRules,
     options.inActiveProject ?? false,
+    config.virtualSubmissionMode,
+    config.virtualSubmissionInstructions,
   )
   // Back-compat concatenation (static prose + '\n\n' + volatile tail) used by
   // the legacy layout, the freeform-persona fallback, and the JSON-parse-fail
@@ -353,6 +375,7 @@ export async function answerWithClassification(
   let attachImages = false
   let pause: PauseDecision | null = null
   let proceedIntent: ProceedIntent | null = null
+  let proceedInfo: ProceedInfo | null = null
   if (parsed && typeof parsed === 'object') {
     const r = parsed as {
       reply?: unknown
@@ -363,6 +386,7 @@ export async function answerWithClassification(
       attach_images?: unknown
       pause?: unknown
       proceed_intent?: unknown
+      proceed_info?: unknown
     }
     const rawReply = typeof r.reply === 'string' ? r.reply : ''
     if (rawReply) {
@@ -376,6 +400,9 @@ export async function answerWithClassification(
     // a hallucinated field on an unconfigured bot can never take it offline.
     pause = hasPauseRules ? coercePauseDecision(r.pause) : null
     proceedIntent = coerceProceedIntent(r.proceed_intent)
+    // Only keep captured info when there is an actual proceed signal — info
+    // without intent is just conversation, not a submission to enrich.
+    proceedInfo = proceedIntent ? coerceProceedInfo(r.proceed_info) : null
     // The model occasionally announces a link in `reply` ("Eto na yung link…")
     // but doesn't set the structured `action_page` field, so the customer sees
     // a broken promise. sanitizeReply strips the tease sentence, but we log
@@ -444,6 +471,7 @@ export async function answerWithClassification(
     pause = null
     // No structured envelope on the fallback path → no proceed-intent signal.
     proceedIntent = null
+    proceedInfo = null
     // The fallback model didn't produce a structured envelope, so it never
     // reasoned about image attachment. Fall back to the same rule as
     // `answer()`: trust operator-tagged @asset/#folder refs.
@@ -509,7 +537,7 @@ export async function answerWithClassification(
   // Without this gate the Messenger worker re-sent the same proof/screenshot
   // assets on every turn, even when the message was unrelated.
   const gatedMedia = attachImages ? media : []
-  return { text, sourceTitles, media: gatedMedia, attachImages, stageChange, actionPage, productRecommendation, propertyRecommendation, pause, proceedIntent, topChunks }
+  return { text, sourceTitles, media: gatedMedia, attachImages, stageChange, actionPage, productRecommendation, propertyRecommendation, pause, proceedIntent, proceedInfo, topChunks }
 }
 
 /**
@@ -721,16 +749,32 @@ export function stageInstructionParts(
    *  re-fill a form they already completed. Lead-specific, so it lives in the
    *  volatile tail (never the cacheable static prefix). */
   inActiveProject: boolean = false,
+  /** Tenant's chat-implied-submission mode. When 'off', the proceed-intent block
+   *  stays minimal (detect only, never touch the reply, no info capture) since
+   *  nothing is recorded. 'suggest'/'auto' unlock capture + acknowledgement. */
+  virtualSubmissionMode: VirtualSubmissionMode = 'suggest',
+  /** Operator instructions guiding what to note + how to acknowledge. Stable
+   *  across a conversation, so it joins the cacheable static prefix. */
+  virtualSubmissionInstructions: string = '',
 ): StageInstructionParts {
   const hasActionPages = actionPages.length > 0
   const hasRecommend = !!recommendRules
   const hasRecommendProperty = !!recommendPropertyRules
+  // Capture + acknowledgement are only meaningful when a submission is actually
+  // recorded ('suggest'/'auto'). In 'off' mode the block stays detect-only.
+  const virtualSubmissionsOn = virtualSubmissionMode !== 'off'
+  const proceedRules = virtualSubmissionInstructions.trim()
   const schemaParts = [
     '"reply": string',
     '"stage_change": {"to_stage_id": string, "confidence": "low"|"medium"|"high", "reason": string} | null',
     '"attach_images": boolean',
     '"proceed_intent": {"confidence": "low"|"medium"|"high", "quote": string, "reason": string} | null',
   ]
+  if (virtualSubmissionsOn) {
+    schemaParts.push(
+      '"proceed_info": {"details": [{"label": string, "value": string}]} | null',
+    )
+  }
   if (hasPauseRules) {
     schemaParts.push('"pause": {"reason": string} | null')
   }
@@ -826,8 +870,35 @@ export function stageInstructionParts(
       '- When you set `pause`, still write a brief, warm `reply` that tells the customer a teammate will take over shortly (e.g. "Let me get a teammate to help you with this, one moment."). Do NOT promise a specific time, and do NOT keep trying to resolve the issue yourself.\n' +
       '- Only pause when a rule GENUINELY matches. When in doubt, set `pause` to null and keep helping.'
     : ''
-  // Proceed-intent detection — ALWAYS in the schema (like stage_change), so it
-  // is byte-stable across turns and joins the cacheable static prefix.
+  // Proceed-intent detection — the detection schema is byte-stable, but the
+  // capture/acknowledge guidance varies by the tenant's mode + instructions
+  // (both conversation-stable, so they still join the cacheable static prefix).
+  //
+  // Capture (info) block — only when submissions are recorded. PASSIVE by
+  // design: distill what the customer ALREADY shared; never a reason to ask
+  // more questions (that adds friction to an order we want to make easy).
+  const captureBlock = virtualSubmissionsOn
+    ? '\n' +
+      '- CAPTURE USEFUL INFO: when you set `proceed_intent`, also fill `proceed_info.details` with any useful facts the customer has ALREADY shared earlier in this thread — e.g. {"label": "Contact number", "value": "0917…"}, {"label": "Business", "value": "…"}, {"label": "Looking for", "value": "…"}, {"label": "Budget", "value": "…"}, {"label": "Schedule", "value": "…"}. Use the customer\'s own words. Set `proceed_info` to null when they have shared nothing useful yet.\n' +
+      '- Do NOT interrogate. NEVER hold back `proceed_intent` waiting for more info, and NEVER fire a separate question-only turn to collect a field. Capture only what is already in the conversation.'
+    : ''
+  // Operator instructions — verbatim guidance on what to note + how to confirm.
+  const proceedRulesBlock =
+    virtualSubmissionsOn && proceedRules
+      ? '\n- OPERATOR INSTRUCTIONS for these submissions (follow them, but never at the cost of adding friction): ' +
+        proceedRules
+      : ''
+  // Acknowledgement — fold the confirmation INTO this turn's reply (no extra
+  // message). The reply is generated and SENT before any submission row is
+  // recorded (and recording is best-effort — it can be gated out or fail), so
+  // the confirmation must promise that YOU / the team will take care of it,
+  // NOT that anything is already saved/submitted in a system. That stays true
+  // even when no row lands (the conversation itself is the operator's record).
+  const ackBlock = virtualSubmissionsOn
+    ? '\n' +
+      '- ACKNOWLEDGE IN THIS REPLY: when you set `proceed_intent` at "high" or "medium" confidence, briefly confirm in `reply` that you have got it and will take care of it, in the customer\'s language and your persona (e.g. "Sige po, ako na po bahala dito — aasikasuhin ko na po 💚"). Promise YOUR / the team\'s follow-through, NOT that it is "submitted"/"recorded"/"in the system". Follow the operator instructions above for tone/wording. Keep it to one short, natural sentence folded into your normal reply — never a separate message.\n' +
+      '- Only ask the customer for more info here if the operator instructions explicitly require a specific detail (e.g. a contact number) AND it is genuinely missing. If so, add it as a brief, OPTIONAL request inside the same confirmation sentence — never withhold or delay the confirmation to get it, never make it a separate turn, and drop it if it would feel pushy.'
+    : '\n- INTERNAL routing only — never mention `proceed_intent` in `reply`, and setting it does NOT change your reply. Keep replying naturally.'
   const proceedIntentBlock =
     '\n\n' +
     'PROCEED INTENT — detect when the customer signals they want to MOVE FORWARD without filling a form:\n' +
@@ -835,8 +906,10 @@ export function stageInstructionParts(
     '- Examples (any language; paraphrases and translations count): "Kayo na po bahala" (you take care of it), "Ikaw na bahala", "Check niyo na lang po page namin" (just use our page), "Sige, ituloy na natin", "Go ahead po", "Proceed na tayo", "Push na natin", "Trust ko na po sa inyo", "Okay na po, kayo na magdesisyon".\n' +
     '- `confidence`: "high" = explicit go-ahead/defer; "medium" = clear forward consent in context; "low" = implicit or ambiguous. Use "high"/"medium" ONLY when there is something concrete to proceed WITH (a product, service, or qualification already discussed in this thread). A bare "sige"/"ok" with no prior context is "low" or null.\n' +
     '- `quote`: copy the customer\'s exact words that signaled this (for the operator to review). `reason`: one short phrase.\n' +
-    '- Set `proceed_intent` to null when the customer is only asking questions, greeting, objecting, deferring a decision ("iisipin ko muna"), or disengaging ("ayaw na", "hindi na").\n' +
-    '- INTERNAL routing only — never mention it in `reply`, and setting it does NOT change your reply. Keep replying naturally.'
+    '- Set `proceed_intent` to null when the customer is only asking questions, greeting, objecting, deferring a decision ("iisipin ko muna"), or disengaging ("ayaw na", "hindi na").' +
+    captureBlock +
+    proceedRulesBlock +
+    ackBlock
   const apListSection = hasActionPages ? '\n\n' + actionPageList(actionPages) : ''
   const recommendSection = hasRecommend ? recommendInstruction(recommendRules!, 'product') : ''
   const recommendPropertySection = hasRecommendProperty
@@ -1261,6 +1334,42 @@ export function coerceProceedIntent(raw: unknown): ProceedIntent | null {
   const quote = typeof r.quote === 'string' ? r.quote.trim().slice(0, 500) : ''
   const reason = typeof r.reason === 'string' ? r.reason.trim().slice(0, 500) : ''
   return { confidence, quote, reason }
+}
+
+/** Max captured detail rows + per-field char caps. Bounds payload bloat and
+ *  prompt-injection blast radius on the model-supplied `proceed_info`. */
+const MAX_PROCEED_DETAILS = 12
+const MAX_DETAIL_LABEL = 120
+const MAX_DETAIL_VALUE = 500
+
+/**
+ * Coerce the model's `proceed_info` into a {@link ProceedInfo} or null. Accepts a
+ * `{ details: [{label, value}] }` shape, trims + caps each field, drops rows
+ * missing a label or value, and returns null when nothing usable remains (so an
+ * empty object never writes an empty `fields` block on the submission).
+ */
+export function coerceProceedInfo(raw: unknown): ProceedInfo | null {
+  if (!raw || typeof raw !== 'object') return null
+  const list = (raw as { details?: unknown }).details
+  if (!Array.isArray(list)) return null
+  const details: ProceedDetail[] = []
+  // Dedup by case-insensitive label: details are later flattened to a label-keyed
+  // record (see fieldsFromInfo), where duplicate labels would silently collapse
+  // last-write-wins and drop a value. Keep the FIRST occurrence per label.
+  const seenLabels = new Set<string>()
+  for (const item of list) {
+    if (details.length >= MAX_PROCEED_DETAILS) break
+    if (!item || typeof item !== 'object') continue
+    const r = item as { label?: unknown; value?: unknown }
+    const label = typeof r.label === 'string' ? r.label.trim().slice(0, MAX_DETAIL_LABEL) : ''
+    const value = typeof r.value === 'string' ? r.value.trim().slice(0, MAX_DETAIL_VALUE) : ''
+    if (!label || !value) continue
+    const key = label.toLowerCase()
+    if (seenLabels.has(key)) continue
+    seenLabels.add(key)
+    details.push({ label, value })
+  }
+  return details.length > 0 ? { details } : null
 }
 
 async function resolveSourceTitles(

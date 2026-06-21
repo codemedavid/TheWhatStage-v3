@@ -292,6 +292,31 @@ export function ConfigForm({
               (e.g. &ldquo;kayo na po bahala&rdquo;), record it as a submission you can turn into a project.
             </div>
           </div>
+
+          <div className="cb-field">
+            <label className="cb-field-label" htmlFor="virtualSubmissionInstructions">
+              Chat-implied submission rules
+            </label>
+            <textarea
+              id="virtualSubmissionInstructions"
+              name="virtualSubmissionInstructions"
+              rows={5}
+              maxLength={2000}
+              defaultValue={initial.virtualSubmissionInstructions ?? ''}
+              className="cb-textarea"
+              placeholder={
+                'Examples:\n' +
+                '• Note their contact number and business name if they shared them.\n' +
+                '• Treat a clear "yes, proceed" or "sige po" as a go.\n' +
+                '• Confirm warmly without asking again: "Ok po, ipo-process na po namin ’to 💚".'
+              }
+            />
+            <div className="cb-field-help">
+              Guides what info to note from the chat and how to confirm once recorded.
+              The bot folds the confirmation into its normal reply &mdash; it never sends an extra
+              message or stalls the customer to collect details. Ignored when set to Off.
+            </div>
+          </div>
         </div>
       </div>
 

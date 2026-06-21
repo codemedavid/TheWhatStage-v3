@@ -725,6 +725,7 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
       // Proceed/consent signal detected this turn (e.g. "kayo na po bahala").
       // Drives chat-implied ("virtual") submission creation after the reply.
       let proceedIntent: Awaited<ReturnType<typeof answerWithClassification>>['proceedIntent'] = null
+      let proceedInfo: Awaited<ReturnType<typeof answerWithClassification>>['proceedInfo'] = null
       const activeCatalogPageId = sendablePages.find((p) => p.kind === 'catalog')?.id ?? null
       const activeRealestatePageId = sendablePages.find((p) => p.kind === 'realestate')?.id ?? null
       const conversationSummary = thread.conversation_summary ?? undefined
@@ -771,6 +772,7 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
           topChunks = r.topChunks
           pauseDecision = r.pause
           proceedIntent = r.proceedIntent
+          proceedInfo = r.proceedInfo
         } catch (e) {
           console.error('[messenger.worker] combined call failed, falling back', e)
         }
@@ -1501,11 +1503,11 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
             pageId: thread.page_id,
             preferredActionPageId: activeCatalogPageId ?? activeRealestatePageId ?? null,
             proceed: proceedIntent,
-            idempotencyAnchor: job.inbound_msg_id ?? job.id,
             mode: config.virtualSubmissionMode,
             stages,
             currentStageId,
             heuristicHit: hasProceedIntent(message),
+            info: proceedInfo,
           })
         } catch (e) {
           console.error('[messenger.worker] createVirtualSubmission threw', e)

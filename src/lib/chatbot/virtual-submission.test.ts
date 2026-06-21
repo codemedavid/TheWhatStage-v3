@@ -53,7 +53,8 @@ describe('decideVirtualSubmission', () => {
 
 interface FakeRow {
   id: string
-  meta: Record<string, unknown> | null
+  data?: Record<string, unknown> | null
+  meta?: Record<string, unknown> | null
 }
 
 /** Minimal Supabase fluent-chain fake covering exactly the calls
@@ -64,9 +65,11 @@ function makeFakeAdmin(opts: {
   existing?: FakeRow | null
 }) {
   const inserts: Record<string, unknown>[] = []
+  const updates: Record<string, unknown>[] = []
   let insertedId = 0
   return {
     inserts,
+    updates,
     from(table: string) {
       if (table === 'chatbot_configs') {
         return {
@@ -104,6 +107,10 @@ function makeFakeAdmin(opts: {
               }),
             }
           },
+          update: (row: Record<string, unknown>) => {
+            updates.push(row)
+            return { eq: async () => ({ error: null }) }
+          },
         }
       }
       throw new Error(`unexpected table ${table}`)
@@ -137,8 +144,39 @@ describe('createVirtualSubmission (IO)', () => {
     expect(row.lead_id).toBe('l1')
     expect(row.outcome).toBe('implied_proceed')
     expect((row.meta as Record<string, unknown>).virtual).toBe(true)
-    expect((row.meta as Record<string, unknown>).idempotency_key).toBe('chat-intent:t1:msg1')
+    expect((row.meta as Record<string, unknown>).idempotency_key).toBe('chat-intent:t1')
     expect((row.data as Record<string, unknown>).message_quote).toBe('Kayo na po bahala')
+  })
+
+  it('stores captured info as data.fields so it renders like a form fill', async () => {
+    const admin = makeFakeAdmin({
+      pages: { ap1: { user_id: 'u1', status: 'published' } },
+      primaryActionPageId: 'ap1',
+    })
+    await createVirtualSubmission(admin as never, {
+      ...baseArgs,
+      info: {
+        details: [
+          { label: 'Contact number', value: '0917 000 1234' },
+          { label: 'Business', value: 'Aling Nena Catering' },
+        ],
+      },
+    })
+    const data = admin.inserts[0].data as Record<string, unknown>
+    expect(data.fields).toEqual({
+      'Contact number': '0917 000 1234',
+      Business: 'Aling Nena Catering',
+    })
+  })
+
+  it('omits data.fields when no info was captured', async () => {
+    const admin = makeFakeAdmin({
+      pages: { ap1: { user_id: 'u1', status: 'published' } },
+      primaryActionPageId: 'ap1',
+    })
+    await createVirtualSubmission(admin as never, baseArgs)
+    const data = admin.inserts[0].data as Record<string, unknown>
+    expect('fields' in data).toBe(false)
   })
 
   it('returns null when no owned/published page can be attributed', async () => {
@@ -157,14 +195,115 @@ describe('createVirtualSubmission (IO)', () => {
     expect(res).toBeNull()
   })
 
-  it('short-circuits as deduplicated when an identical turn already recorded', async () => {
+  it('dedupes per thread: a second proceed-intent never inserts a new row', async () => {
     const admin = makeFakeAdmin({
       pages: { ap1: { user_id: 'u1', status: 'published' } },
       primaryActionPageId: 'ap1',
-      existing: { id: 'sub_existing', meta: { idempotency_key: 'chat-intent:t1:msg1' } },
+      existing: {
+        id: 'sub_existing',
+        data: {
+          virtual: true,
+          message_quote: 'Kayo na po bahala',
+          proceed_confidence: 'high',
+          proceed_reason: 'defer',
+          thread_id: 't1',
+        },
+        meta: { idempotency_key: 'chat-intent:t1' },
+      },
     })
-    const res = await createVirtualSubmission(admin as never, baseArgs)
+    // A different inbound message (msg2) in the SAME thread must NOT create a
+    // second chat-implied submission — that was the doubling bug.
+    const res = await createVirtualSubmission(admin as never, {
+      ...baseArgs,
+      idempotencyAnchor: 'msg2',
+    })
     expect(res).toEqual({ submissionId: 'sub_existing', deduplicated: true, stageMoved: false })
     expect(admin.inserts).toHaveLength(0)
+  })
+
+  it('enriches the existing submission with newly captured fields on dedup', async () => {
+    const admin = makeFakeAdmin({
+      pages: { ap1: { user_id: 'u1', status: 'published' } },
+      primaryActionPageId: 'ap1',
+      existing: {
+        id: 'sub_existing',
+        data: {
+          virtual: true,
+          message_quote: 'Kayo na po bahala',
+          proceed_confidence: 'high',
+          proceed_reason: 'defer',
+          thread_id: 't1',
+          fields: { 'Contact number': '0917 000 1234' },
+        },
+        meta: { idempotency_key: 'chat-intent:t1' },
+      },
+    })
+    await createVirtualSubmission(admin as never, {
+      ...baseArgs,
+      idempotencyAnchor: 'msg2',
+      info: { details: [{ label: 'Business', value: 'Aling Nena Catering' }] },
+    })
+    expect(admin.inserts).toHaveLength(0)
+    expect(admin.updates).toHaveLength(1)
+    const data = admin.updates[0].data as Record<string, unknown>
+    // Pre-existing field preserved AND new field merged in.
+    expect(data.fields).toEqual({
+      'Contact number': '0917 000 1234',
+      Business: 'Aling Nena Catering',
+    })
+  })
+
+  it('upgrades the stored quote/confidence when a stronger signal arrives', async () => {
+    const admin = makeFakeAdmin({
+      pages: { ap1: { user_id: 'u1', status: 'published' } },
+      primaryActionPageId: 'ap1',
+      existing: {
+        id: 'sub_existing',
+        data: {
+          virtual: true,
+          message_quote: 'sige',
+          proceed_confidence: 'low',
+          proceed_reason: 'maybe',
+          thread_id: 't1',
+        },
+        meta: { idempotency_key: 'chat-intent:t1' },
+      },
+    })
+    await createVirtualSubmission(admin as never, {
+      ...baseArgs,
+      proceed: high,
+      idempotencyAnchor: 'msg2',
+    })
+    expect(admin.updates).toHaveLength(1)
+    const data = admin.updates[0].data as Record<string, unknown>
+    expect(data.message_quote).toBe('Kayo na po bahala')
+    expect(data.proceed_confidence).toBe('high')
+  })
+
+  it('does not downgrade a stored stronger signal with a weaker later one', async () => {
+    const admin = makeFakeAdmin({
+      pages: { ap1: { user_id: 'u1', status: 'published' } },
+      primaryActionPageId: 'ap1',
+      existing: {
+        id: 'sub_existing',
+        data: {
+          virtual: true,
+          message_quote: 'Kayo na po bahala',
+          proceed_confidence: 'high',
+          proceed_reason: 'defer',
+          thread_id: 't1',
+        },
+        meta: { idempotency_key: 'chat-intent:t1' },
+      },
+    })
+    await createVirtualSubmission(admin as never, {
+      ...baseArgs,
+      proceed: low,
+      idempotencyAnchor: 'msg2',
+      heuristicHit: true,
+    })
+    // No new info, weaker signal → nothing worth writing.
+    expect(admin.inserts).toHaveLength(0)
+    expect(admin.updates).toHaveLength(0)
   })
 })

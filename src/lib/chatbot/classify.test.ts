@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { StageBrief, StageChange, ActionPageBrief } from './classify'
-import { applyStageChange, coerceActionPage, coerceProceedIntent, sanitizeReply, stageInstruction, stageList } from './classify'
+import { applyStageChange, coerceActionPage, coerceProceedInfo, coerceProceedIntent, sanitizeReply, stageInstruction, stageInstructionParts, stageList } from './classify'
 
 // applyStageChange creates a fresh admin client after a successful move so
 // it can fire `dispatchStageEntered`. The real implementation pulls Supabase
@@ -99,6 +99,84 @@ describe('stageInstruction includes proceed-intent guidance', () => {
     expect(out).toContain('PROCEED INTENT')
     expect(out).toContain('proceed_intent')
     expect(out).toContain('Kayo na po bahala')
+  })
+})
+
+describe('coerceProceedInfo', () => {
+  it('keeps well-formed label/value details', () => {
+    expect(
+      coerceProceedInfo({
+        details: [
+          { label: 'Contact number', value: '0917 000 1234' },
+          { label: 'Business', value: 'Aling Nena Catering' },
+        ],
+      }),
+    ).toEqual({
+      details: [
+        { label: 'Contact number', value: '0917 000 1234' },
+        { label: 'Business', value: 'Aling Nena Catering' },
+      ],
+    })
+  })
+
+  it('returns null for missing/empty/malformed input', () => {
+    expect(coerceProceedInfo(null)).toBeNull()
+    expect(coerceProceedInfo({})).toBeNull()
+    expect(coerceProceedInfo({ details: [] })).toBeNull()
+    expect(coerceProceedInfo({ details: 'nope' })).toBeNull()
+  })
+
+  it('drops rows missing a label or value', () => {
+    expect(
+      coerceProceedInfo({
+        details: [
+          { label: 'Phone', value: '' },
+          { label: '', value: 'x' },
+          { label: 'Budget', value: '5k' },
+        ],
+      }),
+    ).toEqual({ details: [{ label: 'Budget', value: '5k' }] })
+  })
+
+  it('dedups by case-insensitive label, keeping the first occurrence', () => {
+    expect(
+      coerceProceedInfo({
+        details: [
+          { label: 'Contact number', value: '0917-111' },
+          { label: 'contact NUMBER', value: '0917-222' },
+        ],
+      }),
+    ).toEqual({ details: [{ label: 'Contact number', value: '0917-111' }] })
+  })
+
+  it('caps the number of details and field lengths', () => {
+    const many = Array.from({ length: 30 }, (_, i) => ({ label: `L${i}`, value: `V${i}` }))
+    const out = coerceProceedInfo({ details: many })!
+    expect(out.details.length).toBe(12)
+    const long = coerceProceedInfo({ details: [{ label: 'x'.repeat(500), value: 'y'.repeat(2000) }] })!
+    expect(out.details.length).toBeLessThanOrEqual(12)
+    expect(long.details[0].label.length).toBeLessThanOrEqual(120)
+    expect(long.details[0].value.length).toBeLessThanOrEqual(500)
+  })
+})
+
+describe('stageInstructionParts — chat-implied submission guidance', () => {
+  it('adds proceed_info schema + capture + acknowledge guidance in suggest mode', () => {
+    const parts = stageInstructionParts(stages, null, [], null, null, false, false, 'suggest', 'Note their number')
+    const out = parts.staticPrefix
+    expect(out).toContain('proceed_info')
+    expect(out).toContain('CAPTURE USEFUL INFO')
+    expect(out).toContain('ACKNOWLEDGE IN THIS REPLY')
+    expect(out).toContain('Note their number')
+  })
+
+  it('stays detect-only in off mode (no capture, no acknowledge, no proceed_info schema)', () => {
+    const parts = stageInstructionParts(stages, null, [], null, null, false, false, 'off', 'Note their number')
+    const out = parts.staticPrefix
+    expect(out).toContain('PROCEED INTENT')
+    expect(out).not.toContain('proceed_info')
+    expect(out).not.toContain('CAPTURE USEFUL INFO')
+    expect(out).toContain('does NOT change your reply')
   })
 })
 

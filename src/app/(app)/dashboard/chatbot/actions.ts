@@ -34,6 +34,7 @@ export async function saveChatbotConfig(formData: FormData): Promise<void> {
     temperature: num(formData.get('temperature'), 0.4),
     maxContext: num(formData.get('maxContext'), 12),
     virtualSubmissionMode: String(formData.get('virtualSubmissionMode') ?? ''),
+    virtualSubmissionInstructions: String(formData.get('virtualSubmissionInstructions') ?? ''),
   })
 
   revalidatePath('/dashboard/chatbot')
