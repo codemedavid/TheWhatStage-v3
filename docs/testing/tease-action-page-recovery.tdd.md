@@ -35,12 +35,33 @@ the stage-sendable and page-exists guards.
 ## Behavior Change
 
 `src/lib/action-pages/force-send.ts` — new `teasedLinkThisTurn` field on
-`ForceSendContext`; new branch (after the stage + page guards, before the
-qualification/readiness path) that returns the fallback page with
-`reason: 'override:tease'`.
+`ForceSendContext`; new branch (after the stage + page + **cold-inbound** guards,
+before the qualification/readiness path) that returns the fallback page with
+`reason: 'override:tease'`. A shared `buildForcedChoice(pageId, reason)` helper
+removes the duplicated `ActionPageChoice` shape across both override paths.
 
 `src/lib/chatbot/classify.ts` — captures `teasedLink` in the existing
 `[classify.tease]` block and threads `teasedLinkThisTurn` into `decideForceSend`.
+
+## Review Hardening (post code-review)
+
+A precision code review surfaced that `LINK_TEASE_RE` is a broad *detect-and-strip*
+regex, so reusing it directly as a *send* trigger would force-send a form even on
+NEGATED mentions ("hindi na kailangan i-fill up yung form", "optional lang yung
+form") or loose matches ("check niyo na lang po schedule"). Fixes applied:
+
+- **Negation/artifact gate** — recovery now fires only on a POSITIVE tease via the
+  exported `hasPositiveLinkTease()`: a sentence must match `LINK_TEASE_RE`, name an
+  action-page artifact (`TEASE_ARTIFACT_RE`), and NOT be negated/conditional
+  (`TEASE_NEGATION_RE`). Unit-tested directly (the regex→decision seam).
+- **Fallback path** — `teasedLink` is reset to `false` when the `!text` fallback
+  regenerates a fresh reply, so we never attach a button under an unrelated reply.
+- **Cold-inbound guard restored** — the tease branch sits *after* the cold-inbound
+  check, so a tease never blasts a form on a first inbound. `leadId` is
+  intentionally bypassed (deeplink is attributed by psid + page_id).
+- **Scope** — the unrelated `stageInstructionParts` prompt edits that had leaked
+  into the working tree (they belong to `fix/proceed-quote-grounding-tokens`) are
+  excluded from this branch.
 
 ## Task Report
 
@@ -67,6 +88,9 @@ qualification/readiness path) that returns the fallback page with
 | 4 | Tease recovery does nothing when no page exists | `force-send.test.ts:tease recovery > does nothing when there is no page to send` | unit | PASS |
 | 5 | `answerWithClassification` passes `teasedLinkThisTurn: true` when the reply teases a form with no action_page | `classify-force-send.test.ts:passes teasedLinkThisTurn=true to decideForceSend ...` | integration | PASS |
 | 6 | `answerWithClassification` passes `teasedLinkThisTurn: false` for a non-tease reply | `classify-force-send.test.ts:passes teasedLinkThisTurn=false when the reply has no tease` | integration | PASS |
+| 7 | A NEGATED tease ("hindi na kailangan i-fill up") does NOT trigger recovery | `classify-force-send.test.ts:passes teasedLinkThisTurn=false when the tease is NEGATED` | integration | PASS |
+| 8 | `hasPositiveLinkTease` returns true for genuine teases, false for negated/conditional/loose matches | `classify.test.ts:hasPositiveLinkTease` | unit | PASS |
+| 9 | Tease recovery respects the cold-inbound guard and fires with `leadId: null` | `force-send.test.ts:tease recovery > still respects the cold-inbound guard / fires even when leadId is null` | unit | PASS |
 
 ## Known Gaps / Follow-ups
 

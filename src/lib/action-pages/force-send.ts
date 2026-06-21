@@ -214,6 +214,14 @@ export interface ForceSendDecision {
   reason: string
 }
 
+/** A forced action-page choice. The button text/label are left empty on
+ *  purpose so the Messenger worker falls back to its guiding caption + the
+ *  page's configured cta_label. Shared by every override path so the shape
+ *  never drifts between them. */
+function buildForcedChoice(pageId: string, reason: string): ActionPageChoice {
+  return { action_page_id: pageId, reason, button_text: '', button_label: '' }
+}
+
 export async function decideForceSend(ctx: ForceSendContext): Promise<ForceSendDecision> {
   const llm = ctx.llm ?? defaultLlmCheckClient
 
@@ -226,27 +234,25 @@ export async function decideForceSend(ctx: ForceSendContext): Promise<ForceSendD
     return { actionPage: ctx.llmActionPage, overrideFired: false, reason: 'skip:no-page' }
   }
 
-  // Tease recovery: the model already decided to send a form this turn (it
-  // teased it in prose) but forgot to fill the structured field. Attaching the
-  // fallback page now is the whole point — a missed action page kills the sale.
-  // Bypass the qualification + readiness gates; the stage + page guards above
-  // are the only safety we keep (never push on lost/won/dormant or with no page).
-  if (ctx.teasedLinkThisTurn) {
-    return {
-      actionPage: {
-        action_page_id: page.id,
-        reason: 'tease-recovery: model teased a form without attaching it',
-        button_text: '',
-        button_label: '',
-      },
-      overrideFired: true,
-      reason: 'override:tease',
-    }
-  }
-
   const hadPriorCustomerTurn = ctx.history.some((m) => m.role === 'user')
   if (!hadPriorCustomerTurn) {
     return { actionPage: ctx.llmActionPage, overrideFired: false, reason: 'skip:cold-inbound' }
+  }
+
+  // Tease recovery: the model already decided to send a form this turn (it
+  // teased it in prose) but forgot to fill the structured field. Attaching the
+  // fallback page now is the whole point — a missed action page kills the sale.
+  // We deliberately bypass the qualification + readiness gates (the tease IS the
+  // readiness signal) and the leadId guard (the deeplink is attributed by
+  // psid + page_id, not leadId — see route.ts). The stage, page, and
+  // cold-inbound guards above still apply, so we never blast a form on a first
+  // cold inbound or in a lost/won/dormant stage.
+  if (ctx.teasedLinkThisTurn) {
+    return {
+      actionPage: buildForcedChoice(page.id, 'tease-recovery: model teased a form without attaching it'),
+      overrideFired: true,
+      reason: 'override:tease',
+    }
   }
 
   if (!ctx.leadId) {
@@ -286,12 +292,7 @@ export async function decideForceSend(ctx: ForceSendContext): Promise<ForceSendD
   }
 
   return {
-    actionPage: {
-      action_page_id: page.id,
-      reason: 'force-send: qualified + ready',
-      button_text: '',
-      button_label: '',
-    },
+    actionPage: buildForcedChoice(page.id, 'force-send: qualified + ready'),
     overrideFired: true,
     reason: 'override',
   }

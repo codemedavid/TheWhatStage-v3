@@ -3,6 +3,7 @@ import { applyStageChange, type ProceedInfo, type ProceedIntent, type StageBrief
 import type { VirtualSubmissionMode } from './config'
 import { resolveDefaultStageId } from '@/lib/action-pages/default-stage'
 import { dispatchSubmissionReceived } from '@/lib/workflow/dispatcher'
+import { redactForLlm } from './pii-redact'
 
 export type { VirtualSubmissionMode }
 
@@ -61,10 +62,10 @@ export function decideVirtualSubmission(input: ProceedGateInput): ProceedGateDec
   return { create: true, advanceStage, reason: 'proceed_intent' }
 }
 
-/** Normalize for verbatim-ish comparison: lowercase, strip diacritics (so
- *  "niño" matches "nino"), reduce every non-alphanumeric run to a single space,
- *  and trim. Keeps Tagalog/English words intact while ignoring case + accents +
- *  punctuation differences between the LLM's quote and the raw transcript. */
+/** Normalize for token comparison: lowercase, strip diacritics (so "niño"
+ *  matches "nino"), reduce every non-alphanumeric run to a single space, and
+ *  trim. Keeps Tagalog/English words intact while ignoring case + accents +
+ *  punctuation differences between the LLM's quote and the transcript. */
 function normalizeForGrounding(s: string): string {
   return s
     .toLowerCase()
@@ -74,25 +75,62 @@ function normalizeForGrounding(s: string): string {
     .trim()
 }
 
+/** Ultra-common Tagalog/Taglish/English particles + pronouns that carry almost
+ *  no identifying signal. They overlap across unrelated messages, so they are
+ *  ignored when deciding whether a quote is grounded — the DISTINCTIVE words
+ *  (the verbs/nouns a customer actually chose) are what must be present.
+ *  Proceed verbs (go, sige, tuloy, ituloy, proceed, push, check, book…) are
+ *  deliberately NOT here — they are exactly the distinctive signal we verify.
+ *  "phone"/"email" are kept distinctive too (a quote may legitimately span a
+ *  redacted contact the model saw). */
+const GROUNDING_STOPWORDS = new Set([
+  'po', 'opo', 'na', 'nga', 'ng', 'sa', 'ang', 'mga', 'ko', 'mo', 'ka', 'ako',
+  'akin', 'yung', 'yun', 'iyon', 'ito', 'yan', 'iyan', 'lang', 'lng', 'ba',
+  'pa', 'din', 'rin', 'namin', 'natin', 'namon', 'niyo', 'nyo', 'ninyo',
+  'kayo', 'ikaw', 'inyo', 'kami', 'tayo', 'at', 'ay', 'si', 'ni', 'kay',
+  'para', 'kasi', 'eh', 'the', 'a', 'an', 'to', 'of', 'i', 'you', 'it', 'is',
+  'im', 'yes', 'please', 'pls',
+])
+
 /**
  * True when `quote` is grounded in `customerText` — i.e. the customer actually
- * typed those words this thread. Used to reject a fabricated proceed-intent
- * where the model echoes a prompt example (e.g. "Kayo na po bahala") for a lead
- * who never said it.
+ * typed those words this thread. Rejects a fabricated proceed-intent where the
+ * model echoes a prompt example (e.g. "Kayo na po bahala") for a lead who never
+ * said it.
  *
- * Deliberately strict (normalized substring containment, no token-overlap
- * fuzzing): common Tagalog fillers ("kayo", "na", "po") overlap heavily across
- * unrelated messages, so a fuzzy match would wave fabricated phrases through.
- * The prompt instructs the model to copy the customer's words verbatim, so a
- * genuine quote is always a substring of the transcript. Empty quote → false
- * (nothing to ground). Pure, never throws.
+ * Token-based, not substring:
+ *  - Compares in the SAME PII-redacted space the model saw (`redactForLlm`), so
+ *    a quote carrying a "[phone]"/"[email]" placeholder grounds against the
+ *    redacted transcript instead of the raw digits (review finding 2).
+ *  - Requires every DISTINCTIVE token (non-stopword) of the quote to appear as a
+ *    whole token in the transcript. Whole-token matching avoids substring false
+ *    positives ("go po" no longer matches inside "ago poll" — finding 3), and
+ *    ignoring fillers tolerates light paraphrase/contraction differences as long
+ *    as the meaningful word is present ("ituloy niyo na" grounds against
+ *    "ituloy nyo na" — finding 1).
+ *  - All-filler quotes (no distinctive token) fall back to contiguous-phrase
+ *    containment so they cannot be waved through on filler overlap alone.
+ *
+ * Empty quote → false (nothing to ground). Pure, never throws.
  */
 export function isProceedQuoteGrounded(quote: string, customerText: string): boolean {
   const q = normalizeForGrounding(quote)
   if (!q) return false
-  const corpus = normalizeForGrounding(customerText)
+  // Ground against what the model actually saw: the redacted transcript.
+  const corpus = normalizeForGrounding(redactForLlm(customerText))
   if (!corpus) return false
-  return corpus.includes(q)
+
+  const corpusTokens = new Set(corpus.split(' '))
+  const quoteTokens = q.split(' ').filter(Boolean)
+  const distinctive = quoteTokens.filter((t) => !GROUNDING_STOPWORDS.has(t))
+
+  if (distinctive.length === 0) {
+    // Nothing distinctive to anchor on — require the exact filler phrase to
+    // appear contiguously rather than trusting scattered common-word overlap.
+    // (corpus is already single-space normalized, so substring == phrase match.)
+    return corpus.includes(q)
+  }
+  return distinctive.every((t) => corpusTokens.has(t))
 }
 
 export interface CreateVirtualSubmissionArgs {

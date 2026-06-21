@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { StageBrief, StageChange, ActionPageBrief } from './classify'
-import { applyStageChange, coerceActionPage, coerceProceedInfo, coerceProceedIntent, sanitizeReply, stageInstruction, stageInstructionParts, stageList } from './classify'
+import { applyStageChange, coerceActionPage, coerceProceedInfo, coerceProceedIntent, hasPositiveLinkTease, sanitizeReply, stageInstruction, stageInstructionParts, stageList } from './classify'
 
 // applyStageChange creates a fresh admin client after a successful move so
 // it can fire `dispatchStageEntered`. The real implementation pulls Supabase
@@ -492,6 +492,37 @@ describe('sanitizeReply', () => {
     const raw =
       'Usually sa ganyang volume, nasa 60-70% ang nasasayang. Gusto mo bang makita kung paano namin inaayos yan?'
     expect(sanitizeReply(raw)).toBe(raw)
+  })
+})
+
+// ---- hasPositiveLinkTease gates force-send recovery. It must return true for a
+//      genuine "here's the form" tease and false for negated/conditional/loose
+//      matches, so the bot never attaches a form right after saying it isn't
+//      needed. This is the regex→decision seam that classify-force-send.test.ts
+//      (which mocks decideForceSend) cannot exercise.
+describe('hasPositiveLinkTease', () => {
+  it.each([
+    'Perfect po! Sige, eto na po yung form para masimulan na natin 🎶',
+    "Here's the link for you 👇",
+    'Sige po, i-fill up niyo na lang yung form',
+    'I-fill out ang form para makita ang availability',
+  ])('returns true for a positive tease: %s', (raw) => {
+    expect(hasPositiveLinkTease(raw)).toBe(true)
+  })
+
+  it.each([
+    // Negated / conditional — the form is explicitly NOT needed this turn.
+    'Hindi na po kailangan i-fill up yung form, automatic na po',
+    'Wag po muna i-fill up yung form, ako na bahala',
+    'Fill up the form kung gusto niyo lang po, optional lang',
+    'Optional lang po yung form, pero eto kung gusto niyo',
+    // Loose LINK_TEASE_RE match that names no form artifact.
+    'Check niyo na lang po schedule ninyo bukas',
+    // Plain conversational reply.
+    'Salamat po sa inyo, aasikasuhin ko na po!',
+    '',
+  ])('returns false for a non-actionable tease: %s', (raw) => {
+    expect(hasPositiveLinkTease(raw)).toBe(false)
   })
 })
 

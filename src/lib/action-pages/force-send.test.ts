@@ -535,5 +535,18 @@ describe('decideForceSend', () => {
       expect(r.overrideFired).toBe(false)
       expect(r.reason).toBe('skip:no-page')
     })
+
+    it('still respects the cold-inbound guard (no prior customer turn)', async () => {
+      const r = await decideForceSend(ctx({ teasedLinkThisTurn: true, history: [] }))
+      expect(r.overrideFired).toBe(false)
+      expect(r.reason).toBe('skip:cold-inbound')
+    })
+
+    it('fires even when leadId is null (deeplink is attributed by psid, not leadId)', async () => {
+      const r = await decideForceSend(ctx({ teasedLinkThisTurn: true, leadId: null }))
+      expect(r.overrideFired).toBe(true)
+      expect(r.reason).toBe('override:tease')
+      expect(r.actionPage?.action_page_id).toBe('primary')
+    })
   })
 })

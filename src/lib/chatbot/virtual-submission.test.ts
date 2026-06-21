@@ -83,6 +83,40 @@ describe('isProceedQuoteGrounded', () => {
     expect(isProceedQuoteGrounded('', 'ok go po')).toBe(false)
     expect(isProceedQuoteGrounded('   ', 'ok go po')).toBe(false)
   })
+
+  // --- Code-review findings (token-matching, not substring) -----------------
+
+  it('Finding 1: accepts a lightly paraphrased quote when its distinctive word is present', () => {
+    // Model expands the contraction "nyo" → "niyo" (LLMs routinely normalize).
+    // The distinctive verb "ituloy" is in the transcript, so this is grounded —
+    // strict substring would have dropped a genuine consent here.
+    expect(isProceedQuoteGrounded('ituloy niyo na', 'sige, ituloy nyo na yan')).toBe(true)
+  })
+
+  it('Finding 2: grounds a quote that spans a redacted phone the model saw', () => {
+    // The LLM only ever sees the PII-redacted transcript, so its quote carries
+    // the "[phone]" placeholder. Grounding must compare in that same redacted
+    // space, not against the raw digits.
+    expect(
+      isProceedQuoteGrounded('go na, number ko [phone]', 'sige go na, number ko 09171234567'),
+    ).toBe(true)
+  })
+
+  it('Finding 3: rejects a short quote that only matches inside an unrelated word', () => {
+    // "go po" must NOT be grounded by "ago poll" — whole-token matching, no
+    // substring-inside-a-word false positives.
+    expect(isProceedQuoteGrounded('go po', 'sino ang nag-ago poll kahapon')).toBe(false)
+  })
+
+  it('still rejects a fabricated multi-word example whose distinctive word is absent', () => {
+    // Regression guard: the whole point of grounding. "bahala" never appears.
+    expect(isProceedQuoteGrounded('kayo na po bahala', 'pwede po magtanong, magkano?')).toBe(false)
+  })
+
+  it('grounds an all-filler quote only when it appears contiguously', () => {
+    expect(isProceedQuoteGrounded('kayo na po', 'sige kayo na po diyan')).toBe(true)
+    expect(isProceedQuoteGrounded('kayo na po', 'po na kayo ang bahala')).toBe(false)
+  })
 })
 
 // ---- IO happy-path with a hand-rolled fake admin client --------------------
