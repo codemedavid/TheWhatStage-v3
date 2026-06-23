@@ -3,6 +3,7 @@ import { applyStageChange, type ProceedInfo, type ProceedIntent, type StageBrief
 import type { VirtualSubmissionMode } from './config'
 import { resolveDefaultStageId } from '@/lib/action-pages/default-stage'
 import { dispatchSubmissionReceived } from '@/lib/workflow/dispatcher'
+import { redactForLlm } from './pii-redact'
 
 export type { VirtualSubmissionMode }
 
@@ -17,6 +18,13 @@ export interface ProceedGateInput {
   mode: VirtualSubmissionMode
   /** Whether the thread has a lead to attribute the submission to. */
   hasLead: boolean
+  /** Whether the lead already entered the pipeline through a real path — a
+   *  non-virtual form submission or an existing project. When true, a chat
+   *  agreement ("K po", "Okay") is just confirming a deal that already exists,
+   *  so a NEW chat-implied submission would be a duplicate (see the doubling
+   *  bug where a lead with a form + project also got a "Create project" row).
+   *  Optional; absent is treated as "not in pipeline". */
+  alreadyInPipeline?: boolean
 }
 
 export interface ProceedGateDecision {
@@ -44,6 +52,10 @@ export function decideVirtualSubmission(input: ProceedGateInput): ProceedGateDec
   if (input.mode === 'off') return no('mode_off')
   if (!input.hasLead) return no('no_lead')
   if (!input.proceed) return no('no_signal')
+  // Already in the pipeline (real submission or project) → the chat agreement is
+  // confirmation, not a new entry. Suppress to stop the doubled "Create project"
+  // row. Stage auto-advance is a separate path, so confirmations still move stages.
+  if (input.alreadyInPipeline) return no('already_in_pipeline')
 
   const { confidence } = input.proceed
   // Fabrication guard: a medium/high signal must quote words the customer really
@@ -61,10 +73,10 @@ export function decideVirtualSubmission(input: ProceedGateInput): ProceedGateDec
   return { create: true, advanceStage, reason: 'proceed_intent' }
 }
 
-/** Normalize for verbatim-ish comparison: lowercase, strip diacritics (so
- *  "niño" matches "nino"), reduce every non-alphanumeric run to a single space,
- *  and trim. Keeps Tagalog/English words intact while ignoring case + accents +
- *  punctuation differences between the LLM's quote and the raw transcript. */
+/** Normalize for token comparison: lowercase, strip diacritics (so "niño"
+ *  matches "nino"), reduce every non-alphanumeric run to a single space, and
+ *  trim. Keeps Tagalog/English words intact while ignoring case + accents +
+ *  punctuation differences between the LLM's quote and the transcript. */
 function normalizeForGrounding(s: string): string {
   return s
     .toLowerCase()
@@ -74,25 +86,62 @@ function normalizeForGrounding(s: string): string {
     .trim()
 }
 
+/** Ultra-common Tagalog/Taglish/English particles + pronouns that carry almost
+ *  no identifying signal. They overlap across unrelated messages, so they are
+ *  ignored when deciding whether a quote is grounded — the DISTINCTIVE words
+ *  (the verbs/nouns a customer actually chose) are what must be present.
+ *  Proceed verbs (go, sige, tuloy, ituloy, proceed, push, check, book…) are
+ *  deliberately NOT here — they are exactly the distinctive signal we verify.
+ *  "phone"/"email" are kept distinctive too (a quote may legitimately span a
+ *  redacted contact the model saw). */
+const GROUNDING_STOPWORDS = new Set([
+  'po', 'opo', 'na', 'nga', 'ng', 'sa', 'ang', 'mga', 'ko', 'mo', 'ka', 'ako',
+  'akin', 'yung', 'yun', 'iyon', 'ito', 'yan', 'iyan', 'lang', 'lng', 'ba',
+  'pa', 'din', 'rin', 'namin', 'natin', 'namon', 'niyo', 'nyo', 'ninyo',
+  'kayo', 'ikaw', 'inyo', 'kami', 'tayo', 'at', 'ay', 'si', 'ni', 'kay',
+  'para', 'kasi', 'eh', 'the', 'a', 'an', 'to', 'of', 'i', 'you', 'it', 'is',
+  'im', 'yes', 'please', 'pls',
+])
+
 /**
  * True when `quote` is grounded in `customerText` — i.e. the customer actually
- * typed those words this thread. Used to reject a fabricated proceed-intent
- * where the model echoes a prompt example (e.g. "Kayo na po bahala") for a lead
- * who never said it.
+ * typed those words this thread. Rejects a fabricated proceed-intent where the
+ * model echoes a prompt example (e.g. "Kayo na po bahala") for a lead who never
+ * said it.
  *
- * Deliberately strict (normalized substring containment, no token-overlap
- * fuzzing): common Tagalog fillers ("kayo", "na", "po") overlap heavily across
- * unrelated messages, so a fuzzy match would wave fabricated phrases through.
- * The prompt instructs the model to copy the customer's words verbatim, so a
- * genuine quote is always a substring of the transcript. Empty quote → false
- * (nothing to ground). Pure, never throws.
+ * Token-based, not substring:
+ *  - Compares in the SAME PII-redacted space the model saw (`redactForLlm`), so
+ *    a quote carrying a "[phone]"/"[email]" placeholder grounds against the
+ *    redacted transcript instead of the raw digits (review finding 2).
+ *  - Requires every DISTINCTIVE token (non-stopword) of the quote to appear as a
+ *    whole token in the transcript. Whole-token matching avoids substring false
+ *    positives ("go po" no longer matches inside "ago poll" — finding 3), and
+ *    ignoring fillers tolerates light paraphrase/contraction differences as long
+ *    as the meaningful word is present ("ituloy niyo na" grounds against
+ *    "ituloy nyo na" — finding 1).
+ *  - All-filler quotes (no distinctive token) fall back to contiguous-phrase
+ *    containment so they cannot be waved through on filler overlap alone.
+ *
+ * Empty quote → false (nothing to ground). Pure, never throws.
  */
 export function isProceedQuoteGrounded(quote: string, customerText: string): boolean {
   const q = normalizeForGrounding(quote)
   if (!q) return false
-  const corpus = normalizeForGrounding(customerText)
+  // Ground against what the model actually saw: the redacted transcript.
+  const corpus = normalizeForGrounding(redactForLlm(customerText))
   if (!corpus) return false
-  return corpus.includes(q)
+
+  const corpusTokens = new Set(corpus.split(' '))
+  const quoteTokens = q.split(' ').filter(Boolean)
+  const distinctive = quoteTokens.filter((t) => !GROUNDING_STOPWORDS.has(t))
+
+  if (distinctive.length === 0) {
+    // Nothing distinctive to anchor on — require the exact filler phrase to
+    // appear contiguously rather than trusting scattered common-word overlap.
+    // (corpus is already single-space normalized, so substring == phrase match.)
+    return corpus.includes(q)
+  }
+  return distinctive.every((t) => corpusTokens.has(t))
 }
 
 export interface CreateVirtualSubmissionArgs {
@@ -148,13 +197,19 @@ export async function createVirtualSubmission(
   admin: SupabaseClient,
   args: CreateVirtualSubmissionArgs,
 ): Promise<VirtualSubmissionResult | null> {
-  const decision = decideVirtualSubmission({
+  const gateInput: ProceedGateInput = {
     proceed: args.proceed,
     heuristicHit: args.heuristicHit ?? false,
     quoteGrounded: isProceedQuoteGrounded(args.proceed.quote, args.customerText ?? ''),
     mode: args.mode,
     hasLead: !!args.leadId,
-  })
+  }
+  // Cheap pre-gate first (mode/lead/signal/grounding) so the pipeline DB lookup
+  // only runs when we'd otherwise create a submission.
+  if (!decideVirtualSubmission(gateInput).create) return null
+
+  const alreadyInPipeline = await leadAlreadyInPipeline(admin, args.userId, args.leadId)
+  const decision = decideVirtualSubmission({ ...gateInput, alreadyInPipeline })
   if (!decision.create) return null
 
   const actionPageId = await resolveAttributionPage(
@@ -287,6 +342,54 @@ function fieldsFromInfo(info: ProceedInfo | null): Record<string, string> | null
   const out: Record<string, string> = {}
   for (const d of info.details) out[d.label] = d.value
   return out
+}
+
+interface PipelineSubmissionRow {
+  id: string
+  meta: Record<string, unknown> | null
+  outcome: string | null
+}
+
+/** True when the submission is a chat-implied (virtual) one rather than a real
+ *  form fill — recognised by either its `meta.virtual` flag or the virtual
+ *  outcome. Real submissions are the ones that count as a pipeline entry. */
+function isVirtualSubmissionRow(row: PipelineSubmissionRow): boolean {
+  return (row.meta?.virtual === true) || row.outcome === VIRTUAL_OUTCOME
+}
+
+/**
+ * True when the lead already entered the pipeline through a real path: a
+ * non-virtual form submission OR an existing project. Used to suppress a
+ * redundant chat-implied submission when the lead's chat agreement merely
+ * confirms a deal that already exists (the doubling bug).
+ *
+ * Best-effort and FAIL-OPEN: a query error returns false so a transient DB blip
+ * never silently swallows a legitimate first-time chat-implied lead. Reads a
+ * small bounded set and evaluates the virtual flag in JS — robust against
+ * null `meta` rather than a brittle PostgREST null filter.
+ */
+async function leadAlreadyInPipeline(
+  admin: SupabaseClient,
+  userId: string,
+  leadId: string,
+): Promise<boolean> {
+  const { data: subs, error: subErr } = await admin
+    .from('action_page_submissions')
+    .select('id, meta, outcome')
+    .eq('user_id', userId)
+    .eq('lead_id', leadId)
+    .limit(20)
+  if (subErr) return false
+  if ((subs ?? []).some((s) => !isVirtualSubmissionRow(s as PipelineSubmissionRow))) return true
+
+  const { data: projects, error: projErr } = await admin
+    .from('projects')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('lead_id', leadId)
+    .limit(1)
+  if (projErr) return false
+  return (projects ?? []).length > 0
 }
 
 interface ExistingSubmission {

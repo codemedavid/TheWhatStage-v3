@@ -50,6 +50,21 @@ describe('decideVirtualSubmission', () => {
     expect(decideVirtualSubmission({ proceed: low, heuristicHit: true, quoteGrounded: false, mode: 'suggest', hasLead: true }).create).toBe(true)
   })
 
+  it('never creates when the lead already entered the pipeline (real submission or project)', () => {
+    // The doubling bug: a lead who already filled a form / has a project then
+    // says "K po" in chat must NOT spawn a second chat-implied submission.
+    const d = decideVirtualSubmission({
+      proceed: high,
+      heuristicHit: true,
+      quoteGrounded: true,
+      mode: 'suggest',
+      hasLead: true,
+      alreadyInPipeline: true,
+    })
+    expect(d.create).toBe(false)
+    expect(d.reason).toBe('already_in_pipeline')
+  })
+
   it('advances stage only in auto mode with >= medium confidence', () => {
     expect(decideVirtualSubmission({ proceed: high, heuristicHit: false, quoteGrounded: true, mode: 'auto', hasLead: true }).advanceStage).toBe(true)
     expect(decideVirtualSubmission({ proceed: medium, heuristicHit: false, quoteGrounded: true, mode: 'auto', hasLead: true }).advanceStage).toBe(true)
@@ -83,6 +98,40 @@ describe('isProceedQuoteGrounded', () => {
     expect(isProceedQuoteGrounded('', 'ok go po')).toBe(false)
     expect(isProceedQuoteGrounded('   ', 'ok go po')).toBe(false)
   })
+
+  // --- Code-review findings (token-matching, not substring) -----------------
+
+  it('Finding 1: accepts a lightly paraphrased quote when its distinctive word is present', () => {
+    // Model expands the contraction "nyo" → "niyo" (LLMs routinely normalize).
+    // The distinctive verb "ituloy" is in the transcript, so this is grounded —
+    // strict substring would have dropped a genuine consent here.
+    expect(isProceedQuoteGrounded('ituloy niyo na', 'sige, ituloy nyo na yan')).toBe(true)
+  })
+
+  it('Finding 2: grounds a quote that spans a redacted phone the model saw', () => {
+    // The LLM only ever sees the PII-redacted transcript, so its quote carries
+    // the "[phone]" placeholder. Grounding must compare in that same redacted
+    // space, not against the raw digits.
+    expect(
+      isProceedQuoteGrounded('go na, number ko [phone]', 'sige go na, number ko 09171234567'),
+    ).toBe(true)
+  })
+
+  it('Finding 3: rejects a short quote that only matches inside an unrelated word', () => {
+    // "go po" must NOT be grounded by "ago poll" — whole-token matching, no
+    // substring-inside-a-word false positives.
+    expect(isProceedQuoteGrounded('go po', 'sino ang nag-ago poll kahapon')).toBe(false)
+  })
+
+  it('still rejects a fabricated multi-word example whose distinctive word is absent', () => {
+    // Regression guard: the whole point of grounding. "bahala" never appears.
+    expect(isProceedQuoteGrounded('kayo na po bahala', 'pwede po magtanong, magkano?')).toBe(false)
+  })
+
+  it('grounds an all-filler quote only when it appears contiguously', () => {
+    expect(isProceedQuoteGrounded('kayo na po', 'sige kayo na po diyan')).toBe(true)
+    expect(isProceedQuoteGrounded('kayo na po', 'po na kayo ang bahala')).toBe(false)
+  })
 })
 
 // ---- IO happy-path with a hand-rolled fake admin client --------------------
@@ -99,6 +148,10 @@ function makeFakeAdmin(opts: {
   pages: Record<string, { user_id: string; status: string }>
   primaryActionPageId?: string | null
   existing?: FakeRow | null
+  /** Real (non-virtual) submissions already on record for the lead. */
+  leadSubmissions?: FakeRow[]
+  /** Whether the lead already has a project. */
+  leadHasProject?: boolean
 }) {
   const inserts: Record<string, unknown>[] = []
   const updates: Record<string, unknown>[] = []
@@ -107,6 +160,17 @@ function makeFakeAdmin(opts: {
     inserts,
     updates,
     from(table: string) {
+      if (table === 'projects') {
+        return {
+          select: () => ({
+            eq: () => ({
+              eq: () => ({
+                limit: async () => ({ data: opts.leadHasProject ? [{ id: 'proj1' }] : [] }),
+              }),
+            }),
+          }),
+        }
+      }
       if (table === 'chatbot_configs') {
         return {
           select: () => ({
@@ -133,7 +197,10 @@ function makeFakeAdmin(opts: {
       if (table === 'action_page_submissions') {
         return {
           select: () => ({
+            // Idempotency lookup: .filter('meta->>idempotency_key', ...).maybeSingle()
             filter: () => ({ maybeSingle: async () => ({ data: opts.existing ?? null }) }),
+            // Pipeline check: .eq('user_id',...).eq('lead_id',...).limit() → real subs
+            eq: () => ({ eq: () => ({ limit: async () => ({ data: opts.leadSubmissions ?? [] }) }) }),
           }),
           insert: (row: Record<string, unknown>) => {
             inserts.push(row)
@@ -246,6 +313,43 @@ describe('createVirtualSubmission (IO)', () => {
     })
     const res = await createVirtualSubmission(admin as never, baseArgs)
     expect(res).toBeNull()
+  })
+
+  it('does NOT insert when the lead already has a real (non-virtual) submission', async () => {
+    // Leonard repro: filled the form (real submission) AND said "K po" in chat.
+    // The chat agreement must not spawn a second, doubled chat-implied row.
+    const admin = makeFakeAdmin({
+      pages: { ap1: { user_id: 'u1', status: 'published' } },
+      primaryActionPageId: 'ap1',
+      leadSubmissions: [{ id: 'real1', meta: {}, data: {} }],
+    })
+    const res = await createVirtualSubmission(admin as never, baseArgs)
+    expect(res).toBeNull()
+    expect(admin.inserts).toHaveLength(0)
+  })
+
+  it('does NOT insert when the lead already has a project', async () => {
+    const admin = makeFakeAdmin({
+      pages: { ap1: { user_id: 'u1', status: 'published' } },
+      primaryActionPageId: 'ap1',
+      leadHasProject: true,
+    })
+    const res = await createVirtualSubmission(admin as never, baseArgs)
+    expect(res).toBeNull()
+    expect(admin.inserts).toHaveLength(0)
+  })
+
+  it('still inserts when the lead only has a prior virtual submission (no real entry)', async () => {
+    // A prior chat-implied row is NOT a real pipeline entry — a different thread's
+    // virtual submission must not block this one. (Same-thread dedup is separate.)
+    const admin = makeFakeAdmin({
+      pages: { ap1: { user_id: 'u1', status: 'published' } },
+      primaryActionPageId: 'ap1',
+      leadSubmissions: [{ id: 'v1', meta: { virtual: true }, data: {} }],
+    })
+    const res = await createVirtualSubmission(admin as never, baseArgs)
+    expect(res?.submissionId).toBe('sub_1')
+    expect(admin.inserts).toHaveLength(1)
   })
 
   it('dedupes per thread: a second proceed-intent never inserts a new row', async () => {

@@ -1,7 +1,12 @@
 import { vi, describe, it, expect, beforeEach } from 'vitest'
 
 // Mutable reply the mock LLM returns, so individual tests can simulate a tease.
-let mockReplyText = JSON.stringify({ reply: 'Sounds good!', stage_change: null, action_page: null })
+// NOTE: the name MUST start with `mock` — vitest hoists `vi.mock` factories above
+// imports and only allows them to close over variables whose name begins with
+// `mock`. Renaming this to a non-`mock` identifier throws "Cannot access … before
+// initialization" at import time and fails the whole file.
+const DEFAULT_REPLY = JSON.stringify({ reply: 'Sounds good!', stage_change: null, action_page: null })
+let mockReplyText = DEFAULT_REPLY
 
 vi.mock('@/lib/rag', () => ({
   HfRouterLlm: class {
@@ -42,7 +47,7 @@ import { decideForceSend } from '@/lib/action-pages/force-send'
 describe('answerWithClassification force-send wiring', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mockReplyText = JSON.stringify({ reply: 'Sounds good!', stage_change: null, action_page: null })
+    mockReplyText = DEFAULT_REPLY
   })
 
   it('replaces actionPage with the force-send decision when override fires', async () => {
@@ -112,6 +117,41 @@ describe('answerWithClassification force-send wiring', () => {
   })
 
   it('passes teasedLinkThisTurn=false when the reply has no tease', async () => {
+    const supabase = {
+      from: () => ({
+        select: () => ({
+          eq: () => ({ maybeSingle: async () => ({ data: null, error: null }) }),
+        }),
+      }),
+    } as unknown as Parameters<typeof answerWithClassification>[0]
+
+    await answerWithClassification(
+      supabase,
+      'u1',
+      'sige po',
+      [{ role: 'user', content: 'earlier' }],
+      [],
+      null,
+      {
+        actionPages: [
+          { id: 'forced', title: 'P', cta_label: 'go', bot_send_instructions: '' },
+        ],
+        leadId: 'lead-1',
+        threadId: 't1',
+      },
+    )
+
+    expect(vi.mocked(decideForceSend).mock.calls[0][0]).toMatchObject({ teasedLinkThisTurn: false })
+  })
+
+  it('passes teasedLinkThisTurn=false when the tease is NEGATED (no need / optional)', async () => {
+    // LINK_TEASE_RE matches this line too, but the model is telling the customer
+    // they do NOT need the form — force-sending it would contradict the reply.
+    mockReplyText = JSON.stringify({
+      reply: 'Hindi na po kailangan i-fill up yung form, automatic na po ako bahala 💚',
+      stage_change: null,
+      action_page: null,
+    })
     const supabase = {
       from: () => ({
         select: () => ({

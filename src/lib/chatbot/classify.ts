@@ -411,13 +411,18 @@ export async function answerWithClassification(
     // a broken promise. sanitizeReply strips the tease sentence, but we log
     // every detection so we can track how often the model misbehaves.
     if (!actionPage && rawReply && rawReply !== text && LINK_TEASE_RE.test(rawReply)) {
-      // The tease is an explicit "send the form now" decision. Flag it so
-      // decideForceSend below recovers the fallback action page instead of
-      // letting the sanitized reply go out button-less (a dropped sale).
-      teasedLink = true
-      console.warn('[classify.tease] model teased a link with no action_page — recovering via force-send', {
+      // A POSITIVE tease ("eto na po yung form") is an explicit "send the form
+      // now" decision → flag it so decideForceSend recovers the action page
+      // instead of letting the sanitized reply go out button-less (a dropped
+      // sale). LINK_TEASE_RE is deliberately broad (it also strips NEGATIVE
+      // mentions like "hindi na kailangan i-fill up yung form" / "optional lang
+      // yung form"), so we must NOT force-send on those — that would attach a
+      // form right after telling the customer they don't need it.
+      teasedLink = hasPositiveLinkTease(rawReply)
+      console.warn('[classify.tease] model teased a link with no action_page attached', {
         userId,
         actionPagesAvailable: actionPages.length,
+        recovering: teasedLink,
         rawPreview: rawReply.slice(0, 200),
         sanitizedPreview: text.slice(0, 200),
       })
@@ -479,6 +484,10 @@ export async function answerWithClassification(
     // No structured envelope on the fallback path → no proceed-intent signal.
     proceedIntent = null
     proceedInfo = null
+    // The original (teasing) reply was discarded and regenerated here, so we
+    // can no longer claim THIS reply intends a form — clear the tease flag so
+    // decideForceSend doesn't attach a button under an unrelated fallback reply.
+    teasedLink = false
     // The fallback model didn't produce a structured envelope, so it never
     // reasoned about image attachment. Fall back to the same rule as
     // `answer()`: trust operator-tagged @asset/#folder refs.
@@ -1273,6 +1282,39 @@ export function sanitizeReply(raw: string): string {
 // structured `action_page` field was actually set.
 const LINK_TEASE_RE =
   /\b(?:e?to|heto|nandito|narito)\b[^.!?\n]{0,30}?\b(?:link|button|form|page)\b|\bhere(?:'?s|\s+is)\s+(?:the|a|your)?\s*(?:link|form|button|page)\b|\bcheck\s+(?:it|this|out|the\s+(?:link|page|form|button)|sa|ang|yung|ito|'to|niyo|mo|niya)\b|\btingnan\s+(?:mo|niyo|nyo)\b|\bi[-\s]?(?:click|tap|fill)\b|\bclick\s+(?:the|this|here|sa|yung|ito|'to)\b|\btap\s+(?:the|this|here|sa|yung)\b|\bfill\s+(?:out|in|up)\s+(?:the|this|na|yung)?\s*form\b|\bsundin\s+ang\s+link\b|\bpara\s+(?:ma)?kita\s+mo\b/i
+
+// Markers that flip a tease NEGATIVE — the model is telling the customer they
+// do NOT need to act on the link/form (so we must not force-send it). Covers
+// EN / TL / Taglish negations and "optional / only if you want" conditionals.
+const TEASE_NEGATION_RE =
+  /\b(?:hindi|hindî|wag|huwag|ayaw|optional|libre\s+lang)\b|\b'?di\b|\bno\s+need\b|\bdon'?t\b|\bnot\s+(?:yet|needed|required|necessary)\b|\bno\s+longer\b|\bkung\s+(?:gusto|nais|kailangan|trip)\b|\bif\s+you\s+(?:want|prefer|like|wish)\b|\bpwede\s+(?:naman\s+)?(?:hindi|wag|skip)\b|\bskip\b/i
+
+// The action-page artifact (or an explicit fill/submit action) a positive tease
+// must name. LINK_TEASE_RE alone is too broad to drive a SEND — it also fires on
+// unrelated lines like "check niyo na lang po schedule ninyo" (matches "check
+// …niyo" but mentions no form). Requiring an artifact keeps recovery to teases
+// that genuinely point at the action page.
+const TEASE_ARTIFACT_RE =
+  /\b(?:link|form|button|page|porma)\b|\b(?:i-?fill|fill\s+(?:out|in|up)|sagut(?:an|in)|i-?submit|i-?sagot)\b/i
+
+// True when at least one sentence is a POSITIVE tease: it names the action-page
+// artifact (or a fill/submit action), is NOT negated/conditional, and matches
+// the broad tease pattern. This gates force-send recovery so neither a negated
+// mention ("hindi na kailangan i-fill up yung form", "optional lang") nor a
+// loose unrelated match triggers an unwanted send.
+export function hasPositiveLinkTease(s: string): boolean {
+  if (!s) return false
+  const parts = s.split(/([.!?:\n]+)/)
+  for (let i = 0; i < parts.length; i += 2) {
+    const seg = parts[i] ?? ''
+    if (!seg) continue
+    if (!LINK_TEASE_RE.test(seg)) continue
+    if (TEASE_NEGATION_RE.test(seg)) continue
+    if (!TEASE_ARTIFACT_RE.test(seg)) continue
+    return true
+  }
+  return false
+}
 
 export function stripLinkTeaseSentences(s: string): string {
   if (!s) return s
