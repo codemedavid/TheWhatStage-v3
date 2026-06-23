@@ -18,6 +18,13 @@ export interface ProceedGateInput {
   mode: VirtualSubmissionMode
   /** Whether the thread has a lead to attribute the submission to. */
   hasLead: boolean
+  /** Whether the lead already entered the pipeline through a real path — a
+   *  non-virtual form submission or an existing project. When true, a chat
+   *  agreement ("K po", "Okay") is just confirming a deal that already exists,
+   *  so a NEW chat-implied submission would be a duplicate (see the doubling
+   *  bug where a lead with a form + project also got a "Create project" row).
+   *  Optional; absent is treated as "not in pipeline". */
+  alreadyInPipeline?: boolean
 }
 
 export interface ProceedGateDecision {
@@ -45,6 +52,10 @@ export function decideVirtualSubmission(input: ProceedGateInput): ProceedGateDec
   if (input.mode === 'off') return no('mode_off')
   if (!input.hasLead) return no('no_lead')
   if (!input.proceed) return no('no_signal')
+  // Already in the pipeline (real submission or project) → the chat agreement is
+  // confirmation, not a new entry. Suppress to stop the doubled "Create project"
+  // row. Stage auto-advance is a separate path, so confirmations still move stages.
+  if (input.alreadyInPipeline) return no('already_in_pipeline')
 
   const { confidence } = input.proceed
   // Fabrication guard: a medium/high signal must quote words the customer really
@@ -186,13 +197,19 @@ export async function createVirtualSubmission(
   admin: SupabaseClient,
   args: CreateVirtualSubmissionArgs,
 ): Promise<VirtualSubmissionResult | null> {
-  const decision = decideVirtualSubmission({
+  const gateInput: ProceedGateInput = {
     proceed: args.proceed,
     heuristicHit: args.heuristicHit ?? false,
     quoteGrounded: isProceedQuoteGrounded(args.proceed.quote, args.customerText ?? ''),
     mode: args.mode,
     hasLead: !!args.leadId,
-  })
+  }
+  // Cheap pre-gate first (mode/lead/signal/grounding) so the pipeline DB lookup
+  // only runs when we'd otherwise create a submission.
+  if (!decideVirtualSubmission(gateInput).create) return null
+
+  const alreadyInPipeline = await leadAlreadyInPipeline(admin, args.userId, args.leadId)
+  const decision = decideVirtualSubmission({ ...gateInput, alreadyInPipeline })
   if (!decision.create) return null
 
   const actionPageId = await resolveAttributionPage(
@@ -325,6 +342,54 @@ function fieldsFromInfo(info: ProceedInfo | null): Record<string, string> | null
   const out: Record<string, string> = {}
   for (const d of info.details) out[d.label] = d.value
   return out
+}
+
+interface PipelineSubmissionRow {
+  id: string
+  meta: Record<string, unknown> | null
+  outcome: string | null
+}
+
+/** True when the submission is a chat-implied (virtual) one rather than a real
+ *  form fill — recognised by either its `meta.virtual` flag or the virtual
+ *  outcome. Real submissions are the ones that count as a pipeline entry. */
+function isVirtualSubmissionRow(row: PipelineSubmissionRow): boolean {
+  return (row.meta?.virtual === true) || row.outcome === VIRTUAL_OUTCOME
+}
+
+/**
+ * True when the lead already entered the pipeline through a real path: a
+ * non-virtual form submission OR an existing project. Used to suppress a
+ * redundant chat-implied submission when the lead's chat agreement merely
+ * confirms a deal that already exists (the doubling bug).
+ *
+ * Best-effort and FAIL-OPEN: a query error returns false so a transient DB blip
+ * never silently swallows a legitimate first-time chat-implied lead. Reads a
+ * small bounded set and evaluates the virtual flag in JS — robust against
+ * null `meta` rather than a brittle PostgREST null filter.
+ */
+async function leadAlreadyInPipeline(
+  admin: SupabaseClient,
+  userId: string,
+  leadId: string,
+): Promise<boolean> {
+  const { data: subs, error: subErr } = await admin
+    .from('action_page_submissions')
+    .select('id, meta, outcome')
+    .eq('user_id', userId)
+    .eq('lead_id', leadId)
+    .limit(20)
+  if (subErr) return false
+  if ((subs ?? []).some((s) => !isVirtualSubmissionRow(s as PipelineSubmissionRow))) return true
+
+  const { data: projects, error: projErr } = await admin
+    .from('projects')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('lead_id', leadId)
+    .limit(1)
+  if (projErr) return false
+  return (projects ?? []).length > 0
 }
 
 interface ExistingSubmission {
