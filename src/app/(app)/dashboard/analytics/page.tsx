@@ -5,8 +5,8 @@ import {
   getAnalyticsOverview,
   getAnalyticsTimeseries,
   getDefaultCurrency,
-  getLeadFunnel,
   getLeadProjectCrosstab,
+  getLeadStageDistribution,
   getLeadToProject,
   getProjectStageValue,
   getSubmissionToProject,
@@ -19,6 +19,7 @@ import { AnalyticsToolbar } from './_components/Toolbar'
 import { KpiCards } from './_components/KpiCards'
 import { ConversionCard } from './_components/ConversionCard'
 import { StageJourney } from './_components/StageJourney'
+import { StageDistribution } from './_components/StageDistribution'
 import { TrendChart } from './_components/charts/TrendChart'
 import { CrossStageExplorer } from './_components/CrossStageExplorer'
 import { StageValueBreakdown } from './_components/StageValueBreakdown'
@@ -62,7 +63,7 @@ export default async function AnalyticsPage({
     overview,
     previousOverview,
     timeseries,
-    leadFunnel,
+    leadDistribution,
     leadToProject,
     subToProject,
     crosstab,
@@ -75,7 +76,7 @@ export default async function AnalyticsPage({
       ? getAnalyticsOverview({ ...filters, from: prev.from, to: prev.to })
       : Promise.resolve<AnalyticsOverview | null>(null),
     getAnalyticsTimeseries(filters),
-    getLeadFunnel(filters),
+    getLeadStageDistribution(filters),
     getLeadToProject(filters),
     getSubmissionToProject({ from: filters.from, to: filters.to }),
     getLeadProjectCrosstab(filters),
@@ -176,9 +177,13 @@ export default async function AnalyticsPage({
           </section>
 
           <section className="space-y-3">
+            <SectionHeader title="Where your leads are now" subtitle="Current lead count per stage — mirrors your kanban board" />
+            <StageDistribution title="Lead stages" rows={leadDistribution} unit="leads" />
+          </section>
+
+          <section className="space-y-3">
             <SectionHeader title="Stage journeys" subtitle="Monotonic funnels — furthest stage each entity reached" />
             <div className="grid gap-4 lg:grid-cols-2">
-              <StageJourney title="Lead stage journey" rows={leadFunnel} unit="leads" accent="#2563eb" showSelector />
               <StageJourney
                 title="Lead → Project stages"
                 rows={leadToProject}
