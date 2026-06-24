@@ -144,6 +144,34 @@ export async function getLeadFunnel(f: AnalyticsFilters): Promise<FunnelRow[]> {
   return mapFunnel(data, 'leads_reached')
 }
 
+export interface StageDistributionRow {
+  stageId: string
+  name: string
+  kind: string
+  position: number
+  count: number
+}
+
+/**
+ * Current lead count per pipeline stage, in board (position) order — the
+ * board-matching alternative to the monotonic {@link getLeadFunnel}. Stays
+ * accurate even when a tenant's stages are all the default `nurture` kind.
+ */
+export async function getLeadStageDistribution(f: AnalyticsFilters): Promise<StageDistributionRow[]> {
+  const supabase = await createClient()
+  const data = unwrapRpc<Record<string, unknown>[]>(
+    'getLeadStageDistribution',
+    await supabase.rpc('analytics_lead_stage_distribution', rpcArgs(f)),
+  )
+  return data.map((r) => ({
+    stageId: String(r.stage_id),
+    name: String(r.name),
+    kind: String(r.kind ?? ''),
+    position: n(r.position),
+    count: n(r.lead_count),
+  }))
+}
+
 export async function getLeadToProject(f: AnalyticsFilters): Promise<FunnelRow[]> {
   const supabase = await createClient()
   const data = unwrapRpc<Record<string, unknown>[]>(
