@@ -443,8 +443,43 @@ export async function answerWithClassification(
     }
   }
 
-  // Fallback: if JSON parse / shape failed, run a plain follow-up generation
-  // so the customer still gets a reply. Skip stage change in this branch.
+  // Cheap salvage BEFORE paying for a second reply. A JSON parse/shape failure
+  // here is almost always tail-truncation past REPLY_WITH_STRUCTURE_MAX_TOKENS:
+  // the `reply` field is the first key and is already complete in `raw`, only
+  // the structured tail got cut. Recover that reply instead of regenerating.
+  // The structured envelope is untrusted on this path, so the same field resets
+  // as the LLM fallback below apply.
+  if (!text) {
+    const salvaged = salvageReply(raw)
+    if (salvaged) {
+      const guarded = guardReply({
+        text: sanitizeReply(salvaged),
+        grounding,
+        fallbackMessage: config.fallbackMessage,
+      }).text
+      if (guarded) {
+        text = guarded
+        stageChange = null
+        actionPage = null
+        productRecommendation = null
+        propertyRecommendation = null
+        pause = null
+        proceedIntent = null
+        proceedInfo = null
+        teasedLink = false
+        attachImages = media.length > 0
+        console.log('[chatbot.classify.salvage] recovered reply from truncated JSON — skipped fallback call', {
+          userId,
+          rawLen: raw.length,
+          finishReason: completion.finishReason,
+        })
+      }
+    }
+  }
+
+  // Fallback: if JSON parse / shape failed AND salvage found nothing usable,
+  // run a plain follow-up generation so the customer still gets a reply. Skip
+  // stage change in this branch.
   if (!text) {
     const fallbackSystem = leadContext
       ? `${built.system}\n\n${leadContext}`
@@ -1348,6 +1383,57 @@ function parseJson(raw: string): unknown {
       return null
     }
   }
+}
+
+/**
+ * Recover the `reply` string from a combined-call response whose JSON failed to
+ * parse — almost always because the output hit REPLY_WITH_STRUCTURE_MAX_TOKENS
+ * and the model truncated the structured TAIL (proceed_intent/proceed_info/
+ * action_page) AFTER it had already finished writing `reply` (the first field
+ * in the schema). Extracting the reply here avoids paying for a second full
+ * `chatbot.answer.fallback` LLM call on ~1-in-5 turns.
+ *
+ * Tolerant of: escaped quotes/backslashes inside the value, a truncated tail,
+ * and a reply value itself cut off mid-string (no closing quote). Returns the
+ * unescaped reply, or null when no non-empty `reply` value can be found.
+ */
+export function salvageReply(raw: string): string | null {
+  if (!raw) return null
+  const keyMatch = raw.match(/"reply"\s*:\s*"/)
+  if (!keyMatch || keyMatch.index === undefined) return null
+  // Position of the first char inside the opening quote of the value.
+  let i = keyMatch.index + keyMatch[0].length
+  let value = ''
+  let terminated = false
+  for (; i < raw.length; i++) {
+    const ch = raw[i]
+    if (ch === '\\') {
+      // Keep the escape sequence intact for JSON.parse below. A lone trailing
+      // backslash (truncation landed on it) is dropped — nothing follows it.
+      const next = raw[i + 1]
+      if (next === undefined) break
+      value += ch + next
+      i++
+      continue
+    }
+    if (ch === '"') {
+      terminated = true
+      break
+    }
+    value += ch
+  }
+  // Unescape via JSON when the string was well-formed; on a mid-value
+  // truncation the captured slice is plain text, so use it as-is.
+  let decoded = value
+  if (terminated) {
+    try {
+      decoded = JSON.parse(`"${value}"`) as string
+    } catch {
+      decoded = value
+    }
+  }
+  const trimmed = decoded.trim()
+  return trimmed ? trimmed : null
 }
 
 function coerceStageChange(
