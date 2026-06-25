@@ -14,6 +14,7 @@ import { ProjectBoardClient } from './_components/ProjectBoard.client'
 import { ProjectsToolbar } from './_components/ProjectsToolbar'
 import { ProjectStats } from './_components/ProjectStats'
 import { ProjectsNavProvider } from './_components/_useUrlState'
+import { ArchiveRevealProvider } from './_components/_useArchiveReveal'
 import { DeepLinkProjectDrawer } from './_components/DeepLinkProjectDrawer.client'
 
 const UUID_RE =
@@ -82,11 +83,17 @@ async function ProjectsBody({
       </header>
 
       <ProjectStats stats={stats} />
-      <ProjectsToolbar params={params} />
 
-      <div className="mt-5">
-        <ProjectBoardClient columns={columns} stages={stages} showArchived={params.archived} />
-      </div>
+      {/* "Show archived" is client state shared by the toolbar toggle and the
+          board — seeded from ?archived=1 for deep-links, then toggled instantly
+          without a server round-trip (which silently failed to re-render). */}
+      <ArchiveRevealProvider initial={params.archived}>
+        <ProjectsToolbar params={params} />
+
+        <div className="mt-5">
+          <ProjectBoardClient columns={columns} stages={stages} />
+        </div>
+      </ArchiveRevealProvider>
 
       {projectId && (
         <DeepLinkProjectDrawer project={deepLinkProject} stages={stages} />
