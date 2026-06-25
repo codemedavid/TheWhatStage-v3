@@ -28,9 +28,18 @@ function dropFile(target: Element, file: File) {
 }
 
 describe('AttachmentComposer drag-and-drop', () => {
-  it('uploads a file dropped onto the upload area', async () => {
-    // 413 short-circuits before the server-action send, isolating the drop wiring.
-    const fetchMock = vi.fn().mockResolvedValue({ status: 413 } as Response)
+  it('uploads a file dropped onto the upload area straight to ImageKit', async () => {
+    // Direct-upload flow: first call mints the signature from our API, second
+    // sends the bytes to ImageKit (never through our serverless body cap).
+    const fetchMock = vi.fn(async (url: string) => {
+      if (typeof url === 'string' && url.includes('/api/messenger/imagekit-auth')) {
+        return {
+          ok: true,
+          json: async () => ({ token: 't', expire: 1, signature: 's', publicKey: 'p', folder: '/f' }),
+        } as Response
+      }
+      return { ok: true, json: async () => ({ url: 'https://ik/menu.pdf' }) } as Response
+    })
     vi.stubGlobal('fetch', fetchMock)
 
     render(<AttachmentComposer leadId="lead-1" onSent={noop} onError={noop} onClose={noop} />)
@@ -39,8 +48,9 @@ describe('AttachmentComposer drag-and-drop', () => {
     const pdf = new File(['%PDF-1.4'], 'menu.pdf', { type: 'application/pdf' })
     dropFile(dropZone, pdf)
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
-    expect(fetchMock.mock.calls[0][0]).toBe('/api/messenger/operator-upload')
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/messenger/imagekit-auth')
+    expect(fetchMock.mock.calls[1][0]).toBe('https://upload.imagekit.io/api/v1/files/upload')
   })
 
   it('routes a dropped audio file to the trimmer instead of uploading immediately', async () => {
