@@ -86,6 +86,68 @@ export function reachedFor(rows: readonly FunnelInputRow[], stageId: string): nu
   return rows.find((r) => r.stageId === stageId)?.reached ?? 0
 }
 
+// ---- Lead current-stage distribution -----------------------------------
+
+/**
+ * One lead pipeline stage with the number of leads CURRENTLY sitting in it —
+ * exactly what the kanban board column shows. This is deliberately NOT the
+ * monotonic "reached or beyond" funnel: it never relies on the stage `kind`
+ * being curated, so it stays accurate even when every column is the default
+ * `nurture` kind (the common case for custom boards).
+ */
+export interface StageCount {
+  stageId: string
+  name: string
+  kind: string
+  position: number
+  count: number
+}
+
+export interface StageShare extends StageCount {
+  /** % of all cohort leads currently in this stage. */
+  share: number
+  /** Bar width relative to the largest stage (0–100). */
+  barPct: number
+}
+
+export interface StageDistribution {
+  rows: StageShare[]
+  /** Total leads across all stages (the cohort size on the board). */
+  total: number
+}
+
+/**
+ * Turn raw per-stage current counts into a board-ordered distribution with each
+ * stage's share of the cohort and a relative bar width. Sorted by `position`
+ * (board order), so the view mirrors the kanban columns left-to-right.
+ */
+export function buildStageDistribution(rows: readonly StageCount[]): StageDistribution {
+  const sorted = [...rows].sort((a, b) => a.position - b.position)
+  const total = sorted.reduce((sum, r) => sum + r.count, 0)
+  const max = sorted.reduce((m, r) => Math.max(m, r.count), 0)
+  return {
+    total,
+    rows: sorted.map((r) => ({
+      ...r,
+      share: conversionPct(r.count, total),
+      barPct: max > 0 ? (r.count / max) * 100 : 0,
+    })),
+  }
+}
+
+export type StageKindGroup = 'won' | 'lost' | 'active'
+
+/**
+ * Collapse a stage `kind` into a display group: the won terminal, an off-ramp
+ * (lost / objection / dormant), or an active forward stage. Uncurated kinds
+ * (including the default `nurture` and the empty string) fall back to `active`.
+ */
+export function stageKindGroup(kind: string): StageKindGroup {
+  if (kind === 'won') return 'won'
+  if (kind === 'lost' || kind === 'objection' || kind === 'dormant') return 'lost'
+  return 'active'
+}
+
 // ---- Period-over-period comparison -------------------------------------
 
 /** A YYYY-MM-DD date range. */
