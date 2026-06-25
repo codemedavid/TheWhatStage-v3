@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { BulkContext } from './types'
+import { STAGE_EMBED } from '@/lib/projects/stage-embed'
 
 const COOLDOWN_HOURS = 48
 const DAILY_CAP = 500
@@ -125,7 +126,7 @@ export async function loadContext(
   if (leadIds.length > 0) {
     const { data: projectRows } = await admin
       .from('projects')
-      .select('lead_id, ai_instructions, updated_at, project_stages(kind)')
+      .select(`lead_id, ai_instructions, updated_at, ${STAGE_EMBED}(kind)`)
       .in('lead_id', leadIds)
       .order('updated_at', { ascending: false })
     for (const row of projectRows ?? []) {

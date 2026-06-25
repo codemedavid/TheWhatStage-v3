@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { ActiveProjectContext, ProjectStageKind } from './types'
+import { STAGE_EMBED } from './stage-embed'
 
 // A project + its stage as fetched for active-project resolution.
 export type ProjectForResolution = {
@@ -60,7 +61,7 @@ export async function resolveActiveProjectContext(
 ): Promise<ActiveProjectContext | null> {
   const { data, error } = await client
     .from('projects')
-    .select('id, title, value, currency, ai_instructions, updated_at, stage_id, project_stages(name, kind)')
+    .select(`id, title, value, currency, ai_instructions, updated_at, stage_id, ${STAGE_EMBED}(name, kind)`)
     .eq('lead_id', leadId)
     // Archived projects are set aside — the bot must not align to or follow up on
     // them, so they never become the lead's active project.

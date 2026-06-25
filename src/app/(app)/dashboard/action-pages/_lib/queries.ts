@@ -4,6 +4,7 @@ import type { ProjectStageKind } from '@/lib/projects/types'
 import type { PipelineRule } from './schemas'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { normalizeThreadCounts } from '@/lib/messenger/unread'
+import { STAGE_EMBED } from '@/lib/projects/stage-embed'
 
 export interface ActionPageRow {
   id: string
@@ -217,7 +218,7 @@ export async function fetchProjectInfoBySubmissionIds(
   if (submissionIds.length === 0) return map
   const { data, error } = await supabase
     .from('projects')
-    .select('id, origin_submission_id, project_stages(name, kind), leads(messenger_threads(unread_count, missed_count))')
+    .select(`id, origin_submission_id, ${STAGE_EMBED}(name, kind), leads(messenger_threads(unread_count, missed_count))`)
     .eq('user_id', userId)
     .in('origin_submission_id', submissionIds)
   if (error) throw new Error(`fetchProjectInfoBySubmissionIds: ${error.message}`)
