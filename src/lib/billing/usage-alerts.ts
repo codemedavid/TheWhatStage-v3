@@ -16,8 +16,15 @@ import type { SupabaseClient } from '@supabase/supabase-js'
  * it never blocks the rollup. Thresholds are env-overridable.
  */
 
-/** Alert when the windowed cache-hit rate falls below this fraction. */
-const CACHE_HIT_FLOOR = Number(process.env.USAGE_ALERT_CACHE_HIT_FLOOR) || 0.5
+/**
+ * Alert when the windowed cache-hit rate falls below this fraction. Calibrated
+ * to representative chatbot traffic: each prompt carries a large genuinely-
+ * dynamic tail (history + KB chunks + user message), so a perfectly-working
+ * prefix cache only covers ~40–50% of tokens. The earlier 0.50 floor was set
+ * from a single unusually-cacheable combined call (~95% hit) and tripped on
+ * healthy traffic. Env-overridable.
+ */
+const CACHE_HIT_FLOOR = Number(process.env.USAGE_ALERT_CACHE_HIT_FLOOR) || 0.3
 /** Alert when windowed cost exceeds baseline by this factor. */
 const COST_SPIKE_FACTOR = Number(process.env.USAGE_ALERT_COST_SPIKE_FACTOR) || 2
 /** Absolute floor (USD micros) below which the cost-spike alert never fires. */
@@ -30,6 +37,8 @@ const WEEK_MS = 7 * 24 * HOUR_MS
 
 export interface UsageHealth {
   promptTokens: number
+  /** Prompt tokens over rows whose cache count is KNOWN — the hit-rate basis. */
+  knownPromptTokens: number
   cachedPromptTokens: number
   cacheHitRate: number | null
   costMicros: number
@@ -73,9 +82,17 @@ export async function checkUsageHealth(admin: SupabaseClient): Promise<UsageHeal
 
   const rows = (recent ?? []) as LedgerRow[]
   const promptTokens = sum(rows, 'prompt_tokens')
-  const cachedPromptTokens = sum(rows, 'cached_prompt_tokens')
   const costMicros = sum(rows, 'cost_micros')
-  const cacheHitRate = promptTokens > 0 ? cachedPromptTokens / promptTokens : null
+
+  // Cache-hit rate over KNOWN rows only. A null `cached_prompt_tokens` means the
+  // provider did not report a cache count (UNKNOWN) — NOT a 0-hit — so including
+  // its prompt tokens in the denominator would bias the rate down and manufacture
+  // false cache-collapse alerts. Exclude those rows from both numerator and
+  // denominator. (`sum` already skips nulls, so the numerator is known-cached.)
+  const knownRows = rows.filter((r) => r.cached_prompt_tokens != null)
+  const knownPromptTokens = sum(knownRows, 'prompt_tokens')
+  const cachedPromptTokens = sum(knownRows, 'cached_prompt_tokens')
+  const cacheHitRate = knownPromptTokens > 0 ? cachedPromptTokens / knownPromptTokens : null
 
   // Baseline: mean hourly cost over the trailing 7 days, EXCLUDING the last hour
   // so a spike doesn't inflate its own baseline.
@@ -93,13 +110,13 @@ export async function checkUsageHealth(admin: SupabaseClient): Promise<UsageHeal
 
   if (
     cacheHitRate != null &&
-    promptTokens >= CACHE_HIT_MIN_PROMPT &&
+    knownPromptTokens >= CACHE_HIT_MIN_PROMPT &&
     cacheHitRate < CACHE_HIT_FLOOR
   ) {
     alerts.push(
       `cache-hit rate ${(cacheHitRate * 100).toFixed(1)}% is below the ` +
         `${Math.round(CACHE_HIT_FLOOR * 100)}% floor over the last hour ` +
-        `(prompt=${promptTokens}, cached=${cachedPromptTokens}) — the prompt prefix ` +
+        `(prompt=${knownPromptTokens}, cached=${cachedPromptTokens}) — the prompt prefix ` +
         `may have lost byte-stability or traffic moved off the caching provider.`,
     )
   }
@@ -132,6 +149,7 @@ export async function checkUsageHealth(admin: SupabaseClient): Promise<UsageHeal
 
   return {
     promptTokens,
+    knownPromptTokens,
     cachedPromptTokens,
     cacheHitRate,
     costMicros,

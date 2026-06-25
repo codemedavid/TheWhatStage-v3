@@ -7,6 +7,7 @@ const captureMessage = vi.fn()
 vi.mock('@sentry/nextjs', () => ({ captureMessage: (...a: unknown[]) => captureMessage(...a) }))
 
 import { recordUsage, recordUsageDeferred } from './recordUsage'
+import { costMicros } from './pricing'
 
 const DEEPSEEK = 'deepseek/deepseek-v4-flash'
 
@@ -110,6 +111,57 @@ describe('recordUsage', () => {
     await expect(
       recordUsage(client, 'u', 'chatbot.answer', { model: DEEPSEEK, usage }, null, 'k'),
     ).resolves.toBeUndefined()
+  })
+})
+
+describe('recordUsage — UNKNOWN cache count (null, not 0)', () => {
+  // A provider that omits the cache field means UNKNOWN, NOT "no cache hit".
+  // Storing 0 conflates the two and biases the usage-health watchdog's hit-rate
+  // downward (manufacturing false cache-collapse pages). Persist NULL instead.
+  it('persists cached_prompt_tokens as NULL when the count is UNKNOWN', async () => {
+    const { client, upsert } = makeSupabase()
+    await recordUsage(
+      client,
+      'u',
+      'chatbot.classify',
+      { model: DEEPSEEK, usage: { ...usage, cachedPromptTokens: null } },
+      null,
+      'k',
+    )
+    expect(upsert.mock.calls[0][0].cached_prompt_tokens).toBeNull()
+  })
+
+  it('persists the reported number when the provider DID report a cache count', async () => {
+    const { client, upsert } = makeSupabase()
+    await recordUsage(
+      client,
+      'u',
+      'chatbot.classify',
+      { model: DEEPSEEK, usage: { ...usage, cachedPromptTokens: 500 } },
+      null,
+      'k',
+    )
+    expect(upsert.mock.calls[0][0].cached_prompt_tokens).toBe(500)
+  })
+
+  it('treats UNKNOWN as 0 cached for the COST estimate (no phantom discount / NaN)', async () => {
+    const { client, upsert } = makeSupabase()
+    await recordUsage(
+      client,
+      'u',
+      'chatbot.classify',
+      // costUsd absent → price-map path, which must use 0 (not null) for cached.
+      { model: DEEPSEEK, usage: { ...usage, cachedPromptTokens: null } },
+      null,
+      'k',
+    )
+    const expected = costMicros(DEEPSEEK, {
+      promptTokens: usage.promptTokens,
+      cachedPromptTokens: 0,
+      completionTokens: usage.completionTokens,
+    })
+    expect(upsert.mock.calls[0][0].cost_micros).toBe(expected)
+    expect(Number.isNaN(upsert.mock.calls[0][0].cost_micros)).toBe(false)
   })
 })
 
