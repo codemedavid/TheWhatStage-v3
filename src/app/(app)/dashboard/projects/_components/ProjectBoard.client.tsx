@@ -22,8 +22,10 @@ import { markThreadRead } from '../../leads/actions/messenger'
 import { createProjectStage, reorderProjectStages } from '../actions/stages'
 import { splitStageProjects } from '../_lib/board-split'
 import { buildProjectToolbarModel, type DrawerTab, type ProjectToolbarModel } from '../_lib/project-toolbar'
+import { useArchiveReveal } from './_useArchiveReveal'
 import { ProjectDrawer } from './ProjectDrawer'
 import { StageSettingsDrawer } from './StageSettingsDrawer'
+import { StageArchiveDrawer } from './StageArchiveDrawer'
 import type { ProjectCardRow } from '../_lib/queries'
 import { UnreadBadge } from '../../_components/UnreadBadge'
 import type { ProjectStageRow } from '@/lib/projects/types'
@@ -45,16 +47,21 @@ type BoardAction =
   | { type: 'moveProject'; id: string; toStageId: string; toIndex: number }
   | { type: 'reorderStages'; orderedIds: string[] }
 
+type ArchiveView = { stage: ProjectStageRow; archived: ProjectCardRow[] }
+
 export function ProjectBoardClient({
   columns,
   stages,
-  showArchived,
 }: {
   columns: Column[]
   stages: ProjectStageRow[]
-  showArchived: boolean
 }) {
+  // Reveal state lives in client context (shared with the toolbar toggle) so it
+  // flips instantly without the server round-trip that used to silently fail.
+  const { showArchived } = useArchiveReveal()
   const [creating, setCreating] = useState(false)
+  // Which stage's dedicated archive panel is open (from its "N archived" badge).
+  const [archiveView, setArchiveView] = useState<ArchiveView | null>(null)
   // Open the edit drawer instantly from the in-memory row instead of doing a
   // `router.push(?project=)` round-trip — the server refetch was what made the
   // drawer feel laggy. Mirrors the leads board's local `editing` state.
@@ -186,6 +193,7 @@ export function ProjectBoardClient({
                 onOpen={openProject}
                 onReadMessages={openMessages}
                 onSettings={setSettingsStage}
+                onViewArchive={(stage, archived) => setArchiveView({ stage, archived })}
               />
             ))}
             <AddStageColumn />
@@ -220,6 +228,16 @@ export function ProjectBoardClient({
           onClose={() => setSettingsStage(null)}
         />
       )}
+
+      {archiveView && (
+        <StageArchiveDrawer
+          key={archiveView.stage.id}
+          stage={archiveView.stage}
+          archived={archiveView.archived}
+          onClose={() => setArchiveView(null)}
+          onOpen={(project) => { setArchiveView(null); openProject(project) }}
+        />
+      )}
     </>
   )
 }
@@ -231,6 +249,7 @@ function StageColumn({
   onOpen,
   onReadMessages,
   onSettings,
+  onViewArchive,
 }: {
   stage: ProjectStageRow
   projects: ProjectCardRow[]
@@ -238,11 +257,15 @@ function StageColumn({
   onOpen: (project: ProjectCardRow) => void
   onReadMessages: (project: ProjectCardRow) => void
   onSettings: (stage: ProjectStageRow) => void
+  onViewArchive: (stage: ProjectStageRow, archived: ProjectCardRow[]) => void
 }) {
   // Archived cards never enter the sortable list; they render as static dimmed
   // rows below it only when the operator reveals them. Count + subtotal still
-  // span the full set, so the header reflects archived value too.
-  const { active, archived, archivedCount } = splitStageProjects(projects, showArchived)
+  // span the full set, so the header reflects archived value too. Split once
+  // with the full archived set; the inline reveal is gated on `showArchived`,
+  // while the badge always has the complete list for its dedicated panel.
+  const { active, archived: archivedAll, archivedCount } = splitStageProjects(projects, true)
+  const archived = showArchived ? archivedAll : []
   // The column is a sortable item (for left/right reorder) AND the drop target
   // for cards landing in an empty column. Dragging is bound to the header grip
   // only, so clicking cards / the ⋯ button never starts a column drag.
@@ -306,13 +329,16 @@ function StageColumn({
           </span>
           <span className="text-[11px]" style={{ color: 'var(--lead-muted)' }}>{projects.length}</span>
           {archivedCount > 0 && (
-            <span
-              className="rounded-full px-1.5 py-0.5 text-[10px] font-medium"
+            <button
+              type="button"
+              onClick={() => onViewArchive(stage, archivedAll)}
+              className="lead-focus cursor-pointer rounded-full px-1.5 py-0.5 text-[10px] font-medium transition-colors"
               style={{ background: 'var(--lead-surface)', color: 'var(--lead-muted)', border: '1px solid var(--lead-line)' }}
-              title={`${archivedCount} archived card(s) — hidden from the board but still counted`}
+              title={`View ${archivedCount} archived project(s) in ${stage.name}`}
+              aria-label={`View ${archivedCount} archived project(s) in ${stage.name}`}
             >
               {archivedCount} archived
-            </span>
+            </button>
           )}
         </div>
         <div className="flex items-center gap-1.5">
