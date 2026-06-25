@@ -6,6 +6,7 @@ import { Sidebar } from './_components/sidebar'
 import { Topbar } from './_components/topbar'
 import { SuggestionsToast } from './dashboard/leads/_components/SuggestionsToast.client'
 import { countPendingSuggestions } from './dashboard/leads/actions/suggestions'
+import { countNeedsReply } from './dashboard/inbox/_lib/queries'
 
 export default function AppLayout({
   children,
@@ -59,6 +60,12 @@ async function SidebarWithSession() {
   } catch {
     // transient failure — leave count at 0
   }
+  let needsReplyCount = 0
+  try {
+    needsReplyCount = await countNeedsReply(supabase, session.userId)
+  } catch {
+    // transient failure — leave count at 0
+  }
   return (
     <Sidebar
       userInitial={initial}
@@ -67,6 +74,7 @@ async function SidebarWithSession() {
       isSuperadmin={session.role === 'superadmin'}
       pendingSuggestionCount={pendingSuggestionCount}
       projectUnreadCount={projectUnreadCount}
+      needsReplyCount={needsReplyCount}
     />
   )
 }

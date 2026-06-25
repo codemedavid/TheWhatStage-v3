@@ -6,6 +6,7 @@ import { useState, useEffect, useTransition } from 'react'
 
 type IconName =
   | 'overview'
+  | 'inbox'
   | 'analytics'
   | 'leads'
   | 'projects'
@@ -39,6 +40,7 @@ type NavItem = {
 
 const items: NavItem[] = [
   { href: '/dashboard', label: 'Overview', icon: 'overview' },
+  { href: '/dashboard/inbox', label: 'Inbox', icon: 'inbox' },
   { href: '/dashboard/analytics', label: 'Analytics', icon: 'analytics' },
   { href: '/dashboard/leads', label: 'Leads', icon: 'leads' },
   { href: '/dashboard/projects', label: 'Projects', icon: 'projects' },
@@ -56,6 +58,7 @@ const items: NavItem[] = [
 
 const mobileItems: { href: string; label: string; icon: IconName }[] = [
   { href: '/dashboard', label: 'Overview', icon: 'overview' },
+  { href: '/dashboard/inbox', label: 'Inbox', icon: 'inbox' },
   { href: '/dashboard/leads', label: 'Leads', icon: 'leads' },
   { href: '/dashboard/projects', label: 'Projects', icon: 'projects' },
   { href: '/dashboard/chatbot', label: 'Chatbot', icon: 'chatbot' },
@@ -69,6 +72,12 @@ function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
       <>
         <path d="M3 12L12 3l9 9" />
         <path d="M5 10v10h14V10" />
+      </>
+    ),
+    inbox: (
+      <>
+        <path d="M3 13h5l1.5 3h5L21 13" />
+        <path d="M5 5h14l2 8v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5z" />
       </>
     ),
     analytics: (
@@ -227,6 +236,7 @@ export function Sidebar({
   isSuperadmin = false,
   pendingSuggestionCount = 0,
   projectUnreadCount = 0,
+  needsReplyCount = 0,
 }: {
   userInitial?: string
   userName?: string
@@ -234,6 +244,7 @@ export function Sidebar({
   isSuperadmin?: boolean
   pendingSuggestionCount?: number
   projectUnreadCount?: number
+  needsReplyCount?: number
 } = {}) {
   const visibleItems = items.filter(
     (item) =>
@@ -321,6 +332,14 @@ export function Sidebar({
                       className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-semibold text-white"
                     >
                       {projectUnreadCount > 99 ? '99+' : projectUnreadCount}
+                    </span>
+                  )}
+                  {item.href === '/dashboard/inbox' && needsReplyCount > 0 && (
+                    <span
+                      title={`${needsReplyCount} conversation(s) waiting on a reply`}
+                      className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-semibold text-white"
+                    >
+                      {needsReplyCount > 99 ? '99+' : needsReplyCount}
                     </span>
                   )}
                 </span>

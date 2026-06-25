@@ -19,7 +19,14 @@ describe('buildCounterResetPatch', () => {
 
 describe('resetThreadCountersByLead', () => {
   function fakeSupabase(result: { error: unknown }) {
-    const capture: { table?: string; patch?: unknown; col?: string; val?: unknown } = {}
+    const capture: {
+      table?: string
+      patch?: unknown
+      col?: string
+      val?: unknown
+      filters: Array<{ col: string; val: unknown }>
+    } = { filters: [] }
+    // Thenable builder so chained `.eq(...).eq(...)` resolves on await.
     const builder = {
       update: (patch: unknown) => {
         capture.patch = patch
@@ -28,8 +35,10 @@ describe('resetThreadCountersByLead', () => {
       eq: (col: string, val: unknown) => {
         capture.col = col
         capture.val = val
-        return Promise.resolve(result)
+        capture.filters.push({ col, val })
+        return builder
       },
+      then: (resolve: (r: { error: unknown }) => unknown) => resolve(result),
     }
     const client = { from: (t: string) => ((capture.table = t), builder) } as unknown as SupabaseClient
     return { client, capture }
@@ -51,10 +60,25 @@ describe('resetThreadCountersByLead', () => {
     expect(capture.patch).toMatchObject({ unread_count: 0, missed_count: 0 })
   })
 
+  it('also scopes the update by user_id when one is provided', async () => {
+    const { client, capture } = fakeSupabase({ error: null })
+    await resetThreadCountersByLead(client, 'lead-4', { resetMissed: true }, 'user-9')
+    expect(capture.filters).toEqual([
+      { col: 'lead_id', val: 'lead-4' },
+      { col: 'user_id', val: 'user-9' },
+    ])
+  })
+
+  it('omits the user_id filter when no userId is passed', async () => {
+    const { client, capture } = fakeSupabase({ error: null })
+    await resetThreadCountersByLead(client, 'lead-5', { resetMissed: false })
+    expect(capture.filters).toEqual([{ col: 'lead_id', val: 'lead-5' }])
+  })
+
   it('throws a labelled error when the update fails', async () => {
     const { client } = fakeSupabase({ error: { message: 'nope' } })
     await expect(
       resetThreadCountersByLead(client, 'lead-3', { resetMissed: true }),
-    ).rejects.toThrow('resetThreadCounters: nope')
+    ).rejects.toThrow('resetThreadCountersByLead: nope')
   })
 })

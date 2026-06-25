@@ -20,15 +20,20 @@ export function buildCounterResetPatch(opts: ResetOptions, nowIso: string): Coun
 
 // Reset the unread (and optionally missed) counters on a lead's Messenger
 // thread. Must be called with the owner's client so RLS scopes the update to
-// the caller's own thread.
+// the caller's own thread. When the caller already knows the owner, pass
+// `userId` to scope the write by user_id too — defense-in-depth that matches the
+// rest of the dashboard write paths (RLS still enforces this regardless).
 export async function resetThreadCountersByLead(
   supabase: SupabaseClient,
   leadId: string,
   opts: ResetOptions,
+  userId?: string,
 ): Promise<void> {
-  const { error } = await supabase
+  let query = supabase
     .from('messenger_threads')
     .update(buildCounterResetPatch(opts, new Date().toISOString()))
     .eq('lead_id', leadId)
-  if (error) throw new Error(`resetThreadCounters: ${error.message}`)
+  if (userId) query = query.eq('user_id', userId)
+  const { error } = await query
+  if (error) throw new Error(`resetThreadCountersByLead: ${error.message}`)
 }
