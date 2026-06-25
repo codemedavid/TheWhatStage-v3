@@ -71,6 +71,10 @@ interface StepRow {
   instruction: string
   manual_message: string | null
   fallback_message: string | null
+  // Absent on legacy/mocked rows; treated as enabled. A false value means the
+  // operator turned this touch off — it is skipped (never sent, never shifts the
+  // remaining steps' timing).
+  enabled?: boolean
 }
 
 interface ProjectRow {
@@ -133,10 +137,16 @@ export async function handleProjectSequenceRun(
 
   const { data: steps } = await admin
     .from('project_stage_sequence_steps')
-    .select('position, delay_minutes, instruction, manual_message, fallback_message')
+    .select('position, delay_minutes, instruction, manual_message, fallback_message, enabled')
     .eq('sequence_id', run.sequence_id)
     .order('position', { ascending: true })
-  const stepRows = (steps ?? []) as StepRow[]
+  // Drop disabled steps and re-index the survivors to a contiguous 0..M-1 range.
+  // `run.next_step_idx` is an ordinal into the LIVE (enabled) sequence, and the
+  // batch drafts key on these same re-indexed positions — keeping them aligned
+  // is what makes "skip a disabled step" correct without touching run state.
+  const stepRows = ((steps ?? []) as StepRow[])
+    .filter((s) => s.enabled !== false)
+    .map((s, i) => ({ ...s, position: i }))
   const step = stepRows[run.next_step_idx]
   if (!step) { await markDone(admin, run.id); return { outcome: 'done', reason: 'no more steps' } }
 

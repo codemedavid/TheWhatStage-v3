@@ -2,11 +2,9 @@
 import { useCallback, useEffect, useRef, useState, useTransition } from 'react'
 import { createPortal } from 'react-dom'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { updateProjectStage, deleteProjectStage } from '../actions/stages'
-import { SequenceConfig } from './SequenceConfig'
 import type { ProjectStageKind, ProjectStageRow } from '@/lib/projects/types'
-
-type Tab = 'settings' | 'followup'
 
 const CLOSE_ANIM_MS = 200
 
@@ -95,7 +93,6 @@ export function StageSettingsDrawer({ stage, onClose }: { stage: ProjectStageRow
 
 function StageSettingsBody({ stage, onClose }: { stage: ProjectStageRow; onClose: () => void }) {
   const router = useRouter()
-  const [tab, setTab] = useState<Tab>('settings')
   const [name, setName] = useState(stage.name)
   const [color, setColor] = useState<string | null>(stage.color)
   const [kind, setKind] = useState<ProjectStageKind>(stage.kind ?? 'open')
@@ -137,26 +134,18 @@ function StageSettingsBody({ stage, onClose }: { stage: ProjectStageRow; onClose
         </button>
       </div>
 
-      <div className="flex items-center gap-1 border-b px-3" style={{ borderColor: 'var(--lead-line)' }}>
-        {(['settings', 'followup'] as Tab[]).map((t) => (
-          <button
-            key={t}
-            type="button"
-            onClick={() => setTab(t)}
-            className="px-3 py-2.5 text-[12.5px] font-medium"
-            style={{
-              color: tab === t ? 'var(--lead-accent)' : 'var(--lead-muted)',
-              borderBottom: tab === t ? '2px solid var(--lead-accent)' : '2px solid transparent',
-            }}
-          >
-            {t === 'followup' ? 'Follow-up' : 'Settings'}
-          </button>
-        ))}
-      </div>
-
       <div className="flex-1 overflow-y-auto p-5">
-        {tab === 'settings' && (
           <div className="space-y-4">
+            <Link
+              href={`/dashboard/projects/stages/${stage.id}`}
+              className="lead-focus flex items-center justify-between rounded-lg border px-3 py-2.5 text-[12.5px] font-medium"
+              style={{ borderColor: 'var(--lead-line)', background: 'var(--lead-surface)', color: 'var(--lead-accent)' }}
+            >
+              <span>Open stage detail — leads &amp; follow-up</span>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="m9 18 6-6-6-6" />
+              </svg>
+            </Link>
             <div>
               <label className={labelCls} style={{ color: 'var(--lead-body)' }}>Name</label>
               <input value={name} onChange={(e) => setName(e.target.value)} maxLength={60} className={inputCls} style={inputStyle} />
@@ -232,9 +221,6 @@ function StageSettingsBody({ stage, onClose }: { stage: ProjectStageRow; onClose
               </button>
             </div>
           </div>
-        )}
-
-        {tab === 'followup' && <SequenceConfig stageId={stage.id} stageName={stage.name} />}
       </div>
     </>
   )

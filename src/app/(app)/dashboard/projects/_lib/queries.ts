@@ -112,6 +112,20 @@ export async function fetchProjectStages(supabase: SupabaseClient, userId: strin
   return ((data ?? []) as Record<string, unknown>[]).map(normalizeStageRow)
 }
 
+// Single owner-scoped stage for the stage detail route. Null when the id is
+// unknown or belongs to another user (the page renders notFound()).
+export async function fetchProjectStageById(
+  supabase: SupabaseClient,
+  userId: string,
+  stageId: string,
+): Promise<ProjectStageRow | null> {
+  const { data, error } = await supabase
+    .from('project_stages').select('*')
+    .eq('user_id', userId).eq('id', stageId).maybeSingle()
+  if (error) throw error
+  return data ? normalizeStageRow(data as Record<string, unknown>) : null
+}
+
 // Cached variant — admin client because unstable_cache runs outside request
 // scope; user_id filter preserves isolation. Invalidate via revalidateTag.
 export function fetchProjectStagesCached(userId: string): Promise<ProjectStageRow[]> {
@@ -263,6 +277,8 @@ export type StageSequenceStep = {
   manual_message: string | null
   fallback_message: string | null
   channel: 'messenger'
+  /** When false, the step is kept but skipped by firing/seeding/preview. */
+  enabled: boolean
 }
 
 export type StageSequence = {
@@ -288,7 +304,7 @@ export async function fetchStageSequence(
 
   const { data: steps, error: stepErr } = await supabase
     .from('project_stage_sequence_steps')
-    .select('id, position, delay_minutes, instruction, manual_message, fallback_message, channel')
+    .select('id, position, delay_minutes, instruction, manual_message, fallback_message, channel, enabled')
     .eq('sequence_id', seq.id).order('position', { ascending: true })
   if (stepErr) throw stepErr
 
@@ -324,4 +340,49 @@ export async function fetchStageProjectsForPreview(
     title: r.title,
     lead_name: first(r.leads)?.name ?? null,
   }))
+}
+
+// Header aggregate for the stage detail view: how many cards sit in the stage
+// and their combined value. Computed over the SAME set the leads list paginates
+// (owner-scoped, all cards in the stage) so the header total and the list agree.
+export type StageLeadSummary = { count: number; subtotal: number; currency: string }
+
+export async function fetchStageLeadSummary(
+  supabase: SupabaseClient,
+  userId: string,
+  stageId: string,
+): Promise<StageLeadSummary> {
+  const { data, error } = await supabase
+    .from('projects')
+    .select('value, currency')
+    .eq('user_id', userId).eq('stage_id', stageId)
+  if (error) throw error
+  const rows = (data ?? []) as Array<{ value: number | null; currency: string | null }>
+  const subtotal = rows.reduce((sum, r) => sum + (r.value ?? 0), 0)
+  return { count: rows.length, subtotal, currency: rows[0]?.currency ?? 'PHP' }
+}
+
+// Per-card follow-up run status for the stage, so the leads list can show which
+// cards are mid-sequence and when their next touch fires. Only active
+// (pending/running) runs are returned; a card with no entry is simply not
+// enrolled. Owner-scoped via RLS on project_sequence_runs.
+export type StageRunStatus = { status: 'pending' | 'running'; next_run_at: string }
+
+export async function fetchStageSequenceRunStatus(
+  supabase: SupabaseClient,
+  userId: string,
+  stageId: string,
+): Promise<Map<string, StageRunStatus>> {
+  const { data, error } = await supabase
+    .from('project_sequence_runs')
+    .select('project_id, status, next_run_at')
+    .eq('user_id', userId).eq('stage_id', stageId)
+    .in('status', ['pending', 'running'])
+  if (error) throw error
+  type Row = { project_id: string; status: 'pending' | 'running'; next_run_at: string }
+  const map = new Map<string, StageRunStatus>()
+  for (const r of (data ?? []) as Row[]) {
+    map.set(r.project_id, { status: r.status, next_run_at: r.next_run_at })
+  }
+  return map
 }

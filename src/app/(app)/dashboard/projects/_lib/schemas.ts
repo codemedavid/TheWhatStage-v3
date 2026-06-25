@@ -36,9 +36,16 @@ export type ProjectUpdateInput = z.infer<typeof ProjectUpdateInput>
 // guidance and surfaced an opaque masked error).
 export const MAX_RULE_LEN = 1000
 export const MAX_INSTRUCTION_LEN = 2000
+// Max touches per stage sequence. Single source of truth — also consumed by the
+// step editor so the UI cap and the server cap can never drift.
+export const MAX_SEQUENCE_STEPS = 20
 
 export const SequenceStepInput = z.object({
   delay_minutes: z.number().int().min(0).max(525600),
+  // Disabled steps are kept (persisted with their position) so the operator can
+  // re-enable them later, but the firing worker / seeding / preview skip them.
+  // Defaults to true so older payloads and migrated rows stay enabled.
+  enabled: z.boolean().default(true),
   instruction: z.string().min(1).max(MAX_INSTRUCTION_LEN, `must be ${MAX_INSTRUCTION_LEN} characters or fewer`),
   // Operator-authored text sent VERBATIM for this touch (no LLM), overriding the
   // AI draft. Blank/null => the step is drafted by the assistant as usual.
@@ -71,7 +78,7 @@ export const SequenceInput = z.object({
   stage_instructions: StageInstructions,
   do_rules: RuleList,
   dont_rules: RuleList,
-  steps: z.array(SequenceStepInput).max(20),
+  steps: z.array(SequenceStepInput).max(MAX_SEQUENCE_STEPS),
 })
 export type SequenceInput = z.infer<typeof SequenceInput>
 
@@ -85,7 +92,7 @@ export const SequencePreviewInput = z.object({
   stage_instructions: StageInstructions,
   do_rules: RuleList,
   dont_rules: RuleList,
-  steps: z.array(SequenceStepInput).min(1).max(20),
+  steps: z.array(SequenceStepInput).min(1).max(MAX_SEQUENCE_STEPS),
 })
 export type SequencePreviewInput = z.infer<typeof SequencePreviewInput>
 
