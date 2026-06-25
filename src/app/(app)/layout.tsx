@@ -6,6 +6,8 @@ import { Sidebar } from './_components/sidebar'
 import { Topbar } from './_components/topbar'
 import { SuggestionsToast } from './dashboard/leads/_components/SuggestionsToast.client'
 import { countPendingSuggestions } from './dashboard/leads/actions/suggestions'
+import { countNeedsReply, fetchNeedsReply } from './dashboard/inbox/_lib/queries'
+import type { InboxItem } from './dashboard/inbox/_lib/rows'
 
 export default function AppLayout({
   children,
@@ -74,7 +76,18 @@ async function SidebarWithSession() {
 async function TopbarWithSession() {
   const session = await getSession()
   if (!session) redirect('/login')
-  return <Topbar fullName={session.fullName} />
+  const supabase = await createClient()
+  let inboxCount = 0
+  let inboxItems: InboxItem[] = []
+  try {
+    ;[inboxCount, inboxItems] = await Promise.all([
+      countNeedsReply(supabase, session.userId),
+      fetchNeedsReply(supabase, session.userId, 6),
+    ])
+  } catch {
+    // transient failure — render an empty bell
+  }
+  return <Topbar fullName={session.fullName} inboxCount={inboxCount} inboxItems={inboxItems} />
 }
 
 function TopbarFallback() {
