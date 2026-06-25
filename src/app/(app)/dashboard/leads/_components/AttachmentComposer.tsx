@@ -4,6 +4,7 @@ import { sendAttachmentAsOperator, type AttachmentSendInput } from '../actions/m
 import { AudioTrimmer } from './AudioTrimmer'
 import { describeSendError } from '../_lib/send-error'
 import { ATTACHMENT_ACCEPT, attachmentTypeFromFile, isAudioFile } from '../_lib/attachment-file'
+import { uploadOperatorAttachment } from '../_lib/operator-upload-client'
 
 type Tab = 'upload' | 'library' | 'url'
 
@@ -22,36 +23,6 @@ interface LibraryAsset {
 }
 
 const URL_TYPES = ['image', 'video', 'audio', 'file'] as const
-
-type UploadOk = { url: string; attachmentType: AttachmentSendInput['attachmentType']; name: string }
-type UploadResult = UploadOk | { error: string }
-
-/**
- * Read the operator-upload response without assuming JSON. Proxies/tunnels
- * (ngrok, Vercel) reject oversized bodies with a 413 whose body is plain text
- * ("Request Entity Too Large"), so a naive res.json() throws an opaque parse
- * error. Map known statuses to clear, actionable messages.
- */
-async function parseUploadResponse(res: Response): Promise<UploadResult> {
-  if (res.status === 413) {
-    return { error: 'That clip is too large to send. Trim it to a shorter selection and try again.' }
-  }
-
-  const text = await res.text()
-  let json: unknown
-  try {
-    json = JSON.parse(text)
-  } catch {
-    // Non-JSON body (HTML error page, proxy message, etc.).
-    return { error: res.ok ? 'Upload failed: unexpected server response' : `Upload failed (${res.status})` }
-  }
-
-  if (json && typeof json === 'object' && 'error' in json) {
-    return { error: String((json as { error: unknown }).error) }
-  }
-  if (!res.ok) return { error: `Upload failed (${res.status})` }
-  return json as UploadOk
-}
 
 export function AttachmentComposer({ leadId, onSent, onError, onClose }: Props) {
   const [tab, setTab] = useState<Tab>('upload')
@@ -151,22 +122,19 @@ function UploadTab({
   const handleFile = async (file: File) => {
     setUploading(true)
     try {
-      const form = new FormData()
-      form.append('file', file)
-      const res = await fetch('/api/messenger/operator-upload', { method: 'POST', body: form })
-
-      // A 413 from the proxy/tunnel (e.g. ngrok) comes back as plain text, not
-      // JSON, so we must not blindly res.json() — that throws the cryptic
-      // "Unexpected token 'R', \"Request En\"…" error. Read defensively.
-      const upload = await parseUploadResponse(res)
+      // Upload straight to ImageKit from the browser. This bypasses our own
+      // serverless function's ~4.5 MB request-body cap (Vercel/ngrok), which
+      // used to reject ordinary voice clips as "too large" long before the real
+      // 25 MB limit — making short audio look like it hit a duration limit.
+      const upload = await uploadOperatorAttachment(file)
       if ('error' in upload) {
         onError(upload.error)
         return
       }
       onSend({
         source: 'upload',
-        // Trust the client-detected type for audio when the server fell back to
-        // a generic type, so iPadOS picks still send as a voice clip.
+        // Trust the client-detected type for audio when classification fell back
+        // to a generic type, so iPadOS picks still send as a voice clip.
         attachmentType:
           upload.attachmentType === 'file' && isAudioFile(file) ? 'audio' : upload.attachmentType,
         url: upload.url,
