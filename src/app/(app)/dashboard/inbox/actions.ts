@@ -52,3 +52,21 @@ export async function markInboxThreadRead(leadId: string): Promise<void> {
   revalidatePath('/dashboard/inbox')
   revalidatePath('/dashboard', 'layout')
 }
+
+/**
+ * "Mark all read" from the header bell or the inbox page: clears unread AND
+ * missed on every thread that is currently waiting on a reply, in one update.
+ * Scoped by user_id (RLS also enforces it); the `.or(...)` limits the write to
+ * rows that actually need it.
+ */
+export async function markAllThreadsRead(): Promise<void> {
+  const { supabase, userId } = await requireUser()
+  const { error } = await supabase
+    .from('messenger_threads')
+    .update({ unread_count: 0, missed_count: 0, last_read_at: new Date().toISOString() })
+    .eq('user_id', userId)
+    .or('unread_count.gt.0,missed_count.gt.0')
+  if (error) throw new Error(`markAllThreadsRead: ${error.message}`)
+  revalidatePath('/dashboard/inbox')
+  revalidatePath('/dashboard', 'layout')
+}

@@ -117,6 +117,23 @@ function truncate(s: string): string {
   return s.length > MAX_PREVIEW_LEN ? `${s.slice(0, MAX_PREVIEW_LEN - 1)}…` : s
 }
 
+// Relative-time label ("now" / "5m" / "3h" / "2d" / a date). `nowMs` is
+// injectable so it can be unit-tested deterministically. Shared by the inbox
+// row and the header bell.
+export function timeAgo(iso: string | null, nowMs: number = Date.now()): string {
+  if (!iso) return ''
+  const then = new Date(iso).getTime()
+  if (Number.isNaN(then)) return ''
+  const min = Math.floor((nowMs - then) / 60000)
+  if (min < 1) return 'now'
+  if (min < 60) return `${min}m`
+  const hr = Math.floor(min / 60)
+  if (hr < 24) return `${hr}h`
+  const day = Math.floor(hr / 24)
+  if (day < 7) return `${day}d`
+  return new Date(iso).toLocaleDateString()
+}
+
 // Which badge a row should show, if any: unread takes precedence over missed,
 // mirroring LeadCard / the projects board. Returns null when nothing is waiting.
 export function resolveBadge(

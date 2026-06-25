@@ -5,6 +5,7 @@ import {
   pickProjectChip,
   summarizeSubmission,
   resolveBadge,
+  timeAgo,
   mapThreadRow,
   mapSubmissionRow,
   mapProjectRow,
@@ -83,6 +84,31 @@ describe('summarizeSubmission', () => {
     const out = summarizeSubmission(null, { note: long })
     expect(out.length).toBeLessThanOrEqual(140)
     expect(out.endsWith('…')).toBe(true)
+  })
+})
+
+describe('timeAgo', () => {
+  const NOW = new Date('2026-06-26T12:00:00Z').getTime()
+
+  it('returns empty string for null or unparseable input', () => {
+    expect(timeAgo(null, NOW)).toBe('')
+    expect(timeAgo('not-a-date', NOW)).toBe('')
+  })
+
+  it('labels sub-minute as "now"', () => {
+    expect(timeAgo('2026-06-26T11:59:30Z', NOW)).toBe('now')
+  })
+
+  it('labels minutes, hours, and days', () => {
+    expect(timeAgo('2026-06-26T11:45:00Z', NOW)).toBe('15m')
+    expect(timeAgo('2026-06-26T09:00:00Z', NOW)).toBe('3h')
+    expect(timeAgo('2026-06-24T12:00:00Z', NOW)).toBe('2d')
+  })
+
+  it('falls back to a date string beyond a week', () => {
+    const out = timeAgo('2026-06-01T12:00:00Z', NOW)
+    expect(out).not.toMatch(/^\d+[mhd]$/)
+    expect(out).not.toBe('now')
   })
 })
 
