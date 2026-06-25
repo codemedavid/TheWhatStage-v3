@@ -3,6 +3,7 @@ import { unstable_cache } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/admin'
 import type { ProjectRow, ProjectStageRow, ProjectStageKind } from '@/lib/projects/types'
 import { normalizeThreadCounts } from '@/lib/messenger/unread'
+import { STAGE_EMBED } from '@/lib/projects/stage-embed'
 import { type ProjectsQuery, PAGE_SIZE } from './schemas'
 
 export type { ProjectStageRow, ProjectStageKind } from '@/lib/projects/types'
@@ -90,7 +91,7 @@ function flattenProject(row: ProjectRowWithJoins): ProjectCardRow {
 }
 
 const PROJECT_SELECT =
-  '*, leads(name, email, phone, company, messenger_threads(picture_url, unread_count, missed_count)), project_stages(name, kind)'
+  `*, leads(name, email, phone, company, messenger_threads(picture_url, unread_count, missed_count)), ${STAGE_EMBED}(name, kind)`
 
 function normalizeStageRow(row: Record<string, unknown>): ProjectStageRow {
   return {
