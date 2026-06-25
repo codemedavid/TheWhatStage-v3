@@ -26,7 +26,14 @@ vi.mock('@sentry/nextjs', () => ({ captureException: vi.fn() }))
 
 import { handleProjectSequenceSendJob } from './fire'
 
-type Step = { position: number; delay_minutes: number; instruction: string; fallback_message: string | null }
+type Step = {
+  position: number
+  delay_minutes: number
+  instruction: string
+  fallback_message: string | null
+  enabled?: boolean
+  manual_message?: string | null
+}
 
 function makeAdmin(seed: {
   run: Record<string, unknown> | null
@@ -212,5 +219,77 @@ describe('handleProjectSequenceRun fallback behaviour', () => {
 
     expect(runUpdates.some((u) => u.status === 'failed')).toBe(true)
     expect(jobUpdates.at(-1)?.status).toBe('failed')
+  })
+
+  it('sends a manual_message verbatim without calling the LLM (manual-only step path)', async () => {
+    const { admin } = makeAdmin({
+      run: baseRun, project: baseProject,
+      steps: [{ position: 0, delay_minutes: 5, instruction: 'placeholder', fallback_message: 'fb', manual_message: 'Verbatim hello — your order is ready.' }],
+    })
+
+    await handleProjectSequenceSendJob(admin, { id: 'job-m1', payload: { run_id: 'run-1' } })
+
+    expect(sendMock.mock.calls[0][1].text).toBe('Verbatim hello — your order is ready.')
+    expect(draftMock).not.toHaveBeenCalled()
+    expect(batchMock).not.toHaveBeenCalled()
+  })
+})
+
+describe('handleProjectSequenceRun disabled-step handling', () => {
+  // A disabled step must be skipped entirely AND not consume an index: the
+  // surviving steps are re-indexed to a contiguous range, so the run's
+  // next_step_idx keeps lining up with the batch-draft positions.
+  const disabledFirstSteps: Step[] = [
+    { position: 0, delay_minutes: 5, instruction: 'A (off)', fallback_message: 'fbA', enabled: false },
+    { position: 1, delay_minutes: 1440, instruction: 'B', fallback_message: 'fbB' },
+    { position: 2, delay_minutes: 4320, instruction: 'C', fallback_message: 'fbC' },
+  ]
+
+  it('next_step_idx 0 sends the first ENABLED touch, never the disabled leading step', async () => {
+    batchMock.mockResolvedValue([
+      { position: 0, text: 'Touch B' },
+      { position: 1, text: 'Touch C' },
+    ])
+    const { admin } = makeAdmin({
+      run: { ...baseRun, drafts: null }, project: baseProject,
+      sequence: { id: 'seq-1', stage_instructions: null, do_rules: [], dont_rules: [] },
+      steps: disabledFirstSteps,
+    })
+
+    await handleProjectSequenceSendJob(admin, { id: 'job-d1', payload: { run_id: 'run-1' } })
+
+    expect(sendMock.mock.calls[0][1].text).toBe('Touch B')
+    expect(sendMock.mock.calls[0][1].text).not.toBe('Touch A')
+  })
+
+  it('next_step_idx 1 sends the SECOND enabled touch (C), proving positions re-index past the disabled step', async () => {
+    batchMock.mockResolvedValue([
+      { position: 0, text: 'Touch B' },
+      { position: 1, text: 'Touch C' },
+    ])
+    const { admin } = makeAdmin({
+      run: { ...baseRun, next_step_idx: 1, drafts: null }, project: baseProject,
+      sequence: { id: 'seq-1', stage_instructions: null, do_rules: [], dont_rules: [] },
+      steps: disabledFirstSteps,
+    })
+
+    await handleProjectSequenceSendJob(admin, { id: 'job-d2', payload: { run_id: 'run-1' } })
+
+    expect(sendMock.mock.calls[0][1].text).toBe('Touch C')
+  })
+
+  it('marks the run done when every step is disabled (no enabled steps to fire)', async () => {
+    const { admin, runUpdates } = makeAdmin({
+      run: baseRun, project: baseProject,
+      sequence: { id: 'seq-1', stage_instructions: null, do_rules: [], dont_rules: [] },
+      steps: [
+        { position: 0, delay_minutes: 5, instruction: 'A (off)', fallback_message: 'fbA', enabled: false },
+      ],
+    })
+
+    await handleProjectSequenceSendJob(admin, { id: 'job-d3', payload: { run_id: 'run-1' } })
+
+    expect(sendMock).not.toHaveBeenCalled()
+    expect(runUpdates.some((u) => u.status === 'done')).toBe(true)
   })
 })
