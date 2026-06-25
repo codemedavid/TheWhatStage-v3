@@ -10,7 +10,7 @@ import {
   type StageSequence,
   type StagePreviewProject,
 } from '../_lib/queries'
-import { seedStageProjectsImmediate, cancelStageSequenceRuns } from '@/lib/projects/sequences/seed'
+import { seedStageProjectsImmediate, cancelStageSequenceRuns, clearStageRunDrafts } from '@/lib/projects/sequences/seed'
 import { draftSequenceBatch, loadSequenceSendContext, retrieveKnowledge } from '@/lib/sequences/shared'
 import { manualOverride, aiDraftSteps } from '@/lib/sequences/manual'
 import { describeActionError, isRedirectError, type ActionResult } from '../_lib/action-result'
@@ -94,6 +94,7 @@ export async function saveStageSequence(raw: unknown): Promise<ActionResult<{ se
         manual_message: s.manual_message?.trim() || null,
         fallback_message: s.fallback_message?.trim() || null,
         channel: s.channel,
+        enabled: s.enabled,
       }))
       const { error: insErr } = await supabase
         .from('project_stage_sequence_steps').insert(rows)
@@ -111,7 +112,14 @@ export async function saveStageSequence(raw: unknown): Promise<ActionResult<{ se
   let seeded = 0
   try {
     const admin = createAdminClient()
-    if (input.enabled && input.steps.length > 0) {
+    // Enroll only when the sequence is on AND at least one step is enabled —
+    // an all-disabled sequence sends nothing, so treat it like "off".
+    const hasEnabledStep = input.steps.some((s) => s.enabled)
+    if (input.enabled && hasEnabledStep) {
+      // The steps were just replaced (delete + re-insert), so any in-flight run's
+      // cached drafts are keyed by the OLD ordinals — invalidate them before
+      // (re-)seeding so every run re-batches against the new layout.
+      await clearStageRunDrafts(admin, userId, input.stage_id)
       seeded = await seedStageProjectsImmediate(admin, { userId, stageId: input.stage_id })
     } else {
       await cancelStageSequenceRuns(admin, userId, input.stage_id, 'stage sequence disabled')
@@ -192,10 +200,17 @@ export async function previewStageSequence(
       .filter(Boolean).join(' — '),
   ).catch(() => '')
 
+  // Disabled steps are skipped entirely (they never fire), then the remaining
+  // steps are re-indexed to a contiguous 0..M-1 range — mirroring the firing
+  // worker — so the preview matches exactly what would be sent.
+  const enabledSteps = input.steps.filter((s) => s.enabled !== false)
+  if (enabledSteps.length === 0) {
+    return { ok: false, error: 'Add at least one enabled step to preview.' }
+  }
   // Manual steps are sent verbatim — they never reach the model. Only AI steps
   // (no manual override) are drafted, keeping their absolute position so the
   // batch result still keys correctly.
-  const positioned = input.steps.map((s, position) => ({ ...s, position }))
+  const positioned = enabledSteps.map((s, position) => ({ ...s, position }))
   const drafts = await draftSequenceBatch({
     leadName: ctx?.leadName ?? null,
     persona: ctx?.persona ?? null,
