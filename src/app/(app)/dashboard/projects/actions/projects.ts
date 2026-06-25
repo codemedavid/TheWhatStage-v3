@@ -35,6 +35,24 @@ export async function createProject(raw: unknown): Promise<string> {
     .from('leads').select('id').eq('id', input.lead_id).eq('user_id', userId).maybeSingle()
   if (!leadOwned) throw new Error('Lead not found')
 
+  // A client may pass origin_submission_id directly; verify ownership so a card
+  // can't be linked to another tenant's submission (the FK only checks existence).
+  if (input.origin_submission_id) {
+    const { data: subOwned } = await supabase
+      .from('action_page_submissions').select('id')
+      .eq('id', input.origin_submission_id).eq('user_id', userId).maybeSingle()
+    if (!subOwned) throw new Error('Submission not found')
+  }
+
+  // Resolve the stage's workspace so the card's (workspace_id, stage_id) pair
+  // satisfies the composite FK and the card lands on the right board.
+  const { data: stageRow, error: stageErr } = await supabase
+    .from('project_stages').select('workspace_id')
+    .eq('id', input.stage_id).eq('user_id', userId).maybeSingle()
+  if (stageErr) throw stageErr
+  if (!stageRow) throw new Error('Stage not found')
+  const workspaceId = stageRow.workspace_id as string
+
   const currency = input.currency ?? (await resolveDefaultCurrency(supabase, userId))
 
   const { data: maxRow } = await supabase
@@ -45,7 +63,7 @@ export async function createProject(raw: unknown): Promise<string> {
 
   const { data, error } = await supabase
     .from('projects')
-    .insert({ user_id: userId, ...input, currency, position: nextPos })
+    .insert({ user_id: userId, workspace_id: workspaceId, ...input, currency, position: nextPos })
     .select('id').single()
   if (error) throw error
 
@@ -70,15 +88,15 @@ export async function updateProject(id: string, raw: unknown): Promise<void> {
     if (v !== undefined) patch[k] = v
   }
   if (Object.keys(patch).length === 0) return
-  const { supabase } = await requireUser()
-  const { error } = await supabase.from('projects').update(patch).eq('id', id)
+  const { supabase, userId } = await requireUser()
+  const { error } = await supabase.from('projects').update(patch).eq('id', id).eq('user_id', userId)
   if (error) throw error
   revalidatePath('/dashboard/projects', 'layout')
 }
 
 export async function deleteProject(id: string): Promise<void> {
-  const { supabase } = await requireUser()
-  const { error } = await supabase.from('projects').delete().eq('id', id)
+  const { supabase, userId } = await requireUser()
+  const { error } = await supabase.from('projects').delete().eq('id', id).eq('user_id', userId)
   if (error) throw error
   revalidatePath('/dashboard/projects', 'layout')
 }
@@ -88,11 +106,12 @@ export async function deleteProject(id: string): Promise<void> {
 // card rendering. Archiving also cancels any in-flight follow-up sequence so the
 // bot stops messaging a customer we've set aside.
 export async function archiveProject(id: string): Promise<void> {
-  const { supabase } = await requireUser()
+  const { supabase, userId } = await requireUser()
   const { error } = await supabase
     .from('projects')
     .update({ archived_at: new Date().toISOString() })
     .eq('id', id)
+    .eq('user_id', userId)
     .is('archived_at', null)
   if (error) throw error
   await cancelActiveProjectSequenceRuns(createAdminClient(), id, 'project archived')
@@ -102,11 +121,12 @@ export async function archiveProject(id: string): Promise<void> {
 // Restore an archived card to the board. Does not re-seed sequences — the
 // operator can move the card to re-trigger a stage's follow-up if desired.
 export async function unarchiveProject(id: string): Promise<void> {
-  const { supabase } = await requireUser()
+  const { supabase, userId } = await requireUser()
   const { error } = await supabase
     .from('projects')
     .update({ archived_at: null })
     .eq('id', id)
+    .eq('user_id', userId)
   if (error) throw error
   revalidatePath('/dashboard/projects', 'layout')
 }
@@ -116,22 +136,25 @@ export async function moveProject(id: string, toStageId: string, toPosition: num
 
   const { data: current, error: readErr } = await supabase
     .from('projects').select('stage_id, lead_id')
-    .eq('id', id).maybeSingle()
+    .eq('id', id).eq('user_id', userId).maybeSingle()
   if (readErr) throw readErr
   if (!current) throw new Error('Project not found')
 
+  // The composite FK (workspace_id, stage_id) rejects a cross-workspace/foreign
+  // stage; user_id scoping keeps the write owner-bound regardless of RLS.
   const { error } = await supabase
     .from('projects')
     .update({ stage_id: toStageId, position: toPosition })
-    .eq('id', id)
+    .eq('id', id).eq('user_id', userId)
   if (error) throw error
 
   const stageChanged = current.stage_id !== toStageId
   if (stageChanged) {
-    await supabase.from('project_stage_events').insert({
+    const { error: evtErr } = await supabase.from('project_stage_events').insert({
       project_id: id, user_id: userId,
       from_stage_id: current.stage_id, to_stage_id: toStageId, source: 'user',
     })
+    if (evtErr) console.error('[moveProject] stage event insert failed', evtErr)
     const admin = createAdminClient()
     // Leaving the old stage cancels its in-flight sequence; entering the new
     // stage seeds that stage's sequence (seed also clears any active run).
@@ -179,17 +202,15 @@ export async function createProjectFromSubmission(
   if (!submission) throw new Error('Submission not found')
   if (!submission.lead_id) throw new Error('Submission is not linked to a lead')
 
-  // Ensure the user has a project board to drop this into.
-  const { ensureDefaultProjectStages } = await import('../_lib/queries')
-  await ensureDefaultProjectStages(userId)
+  // Ensure the user has a default workspace + board to drop this into.
+  const { ensureDefaultWorkspace, resolveDefaultStageId } = await import('../_lib/workspaces')
+  const workspaceId = await ensureDefaultWorkspace(userId)
 
   let stageId = overrides?.stageId
   if (!stageId) {
-    const { data: def } = await supabase
-      .from('project_stages').select('id')
-      .eq('user_id', userId).eq('is_default', true).maybeSingle()
+    const def = await resolveDefaultStageId(supabase, userId, workspaceId)
     if (!def) throw new Error('No default project stage configured')
-    stageId = def.id as string
+    stageId = def
   }
 
   const page = Array.isArray(submission.action_pages)

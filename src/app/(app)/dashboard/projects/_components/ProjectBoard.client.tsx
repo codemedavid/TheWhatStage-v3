@@ -1,5 +1,6 @@
 'use client'
 import { useEffect, useOptimistic, startTransition, useState, useTransition } from 'react'
+import Link from 'next/link'
 import {
   DndContext,
   PointerSensor,
@@ -28,7 +29,7 @@ import { StageSettingsDrawer } from './StageSettingsDrawer'
 import { StageArchiveDrawer } from './StageArchiveDrawer'
 import type { ProjectCardRow } from '../_lib/queries'
 import { UnreadBadge } from '../../_components/UnreadBadge'
-import type { ProjectStageRow } from '@/lib/projects/types'
+import type { ProjectStageRow, ProjectWorkspaceRow } from '@/lib/projects/types'
 import { formatMoney } from '../_lib/format'
 
 export { formatMoney }
@@ -52,9 +53,13 @@ type ArchiveView = { stage: ProjectStageRow; archived: ProjectCardRow[] }
 export function ProjectBoardClient({
   columns,
   stages,
+  workspaceId,
+  workspaces,
 }: {
   columns: Column[]
   stages: ProjectStageRow[]
+  workspaceId: string
+  workspaces: ProjectWorkspaceRow[]
 }) {
   // Reveal state lives in client context (shared with the toolbar toggle) so it
   // flips instantly without the server round-trip that used to silently fail.
@@ -196,7 +201,7 @@ export function ProjectBoardClient({
                 onViewArchive={(stage, archived) => setArchiveView({ stage, archived })}
               />
             ))}
-            <AddStageColumn />
+            <AddStageColumn workspaceId={workspaceId} />
           </div>
         </SortableContext>
       </DndContext>
@@ -206,6 +211,7 @@ export function ProjectBoardClient({
           mode="create"
           stages={stages}
           createStageId={defaultStageId}
+          workspaceId={workspaceId}
           onClose={() => setCreating(false)}
         />
       )}
@@ -216,6 +222,8 @@ export function ProjectBoardClient({
           mode="edit"
           project={selected}
           stages={stages}
+          workspaceId={workspaceId}
+          workspaces={workspaces}
           initialTab={selectedTab}
           onClose={() => setSelected(null)}
         />
@@ -324,9 +332,14 @@ function StageColumn({
           {stage.color && (
             <span className="h-2.5 w-2.5 rounded-full" style={{ background: stage.color }} />
           )}
-          <span className="text-[13px] font-semibold" style={{ color: 'var(--lead-ink)' }}>
+          <Link
+            href={`/dashboard/projects/stages/${stage.id}`}
+            className="lead-focus text-[13px] font-semibold hover:underline"
+            style={{ color: 'var(--lead-ink)' }}
+            title={`Open ${stage.name} — leads & follow-up`}
+          >
             {stage.name}
-          </span>
+          </Link>
           <span className="text-[11px]" style={{ color: 'var(--lead-muted)' }}>{projects.length}</span>
           {archivedCount > 0 && (
             <button
@@ -597,7 +610,7 @@ function ProjectCard({
   )
 }
 
-function AddStageColumn() {
+function AddStageColumn({ workspaceId }: { workspaceId: string }) {
   const [open, setOpen] = useState(false)
   const [name, setName] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -610,7 +623,7 @@ function AddStageColumn() {
     if (!name.trim()) { setError('Name is required'); return }
     start(async () => {
       try {
-        await createProjectStage({ name: name.trim(), kind: 'open' })
+        await createProjectStage(workspaceId, { name: name.trim(), kind: 'open' })
         reset()
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to add stage')

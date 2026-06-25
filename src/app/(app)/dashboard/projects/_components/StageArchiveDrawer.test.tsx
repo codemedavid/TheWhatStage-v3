@@ -11,7 +11,7 @@ vi.mock('../actions/projects', () => ({
 
 function card(over: Partial<ProjectCardRow>): ProjectCardRow {
   return {
-    id: 'p', user_id: 'u', lead_id: 'l', origin_submission_id: null,
+    id: 'p', user_id: 'u', workspace_id: 'w', lead_id: 'l', origin_submission_id: null,
     stage_id: 's1', title: 't', description: null, value: null,
     currency: 'PHP', ai_instructions: null, notes: null, position: 0,
     archived_at: '2026-06-10', created_at: '2026-06-01', updated_at: '2026-06-01',
@@ -24,7 +24,7 @@ function card(over: Partial<ProjectCardRow>): ProjectCardRow {
 }
 
 const stage: ProjectStageRow = {
-  id: 's1', name: 'Proposal', description: null, position: 0,
+  id: 's1', workspace_id: 'w', name: 'Proposal', description: null, position: 0,
   is_default: false, kind: 'open', color: null,
 }
 

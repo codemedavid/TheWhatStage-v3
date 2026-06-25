@@ -95,6 +95,7 @@ const PROJECT_SELECT =
 function normalizeStageRow(row: Record<string, unknown>): ProjectStageRow {
   return {
     id: row.id as string,
+    workspace_id: row.workspace_id as string,
     name: row.name as string,
     description: (row.description as string | null) ?? null,
     position: row.position as number,
@@ -104,10 +105,15 @@ function normalizeStageRow(row: Record<string, unknown>): ProjectStageRow {
   }
 }
 
-export async function fetchProjectStages(supabase: SupabaseClient, userId: string): Promise<ProjectStageRow[]> {
+export async function fetchProjectStages(
+  supabase: SupabaseClient,
+  userId: string,
+  workspaceId: string,
+): Promise<ProjectStageRow[]> {
   const { data, error } = await supabase
     .from('project_stages').select('*')
-    .eq('user_id', userId).order('position', { ascending: true })
+    .eq('user_id', userId).eq('workspace_id', workspaceId)
+    .order('position', { ascending: true })
   if (error) throw error
   return ((data ?? []) as Record<string, unknown>[]).map(normalizeStageRow)
 }
@@ -127,23 +133,24 @@ export async function fetchProjectStageById(
 }
 
 // Cached variant — admin client because unstable_cache runs outside request
-// scope; user_id filter preserves isolation. Invalidate via revalidateTag.
-export function fetchProjectStagesCached(userId: string): Promise<ProjectStageRow[]> {
+// scope; user_id filter preserves isolation. Keyed (and filtered) per workspace;
+// the per-user tag busts every workspace's entry on any stage change.
+export function fetchProjectStagesCached(userId: string, workspaceId: string): Promise<ProjectStageRow[]> {
   return unstable_cache(
-    async (uid: string) => {
+    async (uid: string, wid: string) => {
       const admin = createAdminClient()
       const { data, error } = await admin
         .from('project_stages').select('*')
-        .eq('user_id', uid).order('position', { ascending: true })
+        .eq('user_id', uid).eq('workspace_id', wid).order('position', { ascending: true })
       if (error) throw error
       return ((data ?? []) as Record<string, unknown>[]).map(normalizeStageRow)
     },
-    ['project-stages', userId],
+    ['project-stages', userId, workspaceId],
     { tags: [projectStagesTag(userId)], revalidate: 3600 },
-  )(userId)
+  )(userId, workspaceId)
 }
 
-const DEFAULT_PROJECT_STAGES: Array<{ name: string; position: number; is_default: boolean; kind: ProjectStageKind; color: string | null }> = [
+export const DEFAULT_PROJECT_STAGES: Array<{ name: string; position: number; is_default: boolean; kind: ProjectStageKind; color: string | null }> = [
   { name: 'New',         position: 0, is_default: true,  kind: 'open', color: null },
   { name: 'Scoping',     position: 1, is_default: false, kind: 'open', color: null },
   { name: 'Proposal',    position: 2, is_default: false, kind: 'open', color: null },
@@ -151,22 +158,6 @@ const DEFAULT_PROJECT_STAGES: Array<{ name: string; position: number; is_default
   { name: 'Won',         position: 4, is_default: false, kind: 'won',  color: '#16a34a' },
   { name: 'Lost',        position: 5, is_default: false, kind: 'lost', color: '#dc2626' },
 ]
-
-// Seed a starter board the first time a user opens Projects. Idempotent: only
-// inserts when the user has zero stages. Uses the admin client so it can run
-// from a cached/server context.
-export async function ensureDefaultProjectStages(userId: string): Promise<void> {
-  const admin = createAdminClient()
-  const { count, error } = await admin
-    .from('project_stages').select('id', { count: 'exact', head: true })
-    .eq('user_id', userId)
-  if (error) throw error
-  if ((count ?? 0) > 0) return
-  const rows = DEFAULT_PROJECT_STAGES.map((s) => ({ user_id: userId, ...s }))
-  const { error: insertErr } = await admin.from('project_stages').insert(rows)
-  // Ignore unique-violation races (a concurrent first load seeded already).
-  if (insertErr && insertErr.code !== '23505') throw insertErr
-}
 
 // Best-effort enrichment of the origin-submission kind (form/booking/etc.) for
 // card badges. Mutates rows in place; missing kinds stay null.
@@ -221,11 +212,12 @@ export async function fetchProjectsPage(
 export async function fetchBoardProjects(
   supabase: SupabaseClient,
   userId: string,
+  workspaceId: string,
   params?: Pick<ProjectsQuery, 'q' | 'from' | 'to'>,
 ): Promise<ProjectCardRow[]> {
   let query = supabase
     .from('projects').select(PROJECT_SELECT)
-    .eq('user_id', userId)
+    .eq('user_id', userId).eq('workspace_id', workspaceId)
   if (params?.q) query = query.or(buildProjectSearchOr(params.q))
   if (params?.from) query = query.gte('updated_at', params.from)
   if (params?.to) query = query.lte('updated_at', `${params.to}T23:59:59.999`)

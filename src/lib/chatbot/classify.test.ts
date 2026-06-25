@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { StageBrief, StageChange, ActionPageBrief } from './classify'
-import { applyStageChange, coerceActionPage, coerceProceedInfo, coerceProceedIntent, hasPositiveLinkTease, sanitizeReply, stageInstruction, stageInstructionParts, stageList } from './classify'
+import { applyStageChange, coerceActionPage, coerceProceedInfo, coerceProceedIntent, hasPositiveLinkTease, salvageReply, sanitizeReply, stageInstruction, stageInstructionParts, stageList } from './classify'
 
 // applyStageChange creates a fresh admin client after a successful move so
 // it can fire `dispatchStageEntered`. The real implementation pulls Supabase
@@ -352,6 +352,45 @@ describe('applyStageChange confidence gate', () => {
     expect(captured1.args?.p_idempotency_key).toBe('classify:T:L:msgA')
     expect(captured2.args?.p_idempotency_key).toBe('classify:T:L:msgB')
     expect(captured1.args?.p_idempotency_key).not.toBe(captured2.args?.p_idempotency_key)
+  })
+})
+
+describe('salvageReply', () => {
+  // The combined classify call emits the `reply` field FIRST, then the
+  // structured tail (proceed_intent/proceed_info/action_page). When output
+  // exceeds REPLY_WITH_STRUCTURE_MAX_TOKENS the tail is truncated and the JSON
+  // no longer parses — but the reply is already complete. salvageReply recovers
+  // it so we don't pay for a second full reply on the fallback path.
+  it('extracts reply from JSON truncated after the reply field', () => {
+    const raw = '{"reply": "Sige po, eto na yung details. Salamat!", "proceed_intent": {"confidence": "hi'
+    expect(salvageReply(raw)).toBe('Sige po, eto na yung details. Salamat!')
+  })
+
+  it('unescapes embedded quotes in the reply', () => {
+    const raw = '{"reply": "Sabi nila \\"sulit\\" daw po", "stage_change": null'
+    expect(salvageReply(raw)).toBe('Sabi nila "sulit" daw po')
+  })
+
+  it('recovers a reply string truncated mid-value (no closing quote)', () => {
+    const raw = '{"reply": "Eto po yung mahabang sagot na naputol'
+    expect(salvageReply(raw)).toBe('Eto po yung mahabang sagot na naputol')
+  })
+
+  it('returns the reply from a complete, well-formed envelope', () => {
+    const raw = '{"reply": "Hello po!", "stage_change": null, "proceed_intent": null}'
+    expect(salvageReply(raw)).toBe('Hello po!')
+  })
+
+  it('returns null when there is no reply field', () => {
+    expect(salvageReply('{"stage_change": null}')).toBeNull()
+  })
+
+  it('returns null for an empty reply value', () => {
+    expect(salvageReply('{"reply": "", "stage_change": null}')).toBeNull()
+  })
+
+  it('returns null for empty input', () => {
+    expect(salvageReply('')).toBeNull()
   })
 })
 

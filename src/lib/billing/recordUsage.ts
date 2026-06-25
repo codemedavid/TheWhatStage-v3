@@ -37,7 +37,17 @@ export async function recordUsage(
 ): Promise<void> {
   const u = completion.usage
   if (!u) return // provider didn't report usage — nothing to bill, don't pollute the ledger
-  const cachedPromptTokens = u.cachedPromptTokens ?? 0
+
+  // Two readings of the cache count, deliberately divergent on the UNKNOWN case
+  // (provider returned no cache field → u.cachedPromptTokens is null):
+  //  • LEDGER: persist NULL so the row records UNKNOWN, NOT a 0-hit. The
+  //    usage-health watchdog excludes UNKNOWN rows from its hit-rate denominator;
+  //    storing 0 here would conflate "unreported" with "no cache" and bias the
+  //    rate down, manufacturing false cache-collapse alerts.
+  //  • COST: fall back to 0 (no cache discount) so the price-map math stays a
+  //    finite, conservative estimate rather than NaN/under-charging.
+  const cachedForLedger = u.cachedPromptTokens ?? null
+  const cachedForCost = u.cachedPromptTokens ?? 0
 
   // Prefer the provider-reported exact cost (OpenRouter `usage.cost`) when
   // present; it already reflects real per-tier rates + cache discount + margin.
@@ -61,7 +71,7 @@ export async function recordUsage(
       ? microsFromUsd(providerCostUsd)
       : costMicros(completion.model, {
           promptTokens: u.promptTokens,
-          cachedPromptTokens,
+          cachedPromptTokens: cachedForCost,
           completionTokens: u.completionTokens,
         })
 
@@ -76,7 +86,7 @@ export async function recordUsage(
         scope,
         model: completion.model,
         prompt_tokens: u.promptTokens,
-        cached_prompt_tokens: cachedPromptTokens,
+        cached_prompt_tokens: cachedForLedger,
         completion_tokens: u.completionTokens,
         total_tokens: u.totalTokens,
         cost_micros,

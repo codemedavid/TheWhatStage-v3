@@ -126,6 +126,20 @@ export async function seedProjectSequenceRun(admin: SupabaseClient, args: SeedAr
   if (insertErr) throw insertErr
 }
 
+// Seed a run ONLY when the project has no active (pending/running) run. Repairs a
+// half-applied workspace transfer (where a prior attempt cancelled the old run
+// then failed before seeding the new one) without resetting a healthy in-flight
+// run.
+export async function ensureProjectSequenceRun(admin: SupabaseClient, args: SeedArgs): Promise<void> {
+  const { data: active, error } = await admin
+    .from('project_sequence_runs').select('id')
+    .eq('project_id', args.projectId).in('status', ['pending', 'running'])
+    .limit(1).maybeSingle()
+  if (error) throw error
+  if (active) return
+  await seedProjectSequenceRun(admin, args)
+}
+
 // Seed runs for every project ALREADY sitting in a stage when its sequence is
 // enabled — the first touch is scheduled immediately (next_run_at = now).
 // Without this, turning a sequence on for a populated stage produces zero

@@ -12,18 +12,25 @@ async function requireUser() {
   return { supabase, userId: user.id }
 }
 
-export async function createProjectStage(raw: unknown): Promise<void> {
+export async function createProjectStage(workspaceId: string, raw: unknown): Promise<void> {
   const input = ProjectStageInput.parse(raw)
   const { supabase, userId } = await requireUser()
 
+  // Reject a workspace the caller does not own before inserting into it.
+  const { data: ws } = await supabase
+    .from('project_workspaces').select('id')
+    .eq('id', workspaceId).eq('user_id', userId).maybeSingle()
+  if (!ws) throw new Error('Workspace not found')
+
   const { data: maxRow } = await supabase
     .from('project_stages').select('position')
-    .eq('user_id', userId).order('position', { ascending: false })
+    .eq('user_id', userId).eq('workspace_id', workspaceId).order('position', { ascending: false })
     .limit(1).maybeSingle()
   const nextPos = (maxRow?.position ?? -1) + 1
 
   const { error } = await supabase.from('project_stages').insert({
     user_id: userId,
+    workspace_id: workspaceId,
     name: input.name,
     description: input.description ?? null,
     kind: input.kind ?? 'open',
@@ -57,13 +64,15 @@ export async function deleteProjectStage(id: string): Promise<void> {
   const { supabase, userId } = await requireUser()
 
   const { data: target } = await supabase
-    .from('project_stages').select('id, is_default').eq('id', id).single()
+    .from('project_stages').select('id, is_default, workspace_id').eq('id', id).single()
   if (!target) throw new Error('Stage not found')
   if (target.is_default) throw new Error('Cannot delete the default stage')
 
+  // Projects move to the default stage OF THE SAME WORKSPACE (each workspace has
+  // its own default), keeping every card's workspace/stage in agreement.
   const { data: def } = await supabase
     .from('project_stages').select('id')
-    .eq('user_id', userId).eq('is_default', true).single()
+    .eq('user_id', userId).eq('workspace_id', target.workspace_id).eq('is_default', true).single()
   if (!def) throw new Error('No default stage to receive projects')
 
   const { error: moveErr } = await supabase

@@ -4,8 +4,20 @@
 
 export type ProjectStageKind = 'open' | 'won' | 'lost'
 
+// A workspace ("project management") groups its own stages + projects. A user
+// has many; exactly one is the default ("Welcome"), which can never be deleted.
+export type ProjectWorkspaceRow = {
+  id: string
+  name: string
+  description: string | null
+  position: number
+  is_default: boolean
+  color: string | null
+}
+
 export type ProjectStageRow = {
   id: string
+  workspace_id: string
   name: string
   description: string | null
   position: number
@@ -17,6 +29,7 @@ export type ProjectStageRow = {
 export type ProjectRow = {
   id: string
   user_id: string
+  workspace_id: string
   lead_id: string
   origin_submission_id: string | null
   stage_id: string

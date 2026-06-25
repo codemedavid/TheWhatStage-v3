@@ -1,5 +1,13 @@
 import { z } from 'zod'
 
+// A workspace groups its own stages + projects. Name mirrors the stage name cap.
+export const WorkspaceInput = z.object({
+  name: z.string().min(1).max(60),
+  description: z.string().max(500).optional().nullable(),
+  color: z.string().max(32).optional().nullable(),
+})
+export type WorkspaceInput = z.infer<typeof WorkspaceInput>
+
 export const ProjectStageKind = z.enum(['open', 'won', 'lost'])
 
 export const ProjectStageInput = z.object({

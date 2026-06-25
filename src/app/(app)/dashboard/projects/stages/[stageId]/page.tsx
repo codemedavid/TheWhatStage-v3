@@ -71,14 +71,14 @@ async function StageDetailBody({ stageId, query }: { stageId: string; query: Pro
     <div>
       <header className="mb-5">
         <Link
-          href="/dashboard/projects"
+          href={`/dashboard/projects/${stage.workspace_id}`}
           className="lead-focus inline-flex items-center gap-1 text-[12.5px] font-medium"
           style={{ color: 'var(--lead-muted)' }}
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
             <path d="m15 18-6-6 6-6" />
           </svg>
-          Projects
+          Back to board
         </Link>
         <div className="mt-1.5 flex flex-wrap items-center gap-2.5">
           {stage.color && <span className="h-3 w-3 rounded-full" style={{ background: stage.color }} />}

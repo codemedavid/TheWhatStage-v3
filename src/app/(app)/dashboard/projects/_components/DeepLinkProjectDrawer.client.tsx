@@ -3,20 +3,21 @@ import { useCallback, useEffect, useState } from 'react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { ProjectDrawer } from './ProjectDrawer'
 import type { ProjectCardRow } from '../_lib/queries'
-import type { ProjectStageRow } from '@/lib/projects/types'
+import type { ProjectStageRow, ProjectWorkspaceRow } from '@/lib/projects/types'
 
 type Props = {
   // null when the `?project=<id>` target does not exist or is not owned by the
   // user — the wrapper then just strips the stale param.
   project: ProjectCardRow | null
   stages: ProjectStageRow[]
+  workspaces: ProjectWorkspaceRow[]
 }
 
 // Opens the project drawer for a `?project=<id>` deep link (board card clicks,
 // "Mark as project" redirects). Closing is driven by local state, not the URL
 // round-trip, so the drawer dismisses instantly and a re-render does not
 // reopen it. Mirrors the leads DeepLinkLeadDrawer.
-export function DeepLinkProjectDrawer({ project, stages }: Props) {
+export function DeepLinkProjectDrawer({ project, stages, workspaces }: Props) {
   const router = useRouter()
   const pathname = usePathname()
   const sp = useSearchParams()
@@ -52,6 +53,8 @@ export function DeepLinkProjectDrawer({ project, stages }: Props) {
       mode="edit"
       project={project}
       stages={stages}
+      workspaceId={project.workspace_id}
+      workspaces={workspaces}
       onClose={handleClose}
     />
   )
