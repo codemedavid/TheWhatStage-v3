@@ -4,9 +4,9 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import {
   fetchProjectsByLead,
-  ensureDefaultProjectStages,
   type ProjectCardRow,
 } from '../../projects/_lib/queries'
+import { ensureDefaultWorkspace, resolveDefaultStageId } from '../../projects/_lib/workspaces'
 import { createProject } from '../../projects/actions/projects'
 
 async function requireUser() {
@@ -35,16 +35,14 @@ export async function createLeadProject(leadId: string, title?: string): Promise
   if (leadErr) throw leadErr
   if (!lead) throw new Error('Lead not found')
 
-  await ensureDefaultProjectStages(userId)
-  const { data: def } = await supabase
-    .from('project_stages').select('id')
-    .eq('user_id', userId).eq('is_default', true).maybeSingle()
-  if (!def) throw new Error('No default project stage configured')
+  const workspaceId = await ensureDefaultWorkspace(userId)
+  const stageId = await resolveDefaultStageId(supabase, userId, workspaceId)
+  if (!stageId) throw new Error('No default project stage configured')
 
   const resolvedTitle = (title?.trim() || `Project — ${lead.name ?? 'customer'}`).slice(0, 160)
   const id = await createProject({
     lead_id: leadId,
-    stage_id: def.id as string,
+    stage_id: stageId,
     title: resolvedTitle,
   })
 

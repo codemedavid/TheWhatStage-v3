@@ -33,6 +33,27 @@ export async function cancelStageSequenceRuns(
   if (error) throw error
 }
 
+// Invalidate the cached one-shot drafts for a stage's in-flight runs. Call when
+// a stage's steps are replaced (reorder / disable / edit): the stored
+// project_sequence_runs.drafts are keyed by the OLD enabled-step ordinals, so
+// after an edit they would serve the wrong (or a just-disabled) touch. Nulling
+// them forces fire.ts to re-batch against the new step layout on the next tick,
+// keeping next_step_idx aligned with freshly drafted text. next_step_idx itself
+// is left intact (the run resumes at the same ordinal in the new live list).
+export async function clearStageRunDrafts(
+  admin: SupabaseClient,
+  userId: string,
+  stageId: string,
+): Promise<void> {
+  const { error } = await admin
+    .from('project_sequence_runs')
+    .update({ drafts: null })
+    .eq('user_id', userId)
+    .eq('stage_id', stageId)
+    .in('status', ['pending', 'running'])
+  if (error) throw error
+}
+
 // Resolve the lead's most recent Messenger thread id, or null when the lead has
 // no thread (e.g. a web-form lead with no PSID).
 async function latestThreadId(admin: SupabaseClient, leadId: string): Promise<string | null> {
@@ -69,10 +90,13 @@ export async function seedProjectSequenceRun(admin: SupabaseClient, args: SeedAr
   if (seqErr) throw seqErr
   if (!seq || !seq.enabled) return
 
+  // Anchor the first touch on the first ENABLED step — a disabled leading step
+  // must not delay (or block) enrollment.
   const { data: firstStep, error: stepErr } = await admin
     .from('project_stage_sequence_steps')
     .select('delay_minutes')
     .eq('sequence_id', seq.id)
+    .eq('enabled', true)
     .order('position', { ascending: true })
     .limit(1)
     .maybeSingle()
@@ -102,6 +126,20 @@ export async function seedProjectSequenceRun(admin: SupabaseClient, args: SeedAr
   if (insertErr) throw insertErr
 }
 
+// Seed a run ONLY when the project has no active (pending/running) run. Repairs a
+// half-applied workspace transfer (where a prior attempt cancelled the old run
+// then failed before seeding the new one) without resetting a healthy in-flight
+// run.
+export async function ensureProjectSequenceRun(admin: SupabaseClient, args: SeedArgs): Promise<void> {
+  const { data: active, error } = await admin
+    .from('project_sequence_runs').select('id')
+    .eq('project_id', args.projectId).in('status', ['pending', 'running'])
+    .limit(1).maybeSingle()
+  if (error) throw error
+  if (active) return
+  await seedProjectSequenceRun(admin, args)
+}
+
 // Seed runs for every project ALREADY sitting in a stage when its sequence is
 // enabled — the first touch is scheduled immediately (next_run_at = now).
 // Without this, turning a sequence on for a populated stage produces zero
@@ -122,10 +160,12 @@ export async function seedStageProjectsImmediate(
   if (seqErr) throw seqErr
   if (!seq || !seq.enabled) return 0
 
+  // Only enabled steps count — an all-disabled sequence enrolls nobody.
   const { count: stepCount, error: cntErr } = await admin
     .from('project_stage_sequence_steps')
     .select('id', { count: 'exact', head: true })
     .eq('sequence_id', seq.id)
+    .eq('enabled', true)
   if (cntErr) throw cntErr
   if (!stepCount) return 0
 

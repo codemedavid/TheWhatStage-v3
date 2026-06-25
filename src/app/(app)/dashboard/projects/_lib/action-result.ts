@@ -9,6 +9,9 @@ import { ZodError, type ZodIssue } from 'zod'
 // actionable message.
 export type ActionResult<T> = ({ ok: true } & T) | { ok: false; error: string }
 
+// For actions that succeed with no payload (still surface failures as data).
+export type VoidActionResult = { ok: true } | { ok: false; error: string }
+
 // Human-friendly label for the field a Zod issue points at, so messages read
 // "Do rule #2: …" instead of "do_rules.1: …".
 function fieldLabel(path: ZodIssue['path']): string {

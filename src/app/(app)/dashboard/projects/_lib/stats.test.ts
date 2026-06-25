@@ -4,12 +4,12 @@ import type { ProjectCardRow } from './queries'
 import type { ProjectStageRow } from '@/lib/projects/types'
 
 function stage(id: string, name: string, kind: ProjectStageRow['kind']): ProjectStageRow {
-  return { id, name, description: null, position: 0, is_default: false, kind, color: null }
+  return { id, workspace_id: 'w', name, description: null, position: 0, is_default: false, kind, color: null }
 }
 
 function card(over: Partial<ProjectCardRow>): ProjectCardRow {
   return {
-    id: 'p', user_id: 'u', lead_id: 'l', origin_submission_id: null,
+    id: 'p', user_id: 'u', workspace_id: 'w', lead_id: 'l', origin_submission_id: null,
     stage_id: 's-open', title: 't', description: null, value: null,
     currency: 'PHP', ai_instructions: null, notes: null, position: 0,
     archived_at: null, created_at: '2026-06-01', updated_at: '2026-06-01',

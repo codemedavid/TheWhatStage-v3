@@ -4,16 +4,17 @@ import { createPortal } from 'react-dom'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { createProject, updateProject, deleteProject, archiveProject, unarchiveProject, searchLeads, type LeadOption } from '../actions/projects'
+import { moveProjectToWorkspace } from '../actions/workspaces'
 import { SubmissionsPanel } from '../../leads/_components/SubmissionsPanel'
 import { ConversationPanel } from '../../leads/_components/ConversationPanel'
 import { SequenceConfig } from './SequenceConfig'
 import { resolveInitialDrawerTab, type DrawerTab } from '../_lib/project-toolbar'
 import type { ProjectCardRow } from '../_lib/queries'
-import type { ProjectStageRow } from '@/lib/projects/types'
+import type { ProjectStageRow, ProjectWorkspaceRow } from '@/lib/projects/types'
 
 type Props =
-  | { mode: 'create'; stages: ProjectStageRow[]; createStageId: string; onClose: () => void }
-  | { mode: 'edit'; project: ProjectCardRow; stages: ProjectStageRow[]; initialTab?: DrawerTab; onClose: () => void }
+  | { mode: 'create'; stages: ProjectStageRow[]; createStageId: string; workspaceId: string; onClose: () => void }
+  | { mode: 'edit'; project: ProjectCardRow; stages: ProjectStageRow[]; workspaceId: string; workspaces: ProjectWorkspaceRow[]; initialTab?: DrawerTab; onClose: () => void }
 
 type Tab = DrawerTab
 
@@ -91,8 +92,8 @@ export function ProjectDrawer(props: Props) {
         aria-modal="true"
       >
         {props.mode === 'create'
-          ? <CreateBody stages={props.stages} createStageId={props.createStageId} onClose={requestClose} />
-          : <EditBody project={props.project} stages={props.stages} initialTab={props.initialTab} onClose={requestClose} />}
+          ? <CreateBody stages={props.stages} createStageId={props.createStageId} workspaceId={props.workspaceId} onClose={requestClose} />
+          : <EditBody project={props.project} stages={props.stages} workspaceId={props.workspaceId} workspaces={props.workspaces} initialTab={props.initialTab} onClose={requestClose} />}
       </div>
     </div>,
     document.body,
@@ -116,7 +117,7 @@ const inputStyle = { borderColor: 'var(--lead-line)', background: 'var(--lead-su
 const inputCls = 'w-full rounded-md border px-2.5 py-1.5 text-[13px]'
 const labelCls = 'mb-1 block text-[12px] font-medium'
 
-function EditBody({ project, stages, initialTab, onClose }: { project: ProjectCardRow; stages: ProjectStageRow[]; initialTab?: DrawerTab; onClose: () => void }) {
+function EditBody({ project, stages, workspaceId, workspaces, initialTab, onClose }: { project: ProjectCardRow; stages: ProjectStageRow[]; workspaceId: string; workspaces: ProjectWorkspaceRow[]; initialTab?: DrawerTab; onClose: () => void }) {
   const router = useRouter()
   const [tab, setTab] = useState<Tab>(() => resolveInitialDrawerTab(initialTab))
   const [title, setTitle] = useState(project.title)
@@ -128,6 +129,24 @@ function EditBody({ project, stages, initialTab, onClose }: { project: ProjectCa
   const [pending, start] = useTransition()
 
   const stage = stages.find((s) => s.id === project.stage_id)
+
+  // Transfer the card to another workspace; it lands in that workspace's first
+  // stage (server-resolved) and we navigate there to manage it.
+  const moveToWorkspace = (toWorkspaceId: string) => {
+    if (toWorkspaceId === workspaceId) return
+    // Transfer is destructive (restarts the follow-up sequence, navigates away)
+    // and fires from a native <select>, so confirm before acting — an accidental
+    // wheel/arrow change otherwise moves the card silently. Declining leaves the
+    // select snapped back to the current workspace (value is controlled).
+    const target = workspaces.find((w) => w.id === toWorkspaceId)
+    if (!confirm(`Move "${project.title}" to "${target?.name ?? 'another workspace'}"? It will land in that workspace's first stage and its follow-up sequence will restart.`)) return
+    setError(null)
+    start(async () => {
+      const res = await moveProjectToWorkspace(project.id, toWorkspaceId)
+      if (res.ok) { onClose(); router.push(`/dashboard/projects/${toWorkspaceId}`) }
+      else setError(res.error)
+    })
+  }
 
   const save = () => {
     setError(null)
@@ -198,6 +217,24 @@ function EditBody({ project, stages, initialTab, onClose }: { project: ProjectCa
               </Link>
               {stage && <span className="ml-auto rounded-full px-2 py-0.5 text-[11px]" style={{ background: 'var(--lead-accent-soft)', color: 'var(--lead-accent)' }}>{stage.name}</span>}
             </div>
+
+            {workspaces.length > 1 && (
+              <div>
+                <label className={labelCls} style={{ color: 'var(--lead-body)' }}>Workspace</label>
+                <select
+                  value={workspaceId}
+                  onChange={(e) => moveToWorkspace(e.target.value)}
+                  disabled={pending}
+                  className={inputCls}
+                  style={inputStyle}
+                >
+                  {workspaces.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
+                </select>
+                <p className="mt-1 text-[11px]" style={{ color: 'var(--lead-muted)' }}>
+                  Moving this project sends it to the chosen workspace&apos;s first stage.
+                </p>
+              </div>
+            )}
 
             {(project.lead_company || project.lead_email || project.lead_phone) && (
               <div
@@ -288,7 +325,7 @@ function EditBody({ project, stages, initialTab, onClose }: { project: ProjectCa
   )
 }
 
-function CreateBody({ stages, createStageId, onClose }: { stages: ProjectStageRow[]; createStageId: string; onClose: () => void }) {
+function CreateBody({ stages, createStageId, workspaceId, onClose }: { stages: ProjectStageRow[]; createStageId: string; workspaceId: string; onClose: () => void }) {
   const router = useRouter()
   const [lead, setLead] = useState<LeadOption | null>(null)
   const [q, setQ] = useState('')
@@ -322,7 +359,7 @@ function CreateBody({ stages, createStageId, onClose }: { stages: ProjectStageRo
           value: value.trim() === '' ? null : Number(value),
         })
         onClose()
-        router.push(`/dashboard/projects?project=${id}`)
+        router.push(`/dashboard/projects/${workspaceId}?project=${id}`)
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Failed to create')
       }
