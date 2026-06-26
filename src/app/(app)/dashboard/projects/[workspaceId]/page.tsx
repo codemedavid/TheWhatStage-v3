@@ -11,7 +11,7 @@ import { fetchWorkspaces, fetchWorkspaceById } from '../_lib/workspaces'
 import { ProjectsQuery } from '../_lib/schemas'
 import { resolveProjectsDateRange } from '../_lib/date-range'
 import { computeProjectStats } from '../_lib/stats'
-import { ProjectBoardClient } from '../_components/ProjectBoard.client'
+import { ProjectViews, type ProjectView } from '../_components/ProjectViews.client'
 import { ProjectsToolbar } from '../_components/ProjectsToolbar'
 import { ProjectStats } from '../_components/ProjectStats'
 import { ProjectsNavProvider } from '../_components/_useUrlState'
@@ -37,11 +37,12 @@ export default async function WorkspaceBoardPage({
   })
   const projectId =
     typeof sp.project === 'string' && UUID_RE.test(sp.project) ? sp.project : undefined
+  const view: ProjectView = sp.view === 'list' ? 'list' : 'kanban'
 
   return (
     <div data-leads-root className="px-4 py-6 md:px-8">
       <Suspense fallback={<BoardFallback />}>
-        <WorkspaceBoardBody workspaceId={workspaceId} params={query} projectId={projectId} />
+        <WorkspaceBoardBody workspaceId={workspaceId} params={query} projectId={projectId} view={view} />
       </Suspense>
     </div>
   )
@@ -51,10 +52,12 @@ async function WorkspaceBoardBody({
   workspaceId,
   params,
   projectId,
+  view,
 }: {
   workspaceId: string
   params: ProjectsQuery
   projectId?: string
+  view: ProjectView
 }) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -114,14 +117,13 @@ async function WorkspaceBoardBody({
       <ArchiveRevealProvider initial={params.archived}>
         <ProjectsToolbar params={params} />
 
-        <div className="mt-5">
-          <ProjectBoardClient
-            columns={columns}
-            stages={stages}
-            workspaceId={workspaceId}
-            workspaces={workspaces}
-          />
-        </div>
+        <ProjectViews
+          initialView={view}
+          columns={columns}
+          stages={stages}
+          workspaceId={workspaceId}
+          workspaces={workspaces}
+        />
       </ArchiveRevealProvider>
 
       {projectId && (
@@ -134,13 +136,17 @@ async function WorkspaceBoardBody({
 function BoardFallback() {
   return (
     <div className="animate-pulse">
-      <div className="mb-5 h-6 w-32 rounded bg-[#E5E7EB]" />
+      <div className="mb-5 h-6 w-32 rounded" style={{ background: 'var(--lead-surface-2)' }} />
       <div className="flex gap-3">
         {[0, 1, 2, 3].map((i) => (
-          <div key={i} className="w-[296px] shrink-0 space-y-2 rounded-2xl border border-[#E5E7EB] bg-white p-3" style={{ minHeight: 320 }}>
-            <div className="h-4 w-24 rounded bg-[#E5E7EB]" />
-            <div className="h-20 rounded bg-[#F3F4F6]" />
-            <div className="h-20 rounded bg-[#F3F4F6]" />
+          <div
+            key={i}
+            className="w-[296px] shrink-0 space-y-2 rounded-2xl p-3"
+            style={{ minHeight: 320, background: 'var(--lead-surface)', border: '1px solid var(--lead-line)' }}
+          >
+            <div className="h-4 w-24 rounded" style={{ background: 'var(--lead-surface-2)' }} />
+            <div className="h-20 rounded" style={{ background: 'var(--lead-surface-2)' }} />
+            <div className="h-20 rounded" style={{ background: 'var(--lead-surface-2)' }} />
           </div>
         ))}
       </div>

@@ -8,10 +8,10 @@ export function ProjectStats({ stats }: { stats: ProjectStats }) {
   const cards: { label: string; value: string; accent?: string }[] = [
     { label: 'Projects', value: String(stats.total) },
     { label: 'Open', value: String(stats.open) },
-    { label: 'Won', value: String(stats.won), accent: '#16a34a' },
-    { label: 'Lost', value: String(stats.lost), accent: '#dc2626' },
+    { label: 'Won', value: String(stats.won), accent: 'var(--lead-accent)' },
+    { label: 'Lost', value: String(stats.lost), accent: 'var(--lead-danger)' },
     { label: 'Pipeline value', value: formatMoney(stats.openValue, stats.currency) || '—' },
-    { label: 'Value won', value: formatMoney(stats.wonValue, stats.currency) || '—', accent: '#16a34a' },
+    { label: 'Value won', value: formatMoney(stats.wonValue, stats.currency) || '—', accent: 'var(--lead-accent)' },
     { label: 'Unread', value: String(stats.unread) },
     { label: 'Missed', value: String(stats.missed) },
   ]

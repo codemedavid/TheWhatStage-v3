@@ -36,7 +36,7 @@ export function WorkspacesView({ summaries }: { summaries: WorkspaceSummary[] })
       {/* Heading */}
       <div className="flex flex-wrap items-start justify-between gap-6">
         <div className="max-w-[640px]">
-          <h1 className="text-[26px] font-extrabold tracking-[-0.02em]" style={{ color: 'var(--lead-ink)' }}>
+          <h1 className="lead-display text-[36px] leading-[1.1]" style={{ color: 'var(--lead-ink)' }}>
             Projects
           </h1>
           <p className="mt-2 text-[14px] leading-relaxed" style={{ color: 'var(--lead-muted)' }}>

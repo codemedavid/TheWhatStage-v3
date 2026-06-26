@@ -23,7 +23,7 @@ interface Props {
   disabled?: boolean
 }
 
-const DEFAULT_DOT = '#CBD5E1'
+const DEFAULT_DOT = '#9c9a90'
 const MENU_MIN_WIDTH = 220
 const VIEWPORT_MARGIN = 8
 // Must out-stack the drawers the picker renders inside: the lead drawer (z-100)
@@ -211,20 +211,20 @@ export function WorkspacePicker({
             ref={popRef}
             id={menuId}
             onClick={(e) => e.stopPropagation()}
-            className="overflow-hidden rounded-lg border border-[#E5E7EB] bg-white py-1 shadow-[0_8px_24px_rgba(0,0,0,0.16)]"
-            style={{ position: 'fixed', top: pos.top, right: pos.right, minWidth: MENU_MIN_WIDTH, zIndex: MENU_Z_INDEX }}
+            className="overflow-hidden rounded-lg py-1 shadow-[0_8px_24px_rgba(0,0,0,0.16)]"
+            style={{ position: 'fixed', top: pos.top, right: pos.right, minWidth: MENU_MIN_WIDTH, zIndex: MENU_Z_INDEX, background: 'var(--ws-surface)', border: '1px solid var(--ws-border)' }}
           >
-            <div className="px-3 pb-1 pt-1.5 text-[10px] font-semibold uppercase tracking-wide text-[#9CA3AF]">
+            <div className="px-3 pb-1 pt-1.5 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--ws-ink-4)]">
               Add to workspace
             </div>
             {workspaces === null ? (
-              <div className="px-3 py-2 text-[12.5px] text-[#9CA3AF]">Loading…</div>
+              <div className="px-3 py-2 text-[12.5px] text-[color:var(--ws-ink-4)]">Loading…</div>
             ) : workspaces.length === 0 ? (
               <button
                 ref={firstItemRef}
                 type="button"
                 onClick={() => pick(undefined)}
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12.5px] text-[#374151] transition-colors hover:bg-[#F9FAFB] focus:bg-[#F9FAFB] focus:outline-none"
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12.5px] text-[color:var(--ws-ink-2)] transition-colors hover:bg-[color:var(--ws-surface-2)] focus:bg-[color:var(--ws-surface-2)] focus:outline-none"
               >
                 <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: DEFAULT_DOT }} aria-hidden="true" />
                 <span className="flex-1 truncate">Default workspace</span>
@@ -236,7 +236,7 @@ export function WorkspacePicker({
                   ref={i === 0 ? firstItemRef : undefined}
                   type="button"
                   onClick={() => pick(w.id)}
-                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12.5px] text-[#374151] transition-colors hover:bg-[#F9FAFB] focus:bg-[#F9FAFB] focus:outline-none"
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12.5px] text-[color:var(--ws-ink-2)] transition-colors hover:bg-[color:var(--ws-surface-2)] focus:bg-[color:var(--ws-surface-2)] focus:outline-none"
                 >
                   <span
                     className="h-2.5 w-2.5 shrink-0 rounded-full"
@@ -245,7 +245,7 @@ export function WorkspacePicker({
                   />
                   <span className="flex-1 truncate">{w.name}</span>
                   {w.isDefault && (
-                    <span className="shrink-0 rounded-sm bg-[#EFF6FF] px-1 text-[10px] font-medium text-[#2563EB]">
+                    <span className="shrink-0 rounded-sm bg-[color:var(--ws-surface-3)] px-1 text-[10px] font-medium text-[color:var(--ws-ink-3)]">
                       Default
                     </span>
                   )}

@@ -30,37 +30,48 @@ body {
   font-feature-settings: "ss03";
 }
 
-/* ---- Leads workspace tokens (committed emerald, light + dark) ---- */
+/* ---- Leads + Projects workspace tokens (light + dark) ----
+   Light values are aligned to the WhatStage brand palette (the --ws-* tokens in
+   :root) so the leads and project-management surfaces match the rest of the site
+   (Action Pages / University / Funnels). Dark keeps its own committed palette. */
 [data-leads-root] {
-  --lead-page: #faf9f5;
+  --lead-page: #fafaf7;
   --lead-surface: #ffffff;
-  --lead-surface-2: #f6f5f0;
-  --lead-line: #ebe8df;
-  --lead-line-strong: #d6d2c4;
+  --lead-surface-2: #f6f5f1;
+  --lead-line: #e8e6de;
+  --lead-line-strong: #d9d6cc;
 
-  --lead-ink: #14110b;
-  --lead-body: #3a362c;
-  --lead-muted: #74705f;
-  --lead-faint: #aea997;
+  --lead-ink: #1a1915;
+  --lead-body: #3f3d36;
+  --lead-muted: #6b6960;
+  --lead-faint: #9c9a90;
 
-  --lead-accent: #047857;
-  --lead-accent-hover: #036049;
-  --lead-accent-soft: #dff3ea;
-  --lead-accent-rail: #047857;
-  --lead-accent-tint: rgba(4, 120, 87, 0.06);
-  --lead-accent-ring: rgba(4, 120, 87, 0.22);
+  --lead-accent: #1f7a4d;
+  --lead-accent-hover: #166040;
+  --lead-accent-soft: #e8f2ec;
+  --lead-accent-rail: #1f7a4d;
+  --lead-accent-tint: rgba(31, 122, 77, 0.06);
+  --lead-accent-ring: rgba(31, 122, 77, 0.22);
 
-  --lead-warn: #b45309;
-  --lead-warn-soft: #fdf2dc;
-  --lead-danger: #b42318;
-  --lead-danger-soft: #fde9e6;
+  --lead-warn: #b8762b;
+  --lead-warn-soft: #fbf3e5;
+  --lead-danger: #b23a2b;
+  --lead-danger-soft: #fbebe7;
 
-  --lead-shadow-sm: 0 1px 2px rgba(20, 17, 11, 0.04);
-  --lead-shadow-md: 0 1px 3px rgba(20, 17, 11, 0.06), 0 6px 18px rgba(20, 17, 11, 0.04);
-  --lead-shadow-lg: 0 10px 36px rgba(20, 17, 11, 0.12);
+  --lead-shadow-sm: 0 1px 2px rgba(26, 25, 21, 0.04);
+  --lead-shadow-md: 0 1px 3px rgba(26, 25, 21, 0.06), 0 6px 18px rgba(26, 25, 21, 0.04);
+  --lead-shadow-lg: 0 10px 36px rgba(26, 25, 21, 0.12);
 
   color: var(--lead-body);
   background: var(--lead-page);
+}
+
+/* Brand display heading — Instrument Serif, matching the Action Pages hero /
+   page titles (.apl-hero h1 / .ap-head h1). Per-heading size stays inline. */
+[data-leads-root] .lead-display {
+  font-family: 'Instrument Serif', Georgia, serif;
+  font-weight: 400;
+  letter-spacing: -0.01em;
 }
 
 [data-leads-root][data-theme="dark"] {
