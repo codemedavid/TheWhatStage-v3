@@ -123,6 +123,14 @@ body {
   box-shadow: 0 0 0 2px var(--lead-page), 0 0 0 4px var(--lead-accent-ring);
 }
 
+/* Subtle hover wash for list rows and menu items inside leads */
+[data-leads-root] .lead-row {
+  transition: background-color 0.12s ease;
+}
+[data-leads-root] .lead-row:hover {
+  background: var(--lead-surface-2);
+}
+
 /* Indeterminate progress bar shown during in-page navigation (filter / sort / etc.) */
 @keyframes lead-progress-slide {
   0%   { transform: translateX(-100%); }

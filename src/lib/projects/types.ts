@@ -13,6 +13,8 @@ export type ProjectWorkspaceRow = {
   position: number
   is_default: boolean
   color: string | null
+  /** Last edit time (name/desc/color or any project move bumps it via trigger). */
+  updated_at: string | null
 }
 
 export type ProjectStageRow = {

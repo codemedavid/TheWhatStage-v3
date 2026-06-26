@@ -62,6 +62,7 @@ describe('computeWorkspaceSummaries', () => {
     position: 0,
     is_default: false,
     color: null,
+    updated_at: null,
     ...over,
   })
 

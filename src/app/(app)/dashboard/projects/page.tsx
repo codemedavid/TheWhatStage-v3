@@ -6,7 +6,7 @@ import {
   fetchWorkspaceSummaries,
   fetchProjectWorkspaceId,
 } from './_lib/workspaces'
-import { WorkspacesGrid } from './_components/WorkspacesGrid.client'
+import { WorkspacesView } from './_components/WorkspacesView.client'
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -74,34 +74,29 @@ async function ProjectsIndexBody({ sp }: { sp: SearchParams }) {
 
   const summaries = await fetchWorkspaceSummaries(supabase, user.id)
 
-  return (
-    <div>
-      <header className="mb-1">
-        <h1 className="text-[20px] font-semibold" style={{ color: 'var(--lead-ink)' }}>
-          Projects
-        </h1>
-        <p className="mt-0.5 text-[13px]" style={{ color: 'var(--lead-muted)' }}>
-          Each workspace runs its own stages, follow-ups, and projects. Open one to manage its board,
-          or duplicate a workspace to reuse its workflow.
-        </p>
-      </header>
-
-      <div className="mt-5">
-        <WorkspacesGrid summaries={summaries} />
-      </div>
-    </div>
-  )
+  return <WorkspacesView summaries={summaries} />
 }
 
 function IndexFallback() {
   return (
     <div className="animate-pulse">
-      <div className="mb-5 h-6 w-32 rounded bg-[#E5E7EB]" />
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {[0, 1, 2].map((i) => (
-          <div key={i} className="h-32 rounded-2xl border border-[#E5E7EB] bg-white p-4">
-            <div className="h-4 w-24 rounded bg-[#E5E7EB]" />
-            <div className="mt-3 h-3 w-32 rounded bg-[#F3F4F6]" />
+      <div className="h-7 w-36 rounded" style={{ background: 'var(--lead-surface-2)' }} />
+      <div className="mt-2 h-4 w-80 max-w-full rounded" style={{ background: 'var(--lead-surface-2)' }} />
+      <div
+        className="mt-[18px] overflow-hidden rounded-2xl"
+        style={{ background: 'var(--lead-surface)', border: '1px solid var(--lead-line)' }}
+      >
+        {[0, 1, 2, 3].map((i) => (
+          <div
+            key={i}
+            className="flex items-center gap-3.5 px-6 py-[18px]"
+            style={{ borderBottom: '1px solid var(--lead-line)' }}
+          >
+            <div className="h-[42px] w-[42px] rounded-[11px]" style={{ background: 'var(--lead-surface-2)' }} />
+            <div className="flex-1">
+              <div className="h-4 w-40 rounded" style={{ background: 'var(--lead-surface-2)' }} />
+              <div className="mt-2 h-3 w-28 rounded" style={{ background: 'var(--lead-surface-2)' }} />
+            </div>
           </div>
         ))}
       </div>
