@@ -99,7 +99,7 @@ function SubmissionCard({ submission }: { submission: LeadSubmission }) {
     minute: '2-digit',
   })
 
-  const markAsProject = async (workspaceId: string) => {
+  const markAsProject = async (workspaceId?: string) => {
     const id = await createProjectFromSubmission(submission.id, { workspaceId })
     router.push(projectHref(id))
   }

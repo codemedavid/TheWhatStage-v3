@@ -7,11 +7,12 @@ import { listProjectWorkspaces, type WorkspaceOption } from '../actions/projects
 
 interface Props {
   /**
-   * Create the project in the chosen workspace and navigate to it. Thrown errors
-   * are caught here and surfaced through {@link Props.onError} — the caller does
-   * not need its own try/catch.
+   * Create the project in the chosen workspace and navigate to it.
+   * `workspaceId` is undefined when the user has no workspaces yet (the server
+   * resolves the default). Thrown errors are caught here and surfaced through
+   * {@link Props.onError} — the caller does not need its own try/catch.
    */
-  onPick: (workspaceId: string) => Promise<void>
+  onPick: (workspaceId?: string) => Promise<void>
   /** Report a create/load failure (or `''` to clear) through the caller's error UI. */
   onError?: (message: string) => void
   label: string
@@ -25,17 +26,36 @@ interface Props {
 const DEFAULT_DOT = '#CBD5E1'
 const MENU_MIN_WIDTH = 220
 const VIEWPORT_MARGIN = 8
-// Must out-stack the drawers the picker is rendered inside: the lead drawer
-// (z-100) and the action-page submission drawer aside (z-101). The menu portals
-// to <body>, so a lower value would paint behind those opaque panels.
+// Must out-stack the drawers the picker renders inside: the lead drawer (z-100)
+// and the action-page submission drawer aside (z-101). The menu portals to
+// <body>, so a lower value would paint behind those opaque panels.
 const MENU_Z_INDEX = 120
 const CREATE_FAILED = 'Failed to create project'
+const LOAD_FAILED = 'Failed to load workspaces'
+// Workspaces change rarely; cache one fetch across every picker instance (there
+// can be one per submission row) and across opens, so only the first interaction
+// on a page pays the round-trip. Short TTL keeps a freshly-added workspace from
+// staying hidden for long.
+const CACHE_TTL_MS = 30_000
+
+let workspaceCache: { at: number; data: Promise<WorkspaceOption[]> } | null = null
+
+function loadWorkspacesCached(): Promise<WorkspaceOption[]> {
+  const now = Date.now()
+  if (workspaceCache && now - workspaceCache.at < CACHE_TTL_MS) return workspaceCache.data
+  const data = listProjectWorkspaces().catch((err) => {
+    workspaceCache = null // don't cache a failure
+    throw err
+  })
+  workspaceCache = { at: now, data }
+  return data
+}
 
 // "Create project" trigger that lets the user choose the destination workspace.
-// On first open it lazily loads the user's workspaces; with a single workspace it
-// skips the menu and creates immediately. The menu is portalled to <body> so a
-// host card's `overflow-hidden` can't clip it — mirrors the anchored-popover
-// pattern in leads/_components/LeadsTable.client.tsx.
+// Workspaces are prefetched on hover/focus and the menu opens immediately (with a
+// brief loading row on a cold first interaction). With a single workspace the
+// menu is skipped and the project is created directly. The menu is portalled to
+// <body> so a host card's `overflow-hidden` can't clip it.
 export function WorkspacePicker({
   onPick,
   onError,
@@ -50,11 +70,15 @@ export function WorkspacePicker({
   const [open, setOpen] = useState(false)
   const [pos, setPos] = useState<{ top: number; right: number } | null>(null)
   const [workspaces, setWorkspaces] = useState<WorkspaceOption[] | null>(null)
-  const [loading, setLoading] = useState(false)
   const [busy, setBusy] = useState(false)
   const btnRef = useRef<HTMLButtonElement>(null)
   const popRef = useRef<HTMLDivElement>(null)
   const firstItemRef = useRef<HTMLButtonElement>(null)
+  const openRef = useRef(false)
+
+  useEffect(() => {
+    openRef.current = open
+  }, [open])
 
   useEffect(() => {
     if (!open) return
@@ -87,10 +111,24 @@ export function WorkspacePicker({
     }
   }, [open])
 
-  // Move focus into the menu on open so keyboard users land on the first option.
+  // Move focus into the menu once its items render, for keyboard users.
   useEffect(() => {
-    if (open) firstItemRef.current?.focus()
-  }, [open])
+    if (open && workspaces && workspaces.length > 0) firstItemRef.current?.focus()
+  }, [open, workspaces])
+
+  const ensureLoaded = (): Promise<WorkspaceOption[]> =>
+    loadWorkspacesCached().then((list) => {
+      setWorkspaces(list)
+      return list
+    })
+
+  // Warm the cache on intent so the menu is ready by the time it's clicked. The
+  // module cache dedupes, so sweeping the cursor across many rows costs one fetch.
+  const prefetch = () => {
+    void ensureLoaded().catch(() => {
+      /* surfaced on the real click */
+    })
+  }
 
   const anchorToTrigger = () => {
     const rect = btnRef.current?.getBoundingClientRect()
@@ -99,7 +137,7 @@ export function WorkspacePicker({
     }
   }
 
-  const pick = async (workspaceId: string) => {
+  const pick = async (workspaceId?: string) => {
     setOpen(false)
     setBusy(true)
     try {
@@ -114,39 +152,39 @@ export function WorkspacePicker({
 
   const handleClick = async (e: React.MouseEvent) => {
     e.stopPropagation()
-    if (busy || loading || disabled) return
+    if (busy || disabled) return
     if (open) {
       setOpen(false)
       return
     }
     onError?.('') // clear any stale error from a previous attempt
+    anchorToTrigger()
 
-    let list = workspaces
-    if (!list) {
-      setLoading(true)
-      try {
-        list = await listProjectWorkspaces()
-        setWorkspaces(list)
-      } catch (err) {
-        onError?.(err instanceof Error ? err.message : 'Failed to load workspaces')
-        return
-      } finally {
-        setLoading(false)
-      }
-    }
-
-    // Nothing to choose — create straight into the only (default) workspace.
-    if (list.length <= 1) {
-      if (list[0]) await pick(list[0].id)
-      else onError?.('No workspace available')
+    // Warm cache: decide instantly without flashing a menu.
+    if (workspaces) {
+      if (workspaces.length <= 1) await pick(workspaces[0]?.id)
+      else setOpen(true)
       return
     }
 
-    anchorToTrigger() // re-read position now (post-fetch) so the menu isn't stale
+    // Cold: open immediately with a loading row, then fill in / auto-pick.
     setOpen(true)
+    let list: WorkspaceOption[]
+    try {
+      list = await ensureLoaded()
+    } catch (err) {
+      setOpen(false)
+      onError?.(err instanceof Error ? err.message : LOAD_FAILED)
+      return
+    }
+    if (!openRef.current) return // user dismissed while loading
+    if (list.length <= 1) {
+      setOpen(false)
+      await pick(list[0]?.id)
+    }
   }
 
-  const triggerLabel = busy ? pendingLabel : loading ? 'Loading…' : label
+  const triggerLabel = busy ? pendingLabel : label
 
   return (
     <>
@@ -154,7 +192,9 @@ export function WorkspacePicker({
         ref={btnRef}
         type="button"
         onClick={handleClick}
-        disabled={disabled || busy || loading}
+        onPointerEnter={prefetch}
+        onFocus={prefetch}
+        disabled={disabled || busy}
         className={className}
         style={style}
         aria-haspopup="true"
@@ -165,7 +205,7 @@ export function WorkspacePicker({
         {triggerLabel}
         <Chevron open={open} />
       </button>
-      {open && pos && workspaces && typeof document !== 'undefined' &&
+      {open && pos && typeof document !== 'undefined' &&
         createPortal(
           <div
             ref={popRef}
@@ -177,27 +217,41 @@ export function WorkspacePicker({
             <div className="px-3 pb-1 pt-1.5 text-[10px] font-semibold uppercase tracking-wide text-[#9CA3AF]">
               Add to workspace
             </div>
-            {workspaces.map((w, i) => (
+            {workspaces === null ? (
+              <div className="px-3 py-2 text-[12.5px] text-[#9CA3AF]">Loading…</div>
+            ) : workspaces.length === 0 ? (
               <button
-                key={w.id}
-                ref={i === 0 ? firstItemRef : undefined}
+                ref={firstItemRef}
                 type="button"
-                onClick={() => pick(w.id)}
+                onClick={() => pick(undefined)}
                 className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12.5px] text-[#374151] transition-colors hover:bg-[#F9FAFB] focus:bg-[#F9FAFB] focus:outline-none"
               >
-                <span
-                  className="h-2.5 w-2.5 shrink-0 rounded-full"
-                  style={{ background: w.color ?? DEFAULT_DOT }}
-                  aria-hidden="true"
-                />
-                <span className="flex-1 truncate">{w.name}</span>
-                {w.isDefault && (
-                  <span className="shrink-0 rounded-sm bg-[#EFF6FF] px-1 text-[10px] font-medium text-[#2563EB]">
-                    Default
-                  </span>
-                )}
+                <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: DEFAULT_DOT }} aria-hidden="true" />
+                <span className="flex-1 truncate">Default workspace</span>
               </button>
-            ))}
+            ) : (
+              workspaces.map((w, i) => (
+                <button
+                  key={w.id}
+                  ref={i === 0 ? firstItemRef : undefined}
+                  type="button"
+                  onClick={() => pick(w.id)}
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12.5px] text-[#374151] transition-colors hover:bg-[#F9FAFB] focus:bg-[#F9FAFB] focus:outline-none"
+                >
+                  <span
+                    className="h-2.5 w-2.5 shrink-0 rounded-full"
+                    style={{ background: w.color ?? DEFAULT_DOT }}
+                    aria-hidden="true"
+                  />
+                  <span className="flex-1 truncate">{w.name}</span>
+                  {w.isDefault && (
+                    <span className="shrink-0 rounded-sm bg-[#EFF6FF] px-1 text-[10px] font-medium text-[#2563EB]">
+                      Default
+                    </span>
+                  )}
+                </button>
+              ))
+            )}
           </div>,
           document.body,
         )}

@@ -5,7 +5,6 @@ import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { ProjectInput, ProjectUpdateInput } from '../_lib/schemas'
 import {
-  ensureDefaultWorkspace,
   fetchWorkspaces,
   resolveDefaultStageId,
   resolveDestinationWorkspaceId,
@@ -193,13 +192,14 @@ export async function searchLeads(q: string): Promise<LeadOption[]> {
 type SubmissionOverrides = { title?: string; value?: number; workspaceId?: string }
 
 // Lightweight workspace list for the "Create project" workspace picker on the
-// action-page submissions and lead drawer. Guarantees the starter "Welcome"
-// workspace exists so the picker is never empty.
+// action-page submissions and lead drawer. Kept to a single RLS-scoped read so
+// the menu opens fast; it does NOT seed a default workspace (the create path's
+// resolveDestinationWorkspaceId handles the brand-new-user case), so an empty
+// result simply means "create into the default".
 export type WorkspaceOption = { id: string; name: string; isDefault: boolean; color: string | null }
 
 export async function listProjectWorkspaces(): Promise<WorkspaceOption[]> {
   const { supabase, userId } = await requireUser()
-  await ensureDefaultWorkspace(userId)
   const rows = await fetchWorkspaces(supabase, userId)
   return rows.map((w) => ({ id: w.id, name: w.name, isDefault: w.is_default, color: w.color }))
 }

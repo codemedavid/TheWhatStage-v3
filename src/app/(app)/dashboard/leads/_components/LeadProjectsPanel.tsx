@@ -39,7 +39,7 @@ export function LeadProjectsPanel({ leadId }: { leadId: string }) {
 
   const open = (id: string) => router.push(projectHref(id))
 
-  const create = async (workspaceId: string) => {
+  const create = async (workspaceId?: string) => {
     const id = await createLeadProject(leadId, undefined, workspaceId)
     router.push(projectHref(id))
   }
