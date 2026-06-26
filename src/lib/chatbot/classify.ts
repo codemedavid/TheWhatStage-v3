@@ -450,6 +450,17 @@ export async function answerWithClassification(
   // The structured envelope is untrusted on this path, so the same field resets
   // as the LLM fallback below apply.
   if (!text) {
+    // Observability: we previously flew blind on WHY ~1-in-5 turns fail to parse
+    // and fall back (a second full LLM call). Env-gated so it never logs raw
+    // model output in normal operation; capped to bound log size. Drives the
+    // salvage-coverage tests + the token-eval replay harness.
+    if (process.env.CLASSIFY_DEBUG_RAW) {
+      console.log('[classify.debug.raw]', {
+        finishReason: completion.finishReason,
+        rawLen: raw.length,
+        raw: raw.slice(0, 6000),
+      })
+    }
     const salvaged = salvageReply(raw)
     if (salvaged) {
       const guarded = guardReply({
@@ -1290,11 +1301,24 @@ export function sanitizeReply(raw: string): string {
   // 7. Stray fenced code blocks that occasionally escape into reply.
   s = s.replace(/```[a-z]*\s*[\s\S]*?```/gi, '')
 
-  // 8. Bracketed link placeholder leakage like [Insert Link] / [form link here].
+  // 8. Bracketed link placeholder leakage like [Insert Link] / [form link here]
+  //    and the resolved action-page routing marker `[Action Page: "title" …]`
+  //    the runtime injects into the bot's instructions for `!actionpage:<slug>`
+  //    mentions. The model is told this marker is internal-only, but it
+  //    occasionally copies it straight into `reply`, so the customer sees a
+  //    placeholder instead of the real button card. Strip it in every form.
   s = s.replace(
     /\[(?:insert\s+)?(?:link|url|form\s+link[^\]]*|action\s+page[^\]]*)\]/gi,
     '',
   )
+
+  // 8a. Raw operator routing tokens that escaped instruction resolution. The
+  //     chatbot instructions use `!actionpage:<slug>` to mark WHERE a page is
+  //     sent; the runtime normally rewrites them before the prompt is built.
+  //     When resolution is skipped (a non-Messenger reply path) or the model
+  //     echoes the literal token, the bare `!actionpage` / `!actionpage:slug`
+  //     must never reach the customer.
+  s = s.replace(/!actionpage(?::[a-z0-9][a-z0-9_-]*)?/gi, '')
 
   // 8b. Link-tease sentences. Models occasionally announce a link in `reply`
   //     ("Sige, eto ang link... check it") without actually setting the
