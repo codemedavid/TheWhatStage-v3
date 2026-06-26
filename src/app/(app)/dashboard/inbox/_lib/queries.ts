@@ -3,6 +3,7 @@ import {
   mapThreadRow,
   mapSubmissionRow,
   mapProjectRow,
+  qualifiesForNeedsReply,
   type InboxItem,
   type InboxTab,
   type RawThreadRow,
@@ -15,9 +16,22 @@ import {
 // indexes. "Load more" can be layered on later — out of scope for v1.
 export const INBOX_PAGE_SIZE = 50
 
+// The Needs-reply feed is filtered in JS (active project / submission / operator
+// takeover — an OR that spans three relations PostgREST can't express in one
+// query). We over-scan the most recent waiting threads, then keep the ones that
+// qualify. The working set is tiny in practice, so a single bounded scan is
+// enough for both the feed and the badge count.
+const NEEDS_REPLY_SCAN_CAP = 300
+
 const THREAD_SELECT =
   'id, lead_id, full_name, picture_url, unread_count, missed_count, is_important, last_message_at, last_message_preview, ' +
   'leads(name, projects(title, archived_at, updated_at)), facebook_pages(name)'
+
+// Needs-reply adds the takeover stamp and a presence probe for submissions so
+// qualifiesForNeedsReply can run client-side.
+const NEEDS_REPLY_SELECT =
+  'id, lead_id, full_name, picture_url, unread_count, missed_count, is_important, last_message_at, last_message_preview, bot_paused_until, ' +
+  'leads(name, projects(title, archived_at, updated_at), action_page_submissions(id)), facebook_pages(name)'
 
 const SUBMISSION_SELECT =
   'id, lead_id, outcome, data, created_at, action_pages(title, kind), ' +
@@ -27,22 +41,35 @@ const PROJECT_SELECT =
   'id, lead_id, title, updated_at, ' +
   'leads(name, messenger_threads(is_important, unread_count, missed_count, picture_url, last_message_at, last_message_preview))'
 
-// Threads where the client is waiting on a reply: an unread message OR a missed
-// one. Served by messenger_threads_user_recent_idx(user_id, last_message_at desc).
+// Scan the most-recent waiting threads (unread OR missed) for a user. Shared by
+// the Needs-reply feed and its badge count so both apply the same JS filter.
+async function scanWaitingThreads(
+  supabase: SupabaseClient,
+  userId: string,
+): Promise<RawThreadRow[]> {
+  const { data, error } = await supabase
+    .from('messenger_threads')
+    .select(NEEDS_REPLY_SELECT)
+    .eq('user_id', userId)
+    .or('unread_count.gt.0,missed_count.gt.0')
+    .order('last_message_at', { ascending: false, nullsFirst: false })
+    .limit(NEEDS_REPLY_SCAN_CAP)
+  if (error) throw new Error(`scanWaitingThreads: ${error.message}`)
+  return ((data ?? []) as unknown as RawThreadRow[]).filter((row) => qualifiesForNeedsReply(row))
+}
+
+// Threads where the client is waiting on a reply (unread OR missed) AND the
+// conversation is real, owned work: an active project, a recorded submission,
+// or one the operator has personally taken over. Cold inbound the bot still
+// handles is intentionally excluded. Served by
+// messenger_threads_user_recent_idx(user_id, last_message_at desc).
 export async function fetchNeedsReply(
   supabase: SupabaseClient,
   userId: string,
   limit = INBOX_PAGE_SIZE,
 ): Promise<InboxItem[]> {
-  const { data, error } = await supabase
-    .from('messenger_threads')
-    .select(THREAD_SELECT)
-    .eq('user_id', userId)
-    .or('unread_count.gt.0,missed_count.gt.0')
-    .order('last_message_at', { ascending: false, nullsFirst: false })
-    .limit(limit)
-  if (error) throw new Error(`fetchNeedsReply: ${error.message}`)
-  return ((data ?? []) as unknown as RawThreadRow[]).map(mapThreadRow)
+  const qualifying = await scanWaitingThreads(supabase, userId)
+  return qualifying.slice(0, limit).map(mapThreadRow)
 }
 
 // Manually pinned threads ("important to check"), newest activity first. Served
@@ -119,17 +146,14 @@ export function fetchInboxItems(
   }
 }
 
-// Distinct conversations waiting on a reply (unread OR missed). Powers the
-// sidebar "Inbox" badge and the "Needs reply" tab chip. A thread count (not a
-// message sum) so the number reads as "how many people are waiting".
+// Distinct conversations that qualify for the Needs-reply feed (waiting on a
+// reply AND real, owned work). Powers the sidebar "Inbox" badge and the "Needs
+// reply" tab chip — kept in lockstep with fetchNeedsReply so the badge never
+// over-counts cold inbound the feed hides. A thread count (not a message sum) so
+// the number reads as "how many people are waiting".
 export async function countNeedsReply(supabase: SupabaseClient, userId: string): Promise<number> {
-  const { count, error } = await supabase
-    .from('messenger_threads')
-    .select('id', { count: 'exact', head: true })
-    .eq('user_id', userId)
-    .or('unread_count.gt.0,missed_count.gt.0')
-  if (error) throw new Error(`countNeedsReply: ${error.message}`)
-  return count ?? 0
+  const qualifying = await scanWaitingThreads(supabase, userId)
+  return qualifying.length
 }
 
 // Count of pinned threads, for the "Important" tab chip.

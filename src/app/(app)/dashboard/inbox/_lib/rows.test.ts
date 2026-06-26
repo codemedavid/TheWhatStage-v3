@@ -9,6 +9,9 @@ import {
   mapThreadRow,
   mapSubmissionRow,
   mapProjectRow,
+  hasActiveProject,
+  isBotTakenOver,
+  qualifiesForNeedsReply,
   type RawThreadRow,
   type RawSubmissionRow,
   type RawProjectRow,
@@ -123,6 +126,86 @@ describe('resolveBadge', () => {
 
   it('returns null when nothing is waiting', () => {
     expect(resolveBadge(0, 0)).toBeNull()
+  })
+})
+
+describe('hasActiveProject', () => {
+  it('is false for no projects', () => {
+    expect(hasActiveProject(null)).toBe(false)
+    expect(hasActiveProject([])).toBe(false)
+    expect(hasActiveProject(undefined)).toBe(false)
+  })
+
+  it('is false when every project is archived', () => {
+    expect(hasActiveProject([{ archived_at: '2026-01-01' }])).toBe(false)
+  })
+
+  it('is true when at least one project is live, even without a title', () => {
+    expect(hasActiveProject([{ archived_at: '2026-01-01' }, { archived_at: null }])).toBe(true)
+    expect(hasActiveProject({ archived_at: null })).toBe(true)
+  })
+})
+
+describe('isBotTakenOver', () => {
+  const NOW = new Date('2026-06-26T12:00:00Z').getTime()
+
+  it('is false when there is no pause stamp', () => {
+    expect(isBotTakenOver(null, NOW)).toBe(false)
+    expect(isBotTakenOver(undefined, NOW)).toBe(false)
+  })
+
+  it('is false for an unparseable or already-expired pause', () => {
+    expect(isBotTakenOver('not-a-date', NOW)).toBe(false)
+    expect(isBotTakenOver('2026-06-26T11:00:00Z', NOW)).toBe(false)
+  })
+
+  it('is true while the operator pause is still in the future', () => {
+    expect(isBotTakenOver('2026-06-26T12:30:00Z', NOW)).toBe(true)
+  })
+})
+
+describe('qualifiesForNeedsReply', () => {
+  const NOW = new Date('2026-06-26T12:00:00Z').getTime()
+  const bare: RawThreadRow = {
+    id: 't1',
+    lead_id: 'lead-1',
+    full_name: 'X',
+    picture_url: null,
+    unread_count: 1,
+    missed_count: 0,
+    is_important: false,
+    last_message_at: null,
+    last_message_preview: null,
+    bot_paused_until: null,
+    leads: { name: 'X', projects: null, action_page_submissions: null },
+    facebook_pages: null,
+  }
+
+  it('excludes a waiting thread with no project, submission, or takeover', () => {
+    expect(qualifiesForNeedsReply(bare, NOW)).toBe(false)
+  })
+
+  it('excludes a thread whose only project is archived', () => {
+    const row = { ...bare, leads: { name: 'X', projects: [{ archived_at: '2026-01-01' }], action_page_submissions: null } }
+    expect(qualifiesForNeedsReply(row, NOW)).toBe(false)
+  })
+
+  it('includes a thread with an active project', () => {
+    const row = { ...bare, leads: { name: 'X', projects: [{ archived_at: null }], action_page_submissions: null } }
+    expect(qualifiesForNeedsReply(row, NOW)).toBe(true)
+  })
+
+  it('includes a thread whose lead has a submission', () => {
+    const row = { ...bare, leads: { name: 'X', projects: null, action_page_submissions: [{ id: 'sub-1' }] } }
+    expect(qualifiesForNeedsReply(row, NOW)).toBe(true)
+  })
+
+  it('includes a thread the operator has taken over (bot paused)', () => {
+    expect(qualifiesForNeedsReply({ ...bare, bot_paused_until: '2026-06-26T12:30:00Z' }, NOW)).toBe(true)
+  })
+
+  it('excludes a thread whose operator takeover has expired', () => {
+    expect(qualifiesForNeedsReply({ ...bare, bot_paused_until: '2026-06-26T11:00:00Z' }, NOW)).toBe(false)
   })
 })
 
