@@ -87,6 +87,7 @@ function normalizeWorkspaceRow(row: Record<string, unknown>): ProjectWorkspaceRo
     position: row.position as number,
     is_default: row.is_default as boolean,
     color: (row.color as string | null) ?? null,
+    updated_at: (row.updated_at as string | null) ?? null,
   }
 }
 
