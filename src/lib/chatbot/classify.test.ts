@@ -417,6 +417,47 @@ describe('sanitizeReply', () => {
     expect(out).toContain('Sure thing')
   })
 
+  // ---- Action-page routing tokens. The chatbot instructions use
+  //      `!actionpage:<slug>` to mark WHERE a page should be sent; the runtime
+  //      resolves these to an internal `[Action Page: "title"]` note before the
+  //      prompt is built. When the model copies that note (or a raw, unresolved
+  //      token) into `reply`, the customer sees a broken placeholder instead of
+  //      a real button. (Production incident 2026-06-26: Messenger thread showed
+  //      `[Action Page: "KantaMoKwentoMo fill up form"]` as plain text.)
+  it('strips a leaked [Action Page: "..."] routing marker (2026-06-26 incident)', () => {
+    const raw =
+      'If go na po tayo, tutulungan ko po kayo 😊\n[Action Page: "KantaMoKwentoMo fill up form"]'
+    const out = sanitizeReply(raw)
+    expect(out).not.toMatch(/\[action page/i)
+    expect(out).not.toMatch(/KantaMoKwentoMo/)
+    expect(out).toContain('tutulungan ko po kayo')
+  })
+
+  it('strips a raw !actionpage:slug token leaked into the reply', () => {
+    const raw = 'Sige po, ready na po tayo! !actionpage:kantamokwentomo'
+    const out = sanitizeReply(raw)
+    expect(out).not.toMatch(/!actionpage/i)
+    expect(out).toContain('ready na po tayo!')
+  })
+
+  it('strips a bare !actionpage token with no slug', () => {
+    const out = sanitizeReply('Tara na po !actionpage')
+    expect(out).not.toMatch(/!actionpage/i)
+    expect(out).toContain('Tara na po')
+  })
+
+  it.each([
+    '!actionpage:booking',
+    '!actionpage:kanta-mo-kwento-mo',
+    '!ACTIONPAGE:Booking',
+    'Heto na po: !actionpage:lead_gen',
+    'Punan niyo lang po — [Action Page: "Booking"]',
+  ])('removes every action-page routing token/marker variant: %s', (raw) => {
+    const out = sanitizeReply(raw)
+    expect(out).not.toMatch(/!actionpage/i)
+    expect(out).not.toMatch(/\[action page/i)
+  })
+
   it('strips ChatML control tokens like <|im_start|>assistant', () => {
     const raw = '<|im_start|>assistant\nHello there<|im_end|>'
     const out = sanitizeReply(raw)
