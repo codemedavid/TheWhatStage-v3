@@ -648,11 +648,19 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
           }
         }
         const slugToTitle = new Map(sendablePages.map((p) => [p.slug, p.title]))
+        // Resolve each `!actionpage:<slug>` mention into an INTERNAL routing note
+        // the model uses to decide WHICH page to attach via the structured
+        // `action_page` field. The marker is intentionally self-describing as
+        // internal — the model used to copy a bare `[Action Page: "title"]` verbatim
+        // into its reply, so the customer saw a placeholder instead of a real
+        // button. sanitizeReply() strips this marker (and the raw token) as a
+        // belt-and-braces guarantee, but the explicit "never write this" cue keeps
+        // the model from emitting it in the first place.
         resolvedInstructions = rawInstr.replace(
           /!actionpage:([a-z0-9][a-z0-9_-]*)/gi,
           (_, slug: string) => {
-            const title = slugToTitle.get(slug)
-            return title ? `[Action Page: "${title}"]` : `[Action Page: "${slug}"]`
+            const title = slugToTitle.get(slug) ?? slug
+            return `[Action Page: "${title}" — internal routing only; set the action_page field, never write this in your reply]`
           },
         )
       }
