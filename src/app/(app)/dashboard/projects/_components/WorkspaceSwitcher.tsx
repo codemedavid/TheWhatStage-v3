@@ -59,7 +59,7 @@ export function WorkspaceSwitcher({
         style={{ border: '1px solid var(--lead-line)', background: 'var(--lead-surface)' }}
       >
         {current.color && <span className="h-2.5 w-2.5 rounded-full" style={{ background: current.color }} />}
-        <span className="text-[18px] font-semibold" style={{ color: 'var(--lead-ink)' }}>
+        <span className="lead-display text-[20px]" style={{ color: 'var(--lead-ink)' }}>
           {pending ? 'Duplicating…' : current.name}
         </span>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden style={{ color: 'var(--lead-muted)' }}>

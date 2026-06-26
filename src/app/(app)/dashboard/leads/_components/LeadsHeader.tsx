@@ -24,7 +24,7 @@ export function LeadsHeader({
       <div className="flex items-center gap-4 flex-wrap">
         <div className="flex items-baseline gap-3">
           <h1
-            className="text-[22px] font-semibold tracking-tight"
+            className="lead-display text-[24px]"
             style={{ color: 'var(--lead-ink)' }}
           >
             Leads
