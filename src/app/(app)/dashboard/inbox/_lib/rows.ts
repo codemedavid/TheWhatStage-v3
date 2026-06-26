@@ -79,6 +79,49 @@ export function pickProjectChip(projects: ProjectChipRow | ProjectChipRow[] | nu
   return chosen?.title ?? null
 }
 
+// Does the lead have at least one live (non-archived) project? Unlike
+// pickProjectChip this ignores the title, so a titleless-but-active project
+// still counts as "real operation". Used to gate the Needs-reply feed.
+export function hasActiveProject(
+  projects: ProjectChipRow | ProjectChipRow[] | null | undefined,
+): boolean {
+  const rows = Array.isArray(projects) ? projects : projects ? [projects] : []
+  return rows.some((p) => !p.archived_at)
+}
+
+type SubmissionRef = { id?: string | null }
+
+// Has the lead ever submitted an action page (form/booking/order/…)?
+function hasSubmission(
+  submissions: SubmissionRef | SubmissionRef[] | null | undefined,
+): boolean {
+  const rows = Array.isArray(submissions) ? submissions : submissions ? [submissions] : []
+  return rows.length > 0
+}
+
+// Is the operator currently handling this conversation? `bot_paused_until` is
+// stamped whenever someone sends a manual reply (see leads/actions/messenger.ts);
+// while it is still in the future the bot is paused and the human has "taken over".
+export function isBotTakenOver(
+  botPausedUntil: string | null | undefined,
+  nowMs: number = Date.now(),
+): boolean {
+  if (!botPausedUntil) return false
+  const until = new Date(botPausedUntil).getTime()
+  if (Number.isNaN(until)) return false
+  return until > nowMs
+}
+
+// Should a waiting thread surface in the Needs-reply feed? We only want the
+// conversations that represent real, owned work — those with an active project,
+// a recorded submission, or one the operator has personally taken over. Other
+// unread/missed chats (cold inbound the bot still owns) are intentionally hidden.
+export function qualifiesForNeedsReply(row: RawThreadRow, nowMs: number = Date.now()): boolean {
+  if (isBotTakenOver(row.bot_paused_until, nowMs)) return true
+  const lead = first(row.leads)
+  return hasActiveProject(lead?.projects) || hasSubmission(lead?.action_page_submissions)
+}
+
 const TAG_LABELS: Record<string, string> = {
   form: 'Form',
   booking: 'Booking',
@@ -157,9 +200,11 @@ export interface RawThreadRow {
   is_important: boolean | null
   last_message_at: string | null
   last_message_preview: string | null
+  /** Operator-takeover stamp; while in the future the bot is paused. */
+  bot_paused_until?: string | null
   leads:
-    | { name?: string | null; projects?: ProjectChipRow | ProjectChipRow[] | null }
-    | { name?: string | null; projects?: ProjectChipRow | ProjectChipRow[] | null }[]
+    | { name?: string | null; projects?: ProjectChipRow | ProjectChipRow[] | null; action_page_submissions?: { id?: string | null } | { id?: string | null }[] | null }
+    | { name?: string | null; projects?: ProjectChipRow | ProjectChipRow[] | null; action_page_submissions?: { id?: string | null } | { id?: string | null }[] | null }[]
     | null
   facebook_pages: { name?: string | null } | { name?: string | null }[] | null
 }
