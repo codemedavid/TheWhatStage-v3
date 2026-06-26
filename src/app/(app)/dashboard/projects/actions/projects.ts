@@ -4,6 +4,12 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { ProjectInput, ProjectUpdateInput } from '../_lib/schemas'
+import {
+  ensureDefaultWorkspace,
+  fetchWorkspaces,
+  resolveDefaultStageId,
+  resolveDestinationWorkspaceId,
+} from '../_lib/workspaces'
 import { seedProjectSequenceRun, cancelActiveProjectSequenceRuns } from '@/lib/projects/sequences/seed'
 import { resetThreadCountersByLead } from '@/lib/messenger/reset-counters'
 
@@ -184,7 +190,19 @@ export async function searchLeads(q: string): Promise<LeadOption[]> {
   return (data ?? []) as LeadOption[]
 }
 
-type SubmissionOverrides = { title?: string; value?: number; stageId?: string }
+type SubmissionOverrides = { title?: string; value?: number; workspaceId?: string }
+
+// Lightweight workspace list for the "Create project" workspace picker on the
+// action-page submissions and lead drawer. Guarantees the starter "Welcome"
+// workspace exists so the picker is never empty.
+export type WorkspaceOption = { id: string; name: string; isDefault: boolean; color: string | null }
+
+export async function listProjectWorkspaces(): Promise<WorkspaceOption[]> {
+  const { supabase, userId } = await requireUser()
+  await ensureDefaultWorkspace(userId)
+  const rows = await fetchWorkspaces(supabase, userId)
+  return rows.map((w) => ({ id: w.id, name: w.name, isDefault: w.is_default, color: w.color }))
+}
 
 // "Mark as project": create a project from an action-page submission, linking
 // it back to the originating submission and the submission's lead.
@@ -202,16 +220,12 @@ export async function createProjectFromSubmission(
   if (!submission) throw new Error('Submission not found')
   if (!submission.lead_id) throw new Error('Submission is not linked to a lead')
 
-  // Ensure the user has a default workspace + board to drop this into.
-  const { ensureDefaultWorkspace, resolveDefaultStageId } = await import('../_lib/workspaces')
-  const workspaceId = await ensureDefaultWorkspace(userId)
-
-  let stageId = overrides?.stageId
-  if (!stageId) {
-    const def = await resolveDefaultStageId(supabase, userId, workspaceId)
-    if (!def) throw new Error('No default project stage configured')
-    stageId = def
-  }
+  // Resolve the destination workspace: an explicit pick from the action-page /
+  // lead-drawer picker (ownership-verified) or the user's default workspace, then
+  // drop the card into that workspace's default stage.
+  const workspaceId = await resolveDestinationWorkspaceId(supabase, userId, overrides?.workspaceId)
+  const stageId = await resolveDefaultStageId(supabase, userId, workspaceId)
+  if (!stageId) throw new Error('No default project stage configured')
 
   const page = Array.isArray(submission.action_pages)
     ? (submission.action_pages[0] ?? null)

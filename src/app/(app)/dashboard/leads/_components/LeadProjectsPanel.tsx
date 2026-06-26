@@ -3,6 +3,8 @@
 import { useEffect, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { loadLeadProjects, createLeadProject } from '../actions/projects'
+import { WorkspacePicker } from '../../projects/_components/WorkspacePicker.client'
+import { projectHref } from '../../projects/_lib/links'
 import type { ProjectCardRow } from '../../projects/_lib/queries'
 
 type State =
@@ -13,7 +15,6 @@ type State =
 export function LeadProjectsPanel({ leadId }: { leadId: string }) {
   const router = useRouter()
   const [state, setState] = useState<State>({ kind: 'loading' })
-  const [creating, startCreate] = useTransition()
   const [, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
 
@@ -36,18 +37,11 @@ export function LeadProjectsPanel({ leadId }: { leadId: string }) {
     }
   }, [leadId, startTransition])
 
-  const open = (id: string) => router.push(`/dashboard/projects?project=${id}`)
+  const open = (id: string) => router.push(projectHref(id))
 
-  const create = () => {
-    setError(null)
-    startCreate(async () => {
-      try {
-        const id = await createLeadProject(leadId)
-        router.push(`/dashboard/projects?project=${id}`)
-      } catch (e) {
-        setError(e instanceof Error ? e.message : 'Failed to create project')
-      }
-    })
+  const create = async (workspaceId: string) => {
+    const id = await createLeadProject(leadId, undefined, workspaceId)
+    router.push(projectHref(id))
   }
 
   return (
@@ -56,15 +50,13 @@ export function LeadProjectsPanel({ leadId }: { leadId: string }) {
         <p className="text-[12.5px]" style={{ color: 'var(--lead-muted)' }}>
           Deals and work created for this customer.
         </p>
-        <button
-          type="button"
-          onClick={create}
-          disabled={creating}
-          className="shrink-0 rounded-md px-2.5 py-1.5 text-[12px] font-medium text-white disabled:opacity-50"
+        <WorkspacePicker
+          label="+ New project"
+          onPick={create}
+          onError={setError}
+          className="inline-flex shrink-0 items-center gap-1 rounded-md px-2.5 py-1.5 text-[12px] font-medium text-white disabled:opacity-50"
           style={{ background: 'var(--lead-accent)' }}
-        >
-          {creating ? 'Creating…' : '+ New project'}
-        </button>
+        />
       </div>
 
       {error && (
