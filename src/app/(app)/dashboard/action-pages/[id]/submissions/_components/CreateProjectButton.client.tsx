@@ -1,9 +1,11 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { createProjectFromSubmission } from '../../../../projects/actions/projects'
+import { WorkspacePicker } from '../../../../projects/_components/WorkspacePicker.client'
+import { projectHref } from '../../../../projects/_lib/links'
 import type { SubmissionProjectInfo } from '../../../_lib/queries'
 import { UnreadBadge } from '../../../../_components/UnreadBadge'
 
@@ -22,12 +24,11 @@ const STAGE_BADGE_STYLES: Record<'open' | 'won' | 'lost', string> = {
 }
 
 // Inline action on a submission card: turn the submission into a project so the
-// deal can be tracked on the Projects board. Mirrors LeadProjectsPanel's
-// useTransition + router.push pattern. Hidden when the submission has no lead,
-// since createProjectFromSubmission requires one.
+// deal can be tracked on the Projects board. The WorkspacePicker lets the user
+// choose the destination workspace before creating. Hidden when the submission
+// has no lead, since createProjectFromSubmission requires one.
 export function CreateProjectButton({ submissionId, leadId, existingProject }: Props) {
   const router = useRouter()
-  const [pending, start] = useTransition()
   const [error, setError] = useState<string | null>(null)
 
   if (existingProject) {
@@ -36,7 +37,7 @@ export function CreateProjectButton({ submissionId, leadId, existingProject }: P
     return (
       <span className="inline-flex items-center gap-1.5">
         <Link
-          href={`/dashboard/projects?project=${existingProject.id}`}
+          href={projectHref(existingProject.id)}
           className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors ${badgeStyle}`}
           title={`Project stage: ${label}`}
         >
@@ -53,29 +54,20 @@ export function CreateProjectButton({ submissionId, leadId, existingProject }: P
 
   if (!leadId) return null
 
-  const create = () => {
-    setError(null)
-    start(async () => {
-      try {
-        const id = await createProjectFromSubmission(submissionId)
-        router.push(`/dashboard/projects?project=${id}`)
-      } catch (e) {
-        setError(e instanceof Error ? e.message : 'Failed to create project')
-      }
-    })
+  const create = async (workspaceId: string) => {
+    const id = await createProjectFromSubmission(submissionId, { workspaceId })
+    router.push(projectHref(id))
   }
 
   return (
     <div className="flex flex-col items-end gap-0.5">
-      <button
-        type="button"
-        onClick={create}
-        disabled={pending}
+      <WorkspacePicker
+        label="Create project"
+        icon={<ProjectIcon size={11} />}
+        onPick={create}
+        onError={setError}
         className="inline-flex items-center gap-1 rounded-md border border-[#E5E7EB] bg-white px-2 py-1 text-[11px] font-medium text-[#374151] transition-colors hover:bg-[#F9FAFB] disabled:opacity-50"
-      >
-        <ProjectIcon size={11} />
-        {pending ? 'Creating…' : 'Create project'}
-      </button>
+      />
       {error && <span className="text-[10.5px] text-[#E11D48]">{error}</span>}
     </div>
   )

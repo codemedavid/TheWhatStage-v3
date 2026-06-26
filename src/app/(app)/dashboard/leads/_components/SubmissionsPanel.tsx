@@ -8,6 +8,8 @@ import {
 } from '../actions/submissions'
 import { SubmissionView } from '../../_components/SubmissionView'
 import { createProjectFromSubmission } from '../../projects/actions/projects'
+import { WorkspacePicker } from '../../projects/_components/WorkspacePicker.client'
+import { projectHref } from '../../projects/_lib/links'
 
 type State =
   | { kind: 'loading' }
@@ -89,7 +91,6 @@ export function SubmissionsPanel({
 function SubmissionCard({ submission }: { submission: LeadSubmission }) {
   const [open, setOpen] = useState(false)
   const router = useRouter()
-  const [marking, startMark] = useTransition()
   const [markError, setMarkError] = useState<string | null>(null)
   const when = new Date(submission.created_at).toLocaleString(undefined, {
     month: 'short',
@@ -98,16 +99,9 @@ function SubmissionCard({ submission }: { submission: LeadSubmission }) {
     minute: '2-digit',
   })
 
-  const markAsProject = () => {
-    setMarkError(null)
-    startMark(async () => {
-      try {
-        const id = await createProjectFromSubmission(submission.id)
-        router.push(`/dashboard/projects?project=${id}`)
-      } catch (e) {
-        setMarkError(e instanceof Error ? e.message : 'Failed to create project')
-      }
-    })
+  const markAsProject = async (workspaceId: string) => {
+    const id = await createProjectFromSubmission(submission.id, { workspaceId })
+    router.push(projectHref(id))
   }
   return (
     <div
@@ -170,15 +164,13 @@ function SubmissionCard({ submission }: { submission: LeadSubmission }) {
             {markError && (
               <span className="text-[11.5px]" style={{ color: 'var(--lead-danger)' }}>{markError}</span>
             )}
-            <button
-              type="button"
-              onClick={markAsProject}
-              disabled={marking}
-              className="ml-auto rounded-md px-2.5 py-1.5 text-[12px] font-medium text-white disabled:opacity-50"
+            <WorkspacePicker
+              label="Mark as project"
+              onPick={markAsProject}
+              onError={setMarkError}
+              className="ml-auto inline-flex items-center gap-1 rounded-md px-2.5 py-1.5 text-[12px] font-medium text-white disabled:opacity-50"
               style={{ background: 'var(--lead-accent)' }}
-            >
-              {marking ? 'Creating…' : 'Mark as project'}
-            </button>
+            />
           </div>
         </div>
       )}

@@ -6,7 +6,7 @@ import {
   fetchProjectsByLead,
   type ProjectCardRow,
 } from '../../projects/_lib/queries'
-import { ensureDefaultWorkspace, resolveDefaultStageId } from '../../projects/_lib/workspaces'
+import { resolveDestinationWorkspaceId, resolveDefaultStageId } from '../../projects/_lib/workspaces'
 import { createProject } from '../../projects/actions/projects'
 
 async function requireUser() {
@@ -23,10 +23,15 @@ export async function loadLeadProjects(leadId: string): Promise<ProjectCardRow[]
   return fetchProjectsByLead(supabase, userId, leadId)
 }
 
-// Create a project for a lead straight from the lead drawer, dropping it into
-// the user's default project stage. Mirrors createProjectFromSubmission's stage
-// resolution; createProject seeds the stage's follow-up sequence if any.
-export async function createLeadProject(leadId: string, title?: string): Promise<string> {
+// Create a project for a lead straight from the lead drawer, dropping it into a
+// chosen workspace's default stage (or the user's default workspace when none is
+// picked). Mirrors createProjectFromSubmission's resolution; createProject seeds
+// the stage's follow-up sequence if any.
+export async function createLeadProject(
+  leadId: string,
+  title?: string,
+  workspaceId?: string,
+): Promise<string> {
   const { supabase, userId } = await requireUser()
 
   const { data: lead, error: leadErr } = await supabase
@@ -35,8 +40,8 @@ export async function createLeadProject(leadId: string, title?: string): Promise
   if (leadErr) throw leadErr
   if (!lead) throw new Error('Lead not found')
 
-  const workspaceId = await ensureDefaultWorkspace(userId)
-  const stageId = await resolveDefaultStageId(supabase, userId, workspaceId)
+  const resolvedWorkspaceId = await resolveDestinationWorkspaceId(supabase, userId, workspaceId)
+  const stageId = await resolveDefaultStageId(supabase, userId, resolvedWorkspaceId)
   if (!stageId) throw new Error('No default project stage configured')
 
   const resolvedTitle = (title?.trim() || `Project — ${lead.name ?? 'customer'}`).slice(0, 160)

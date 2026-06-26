@@ -195,6 +195,23 @@ async function readDefaultWorkspaceId(admin: SupabaseClient, userId: string): Pr
   return (data?.id as string | undefined) ?? null
 }
 
+// Resolve the destination workspace for a new card. An explicitly chosen
+// workspace is validated against the caller's ownership (so a foreign UUID can't
+// be smuggled past the composite FK); otherwise we fall back to seeding/using
+// the user's default "Welcome" workspace.
+export async function resolveDestinationWorkspaceId(
+  supabase: SupabaseClient,
+  userId: string,
+  workspaceId?: string | null,
+): Promise<string> {
+  if (workspaceId) {
+    const owned = await fetchWorkspaceById(supabase, userId, workspaceId)
+    if (!owned) throw new Error('Workspace not found')
+    return workspaceId
+  }
+  return ensureDefaultWorkspace(userId)
+}
+
 // All workspaces + their summary stats for the index grid. Projects are few per
 // user, so this fetches the flat stage/project lists and folds them in TS rather
 // than running a grouped RPC.
