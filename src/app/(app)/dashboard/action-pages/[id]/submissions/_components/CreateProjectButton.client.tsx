@@ -54,7 +54,7 @@ export function CreateProjectButton({ submissionId, leadId, existingProject }: P
 
   if (!leadId) return null
 
-  const create = async (workspaceId: string) => {
+  const create = async (workspaceId?: string) => {
     const id = await createProjectFromSubmission(submissionId, { workspaceId })
     router.push(projectHref(id))
   }
