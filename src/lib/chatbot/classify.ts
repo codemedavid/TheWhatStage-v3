@@ -481,7 +481,7 @@ export async function answerWithClassification(
         raw: raw.slice(0, 6000),
       })
     }
-    const salvaged = salvageReply(raw)
+    const salvaged = recoverReply(raw)
     if (salvaged) {
       const guarded = guardReply({
         text: sanitizeReply(salvaged),
@@ -1522,6 +1522,89 @@ export function salvageReply(raw: string): string | null {
   }
   const trimmed = decoded.trim()
   return trimmed ? trimmed : null
+}
+
+// Reply-key aliases the model sometimes emits instead of the schema's "reply"
+// when it breaks response_format and "chats" back. Kept tight (high precision)
+// so we never mistake an unrelated field for the reply.
+const ALT_REPLY_KEYS = ['reply', 'message', 'response'] as const
+
+/**
+ * Extract a quoted string value for one of {@link ALT_REPLY_KEYS} written with
+ * EITHER single or double quotes — e.g. `{'reply': '...'}` or `{"message": "…"}`.
+ * Walks char-by-char from the opening quote so an escaped quote inside the value
+ * doesn't end it early. Returns the unescaped value, or null when no aliased key
+ * with a non-empty value is present.
+ */
+function salvageAltReply(raw: string): string | null {
+  const keyMatch = raw.match(/["']?(?:reply|message|response)["']?\s*:\s*(["'])/)
+  if (!keyMatch || keyMatch.index === undefined) return null
+  const quote = keyMatch[1]
+  let i = keyMatch.index + keyMatch[0].length
+  let value = ''
+  let terminated = false
+  for (; i < raw.length; i++) {
+    const ch = raw[i]
+    if (ch === '\\') {
+      const next = raw[i + 1]
+      if (next === undefined) break
+      value += ch + next
+      i++
+      continue
+    }
+    if (ch === quote) {
+      terminated = true
+      break
+    }
+    value += ch
+  }
+  let decoded = value
+  if (terminated) {
+    // Normalize to a JSON string literal (single→double) before unescaping.
+    try {
+      decoded = JSON.parse(`"${value.replace(/"/g, '\\"')}"`) as string
+    } catch {
+      decoded = value
+    }
+  }
+  const trimmed = decoded.trim()
+  return trimmed ? trimmed : null
+}
+
+// Schema keys that mark a (possibly broken) structured envelope. If the output
+// carries any of these, it is NOT free prose — defer to the LLM fallback rather
+// than risk emitting JSON fragments to the customer.
+const ENVELOPE_KEY_RE = /["'](?:reply|stage_change|action_page|proceed_intent|proceed_info|recommend)["']\s*:/
+
+/**
+ * Treat the whole output as the reply when the model ignored response_format and
+ * answered in plain natural language. Declines anything that looks like a JSON
+ * object/array or carries envelope keys, so a truncated `{"reply":` (no value)
+ * falls through to the LLM fallback instead of leaking raw JSON.
+ */
+function salvageProse(raw: string): string | null {
+  const t = raw.trim()
+  if (!t) return null
+  if (t.startsWith('{') || t.startsWith('[')) return null
+  if (ENVELOPE_KEY_RE.test(t)) return null
+  // Model occasionally wraps prose in a bare code fence.
+  const unfenced = t.replace(/^```[a-z]*\s*/i, '').replace(/```\s*$/, '').trim()
+  return unfenced || null
+}
+
+/**
+ * Single recovery entry point used by classify() BEFORE paying for a second
+ * `chatbot.answer.fallback` generation. Layers, cheapest/safest first:
+ *   1. salvageReply     — the schema's double-quoted "reply" (truncation/escapes)
+ *   2. salvageAltReply  — single-quoted or aliased key (message/response)
+ *   3. salvageProse     — the model answered in plain prose, no JSON at all
+ * Returns the recovered reply, or null when nothing usable can be extracted (the
+ * caller then runs the LLM fallback). Each layer only fires when the prior one
+ * found nothing, so this never widens what salvageReply already accepted.
+ */
+export function recoverReply(raw: string): string | null {
+  if (!raw) return null
+  return salvageReply(raw) ?? salvageAltReply(raw) ?? salvageProse(raw)
 }
 
 function coerceStageChange(
