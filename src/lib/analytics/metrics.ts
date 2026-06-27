@@ -233,6 +233,44 @@ export interface CrosstabResult {
   ratio: number
 }
 
+/** One distinct stage rung on an explorer axis (deduped from the cross-tab). */
+export interface StageRef {
+  rank: number
+  name: string
+  kind: string
+}
+
+/**
+ * Collapse cross-tab cells to one {@link StageRef} per rank, sorted by rank. The
+ * cross-tab is a lead-rung x project-rung product, so each rung repeats once per
+ * opposite-axis rung; this keeps the first occurrence per rank. With the
+ * project-stage axis grouped by `kind` in the SQL, "Won" is a single rung across
+ * every project — not one entry per project.
+ */
+function uniqueStages(
+  cells: readonly CrosstabCell[],
+  rankOf: (c: CrosstabCell) => number,
+  nameOf: (c: CrosstabCell) => string,
+  kindOf: (c: CrosstabCell) => string,
+): StageRef[] {
+  const byRank = new Map<number, StageRef>()
+  for (const c of cells) {
+    const rank = rankOf(c)
+    if (!byRank.has(rank)) byRank.set(rank, { rank, name: nameOf(c), kind: kindOf(c) })
+  }
+  return [...byRank.values()].sort((a, b) => a.rank - b.rank)
+}
+
+/** Distinct lead-stage rungs from the cross-tab, in rank order. */
+export function leadStageRefs(cells: readonly CrosstabCell[]): StageRef[] {
+  return uniqueStages(cells, (c) => c.leadRank, (c) => c.leadStageName, (c) => c.leadKind ?? '')
+}
+
+/** Distinct project-stage rungs from the cross-tab, in rank order. */
+export function projectStageRefs(cells: readonly CrosstabCell[]): StageRef[] {
+  return uniqueStages(cells, (c) => c.projectRank, (c) => c.projectStageName, (c) => c.projectKind)
+}
+
 /** Look up a cross-tab cell and derive its conversion percentage and ratio. */
 export function crosstabLookup(
   cells: readonly CrosstabCell[],

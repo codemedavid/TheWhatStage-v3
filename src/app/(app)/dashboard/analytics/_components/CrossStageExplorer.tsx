@@ -1,7 +1,14 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { crosstabLookup, formatCount, formatPct, type CrosstabCell } from '@/lib/analytics/metrics'
+import {
+  crosstabLookup,
+  formatCount,
+  formatPct,
+  leadStageRefs,
+  projectStageRefs,
+  type CrosstabCell,
+} from '@/lib/analytics/metrics'
 import { DrilldownButton, type DrilldownFilters } from './DrilldownButton'
 import { Card } from './ui'
 
@@ -11,40 +18,14 @@ interface CrossStageExplorerProps {
   currency: string
 }
 
-interface StageRef {
-  rank: number
-  name: string
-  kind: string
-}
-
-function uniqueStages(
-  cells: CrosstabCell[],
-  rankOf: (c: CrosstabCell) => number,
-  nameOf: (c: CrosstabCell) => string,
-  kindOf: (c: CrosstabCell) => string,
-): StageRef[] {
-  const byRank = new Map<number, StageRef>()
-  for (const c of cells) {
-    const rank = rankOf(c)
-    if (!byRank.has(rank)) byRank.set(rank, { rank, name: nameOf(c), kind: kindOf(c) })
-  }
-  return [...byRank.values()].sort((a, b) => a.rank - b.rank)
-}
-
 /**
  * The lead-stage -> project-stage explorer: pick any lead stage and any project
  * stage to see how many leads that reached the first also reached the second,
  * with conversion %, ratio, and a drill-down into the actual leads.
  */
 export function CrossStageExplorer({ cells, filters, currency }: CrossStageExplorerProps) {
-  const leadStages = useMemo(
-    () => uniqueStages(cells, (c) => c.leadRank, (c) => c.leadStageName, (c) => c.leadKind ?? ''),
-    [cells],
-  )
-  const projectStages = useMemo(
-    () => uniqueStages(cells, (c) => c.projectRank, (c) => c.projectStageName, (c) => c.projectKind),
-    [cells],
-  )
+  const leadStages = useMemo(() => leadStageRefs(cells), [cells])
+  const projectStages = useMemo(() => projectStageRefs(cells), [cells])
 
   const defaultLead = leadStages.find((s) => s.kind === 'qualifying')?.rank ?? leadStages[0]?.rank ?? 0
   const defaultProject =
