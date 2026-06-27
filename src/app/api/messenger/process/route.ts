@@ -1307,6 +1307,10 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
             // Idempotent on retry — see text-reply block above for rationale.
             let buttonFbId = job.outbound_button_fb_id
             let carouselSent = false
+            // Set when the button can't be delivered but the operator-configured
+            // in-chat fill-up template was sent instead, so the persisted record
+            // reflects what the customer actually received.
+            let fillupFallbackText: string | null = null
             if (!buttonFbId && carouselProducts.length > 0) {
               const elements: MessengerGenericElement[] = carouselProducts
                 .slice(0, 10)
@@ -1431,6 +1435,33 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
                   threadId: thread.id,
                   reason: (btnResult as { sent: false; reason: string }).reason,
                 })
+                // In-chat fallback: the button can't reach the customer (Meta
+                // policy / no deliverable card), but the bot already promised a
+                // form. Rather than leave a button-less promise, send the
+                // operator-configured fill-up template so the customer can type
+                // their details in chat — those flow into a chat-implied
+                // submission on their next message. Empty template = button-only.
+                const fillupTemplate = config.chatFillupTemplate?.trim()
+                if (fillupTemplate) {
+                  const fillupResult = await sendOutbound({
+                    admin,
+                    thread: { id: thread.id, psid: thread.psid, last_inbound_at: thread.last_inbound_at },
+                    pageToken,
+                    payload: { kind: 'text', text: fillupTemplate },
+                    kind: 'bot',
+                  })
+                  if (fillupResult.sent) {
+                    fillupFallbackText = fillupTemplate
+                    console.info('[messenger.worker] action-page in-chat fill-up fallback sent', {
+                      threadId: thread.id,
+                    })
+                  } else {
+                    console.warn('[messenger.worker] action-page fill-up fallback also policy_blocked', {
+                      threadId: thread.id,
+                      reason: (fillupResult as { sent: false; reason: string }).reason,
+                    })
+                  }
+                }
               }
             }
             const persistedBody = carouselSent
@@ -1446,12 +1477,16 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
                     .map((p) => `• ${p.title} (${p.price_label})`)
                     .join('\n') +
                   `\nView all → ${targetUrl}`
-              : `${btnText}\n${btnLabel} → ${targetUrl}`
+              : fillupFallbackText
+                ? fillupFallbackText
+                : `${btnText}\n${btnLabel} → ${targetUrl}`
             const previewText = carouselSent
               ? chosen.kind === 'realestate'
                 ? `${chosen.title} · ${realestateElements.length} listings`
                 : `${chosen.title} · ${carouselProducts.length} products`
-              : `${btnLabel} · ${chosen.title}`
+              : fillupFallbackText
+                ? fillupFallbackText
+                : `${btnLabel} · ${chosen.title}`
             const { error: btnInsertErr } = await admin
               .from('messenger_messages')
               .insert({

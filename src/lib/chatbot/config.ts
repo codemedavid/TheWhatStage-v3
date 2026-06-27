@@ -24,6 +24,7 @@ export const MAX_PAUSE_AI_INSTRUCTIONS_LENGTH = 2000
 /** Upper bound on stored chat-implied-submission instruction text. Same ceiling
  *  as pause rules — these are short operator directives, not prose. */
 export const MAX_VIRTUAL_SUBMISSION_INSTRUCTIONS_LENGTH = 2000
+export const MAX_CHAT_FILLUP_TEMPLATE_LENGTH = 500
 
 /**
  * Output-token ceilings for customer-reply generation.
@@ -77,6 +78,11 @@ export type ChatbotConfigRow = {
   /** Operator instructions guiding chat-implied submissions: what info is worth
    *  noting and how to acknowledge once recorded. Optional on older/partial rows. */
   virtual_submission_instructions?: string | null
+  /** In-chat fallback template the bot sends when the action-page button cannot
+   *  be delivered (Meta policy block, no deliverable card). Asks the customer to
+   *  type their details in chat so the form promise is still honored; the reply
+   *  flows into a chat-implied submission. Empty = no in-chat fallback. */
+  chat_fillup_template?: string | null
   created_at: string
   updated_at: string
 }
@@ -110,6 +116,9 @@ export type ChatbotConfig = ChatbotPersona & {
   /** Operator instructions guiding chat-implied submissions (info to note +
    *  how to acknowledge). Empty string = no extra guidance. */
   virtualSubmissionInstructions: string
+  /** In-chat fallback template sent when the action-page button can't be
+   *  delivered. Empty string = no in-chat fallback (button-only). */
+  chatFillupTemplate: string
   updatedAt: string
 }
 
@@ -138,6 +147,7 @@ export const DEFAULT_CHATBOT_CONFIG: ChatbotConfig = {
   messageDebounceSeconds: DEFAULT_MESSAGE_DEBOUNCE_SECONDS,
   virtualSubmissionMode: 'suggest',
   virtualSubmissionInstructions: '',
+  chatFillupTemplate: '',
   updatedAt: '',
 }
 
@@ -240,6 +250,7 @@ export function rowToConfig(row: ChatbotConfigRow): ChatbotConfig {
     primaryActionPageId: row.primary_action_page_id ?? null,
     virtualSubmissionMode: coerceVirtualSubmissionMode(row.virtual_submission_mode),
     virtualSubmissionInstructions: row.virtual_submission_instructions ?? '',
+    chatFillupTemplate: row.chat_fillup_template ?? '',
     updatedAt: row.updated_at ?? '',
   }
 }
@@ -274,6 +285,10 @@ export type ChatbotConfigInput = {
   /** Optional: operator instructions for chat-implied submissions. Omit to
    *  leave the existing value untouched; trimmed + length-capped when provided. */
   virtualSubmissionInstructions?: string
+  /** Optional: in-chat fallback template sent when the action-page button can't
+   *  be delivered. Omit to leave the existing value untouched; trimmed +
+   *  length-capped when provided. */
+  chatFillupTemplate?: string
 }
 
 export async function upsertChatbotConfig(
@@ -304,6 +319,13 @@ export async function upsertChatbotConfig(
     payload.virtual_submission_instructions = input.virtualSubmissionInstructions
       .trim()
       .slice(0, MAX_VIRTUAL_SUBMISSION_INSTRUCTIONS_LENGTH)
+  }
+  // Same omit-when-absent contract: callers that don't manage the in-chat
+  // fallback template never clobber the stored value.
+  if (input.chatFillupTemplate !== undefined) {
+    payload.chat_fillup_template = input.chatFillupTemplate
+      .trim()
+      .slice(0, MAX_CHAT_FILLUP_TEMPLATE_LENGTH)
   }
   const { error } = await supabase.from('chatbot_configs').upsert(payload, { onConflict: 'user_id' })
   if (error) throw new Error(`upsertChatbotConfig: ${error.message}`)
