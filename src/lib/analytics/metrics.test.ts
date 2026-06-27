@@ -9,8 +9,10 @@ import {
   formatDelta,
   formatPct,
   formatRatio,
+  leadStageRefs,
   perDay,
   previousPeriod,
+  projectStageRefs,
   ratio,
   reachedFor,
   stageKindGroup,
@@ -250,6 +252,47 @@ describe('crosstabLookup', () => {
 
   it('returns zeros when the cell is absent', () => {
     expect(crosstabLookup(cells, 9, 9)).toEqual({ leads: 0, total: 0, pct: 0, ratio: 0 })
+  })
+})
+
+describe('projectStageRefs / leadStageRefs', () => {
+  // The crosstab is the cross-product of lead rungs x project rungs, so every
+  // project rung repeats once per lead rung. The refs helpers must collapse that
+  // to one entry per rung (deduped by rank) for the explorer dropdowns.
+  const cells: CrosstabCell[] = [
+    // lead "New" (rank 0) x {Open, Won}
+    { leadStageId: 'n', leadStageName: 'New', leadKind: 'entry', leadRank: 0, leadStageTotal: 200,
+      projectStageId: 'open', projectStageName: 'Open', projectKind: 'open', projectRank: 0, leads: 120 },
+    { leadStageId: 'n', leadStageName: 'New', leadKind: 'entry', leadRank: 0, leadStageTotal: 200,
+      projectStageId: 'won', projectStageName: 'Won', projectKind: 'won', projectRank: 1, leads: 20 },
+    // lead "Qualified" (rank 1) x {Open, Won} — project rungs repeat
+    { leadStageId: 'q', leadStageName: 'Qualified', leadKind: 'qualifying', leadRank: 1, leadStageTotal: 142,
+      projectStageId: 'open', projectStageName: 'Open', projectKind: 'open', projectRank: 0, leads: 96 },
+    { leadStageId: 'q', leadStageName: 'Qualified', leadKind: 'qualifying', leadRank: 1, leadStageTotal: 142,
+      projectStageId: 'won', projectStageName: 'Won', projectKind: 'won', projectRank: 1, leads: 37 },
+  ]
+
+  it('collapses project stages to one entry per rank — a single Won rung', () => {
+    const refs = projectStageRefs(cells)
+    expect(refs).toEqual([
+      { rank: 0, name: 'Open', kind: 'open' },
+      { rank: 1, name: 'Won', kind: 'won' },
+    ])
+    // The bug being fixed: exactly one "Won" entry, not one per project.
+    expect(refs.filter((r) => r.kind === 'won')).toHaveLength(1)
+  })
+
+  it('collapses lead stages to one entry per rank, sorted by rank', () => {
+    const refs = leadStageRefs(cells)
+    expect(refs).toEqual([
+      { rank: 0, name: 'New', kind: 'entry' },
+      { rank: 1, name: 'Qualified', kind: 'qualifying' },
+    ])
+  })
+
+  it('returns an empty list when there are no cells', () => {
+    expect(projectStageRefs([])).toEqual([])
+    expect(leadStageRefs([])).toEqual([])
   })
 })
 
