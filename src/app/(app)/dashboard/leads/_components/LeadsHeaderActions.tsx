@@ -22,7 +22,7 @@ export function LeadsHeaderActions({
       <ViewSwitch view={view} />
       <Divider />
       <OverflowMenu />
-      <ExportMenu />
+      <ExportMenu view={view} />
       <ThemeToggle />
       <button
         type="button"

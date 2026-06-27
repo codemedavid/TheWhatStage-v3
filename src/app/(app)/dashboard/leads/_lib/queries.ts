@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { unstable_cache } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { normalizeThreadCounts } from '@/lib/messenger/unread'
+import { STAGE_EMBED } from '@/lib/projects/stage-embed'
 import { type LeadsQuery, PAGE_SIZE } from './schemas'
 import { manilaDayStartIso, manilaDayEndIso } from './day-bounds'
 
@@ -359,60 +360,26 @@ export type ContactLeadRow = LeadRow & {
   latest_contact_at: string | null
 }
 
-export async function fetchContactLeadsTotal(
-  supabase: SupabaseClient,
-  userId: string,
-  params: LeadsQuery,
-): Promise<number> {
-  let query = supabase
-    .from('leads').select('id', { count: 'exact', head: true })
-    .eq('user_id', userId)
-
-  if (params.contact_filter === 'phone') query = query.not('phones', 'eq', '{}')
-  else if (params.contact_filter === 'email') query = query.not('emails', 'eq', '{}')
-  else if (params.contact_filter === 'both') query = query.not('phones', 'eq', '{}').not('emails', 'eq', '{}')
-  else query = query.or('phones.neq.{},emails.neq.{}')
-
-  if (params.q) query = query.or(buildLeadSearchOr(params.q))
-  query = applyActivityWindow(query, params)
-  const { count, error } = await query
-  if (error) throw error
-  return count ?? 0
+// Restrict a leads query to reachable contacts per the active contact filter:
+// `phone`/`email` require that array to be non-empty, `both` requires both, and
+// the default `either` keeps any lead with at least one phone or email.
+function applyContactFilter<T extends {
+  not: (col: string, op: string, v: string) => T
+  or: (filter: string) => T
+}>(query: T, filter: LeadsQuery['contact_filter']): T {
+  if (filter === 'phone') return query.not('phones', 'eq', '{}')
+  if (filter === 'email') return query.not('emails', 'eq', '{}')
+  if (filter === 'both') return query.not('phones', 'eq', '{}').not('emails', 'eq', '{}')
+  return query.or('phones.neq.{},emails.neq.{}')
 }
 
-export async function fetchContactLeadsPage(
+// Attach the most recent phone/email contact value (and the derived
+// `latest_contact_at`) to each lead by joining `lead_contact_values`. Shared by
+// the paginated contacts view and the contacts export so both stay consistent.
+async function attachLatestContactValues(
   supabase: SupabaseClient,
-  userId: string,
-  params: LeadsQuery,
-): Promise<{ rows: ContactLeadRow[]; total: number }> {
-  let query = supabase
-    .from('leads')
-    .select('*, messenger_threads(picture_url, unread_count, missed_count), campaigns(name)', { count: 'exact' })
-    .eq('user_id', userId)
-
-  if (params.contact_filter === 'phone') query = query.not('phones', 'eq', '{}')
-  else if (params.contact_filter === 'email') query = query.not('emails', 'eq', '{}')
-  else if (params.contact_filter === 'both') query = query.not('phones', 'eq', '{}').not('emails', 'eq', '{}')
-  else query = query.or('phones.neq.{},emails.neq.{}')
-
-  if (params.q) query = query.or(buildLeadSearchOr(params.q))
-  query = applyActivityWindow(query, params)
-
-  if (params.contact_sort === 'name_asc') {
-    query = query.order('name', { ascending: true })
-  } else {
-    // DB-level fallback: order by updated_at. For recent_contact sort, this is
-    // overridden in-memory below for the current page. Cross-page ordering under
-    // recent_contact is approximate (updated_at proxy) — acceptable for MVP.
-    query = query.order('updated_at', { ascending: false })
-  }
-
-  const from = (params.page - 1) * PAGE_SIZE
-  const to   = from + PAGE_SIZE - 1
-  const { data, error, count } = await query.range(from, to)
-  if (error) throw error
-  const baseRows = ((data ?? []) as LeadRowWithJoins[]).map(flattenLead)
-
+  baseRows: LeadRow[],
+): Promise<ContactLeadRow[]> {
   const leadIds = baseRows.map((l) => l.id)
   type RawContact = {
     lead_id: string
@@ -442,7 +409,7 @@ export async function fetchContactLeadsPage(
     }
   }
 
-  let rows: ContactLeadRow[] = baseRows.map((l) => {
+  return baseRows.map((l) => {
     const bucket = latestByLead.get(l.id) ?? { phone: null, email: null }
     const latest_contact_at =
       bucket.phone && bucket.email
@@ -450,6 +417,55 @@ export async function fetchContactLeadsPage(
         : (bucket.phone?.collected_at ?? bucket.email?.collected_at ?? null)
     return { ...l, latest_phone: bucket.phone, latest_email: bucket.email, latest_contact_at }
   })
+}
+
+export async function fetchContactLeadsTotal(
+  supabase: SupabaseClient,
+  userId: string,
+  params: LeadsQuery,
+): Promise<number> {
+  let query = supabase
+    .from('leads').select('id', { count: 'exact', head: true })
+    .eq('user_id', userId)
+
+  query = applyContactFilter(query, params.contact_filter)
+  if (params.q) query = query.or(buildLeadSearchOr(params.q))
+  query = applyActivityWindow(query, params)
+  const { count, error } = await query
+  if (error) throw error
+  return count ?? 0
+}
+
+export async function fetchContactLeadsPage(
+  supabase: SupabaseClient,
+  userId: string,
+  params: LeadsQuery,
+): Promise<{ rows: ContactLeadRow[]; total: number }> {
+  let query = supabase
+    .from('leads')
+    .select('*, messenger_threads(picture_url, unread_count, missed_count), campaigns(name)', { count: 'exact' })
+    .eq('user_id', userId)
+
+  query = applyContactFilter(query, params.contact_filter)
+  if (params.q) query = query.or(buildLeadSearchOr(params.q))
+  query = applyActivityWindow(query, params)
+
+  if (params.contact_sort === 'name_asc') {
+    query = query.order('name', { ascending: true })
+  } else {
+    // DB-level fallback: order by updated_at. For recent_contact sort, this is
+    // overridden in-memory below for the current page. Cross-page ordering under
+    // recent_contact is approximate (updated_at proxy) — acceptable for MVP.
+    query = query.order('updated_at', { ascending: false })
+  }
+
+  const from = (params.page - 1) * PAGE_SIZE
+  const to   = from + PAGE_SIZE - 1
+  const { data, error, count } = await query.range(from, to)
+  if (error) throw error
+  const baseRows = ((data ?? []) as LeadRowWithJoins[]).map(flattenLead)
+
+  let rows = await attachLatestContactValues(supabase, baseRows)
 
   if (params.contact_sort === 'recent_contact') {
     rows = rows.sort((a, b) => {
@@ -461,4 +477,71 @@ export async function fetchContactLeadsPage(
   }
 
   return { rows, total: count ?? 0 }
+}
+
+// Unpaginated contacts fetch for CSV export. `scope: 'all'` exports every
+// reachable contact; `scope: 'filtered'` honours the on-screen contact filter,
+// search term, and date window. Capped at `limit` rows.
+export async function fetchContactsForExport(
+  supabase: SupabaseClient,
+  userId: string,
+  params: LeadsQuery,
+  scope: 'filtered' | 'all',
+  limit: number,
+): Promise<ContactLeadRow[]> {
+  let query = supabase
+    .from('leads')
+    .select('*, messenger_threads(picture_url, unread_count, missed_count), campaigns(name)')
+    .eq('user_id', userId)
+
+  // Even an "all" export is scoped to reachable contacts — a contact with no
+  // phone or email has nothing to export. Filters only apply to "filtered".
+  query = applyContactFilter(query, scope === 'filtered' ? params.contact_filter : 'either')
+  if (scope === 'filtered') {
+    if (params.q) query = query.or(buildLeadSearchOr(params.q))
+    query = applyActivityWindow(query, params)
+  }
+
+  query = query.order('updated_at', { ascending: false }).limit(limit)
+  const { data, error } = await query
+  if (error) throw error
+  const baseRows = ((data ?? []) as LeadRowWithJoins[]).map(flattenLead)
+  return attachLatestContactValues(supabase, baseRows)
+}
+
+// Map each given lead id to the stage name of its most recent project (by
+// creation time). Leads with no project are absent from the map. Single batched
+// query — no N+1 across the export set.
+export async function fetchLatestProjectStatusByLead(
+  supabase: SupabaseClient,
+  userId: string,
+  leadIds: string[],
+): Promise<Map<string, string>> {
+  const statusByLead = new Map<string, string>()
+  if (leadIds.length === 0) return statusByLead
+
+  type ProjectStatusRow = {
+    lead_id: string
+    created_at: string
+    project_stages: { name: string } | { name: string }[] | null
+  }
+  const { data, error } = await supabase
+    .from('projects')
+    // `projects` has two FKs to `project_stages`; STAGE_EMBED names the simple
+    // one to avoid PostgREST's PGRST201 ambiguity error. Result key stays
+    // `project_stages`.
+    .select(`lead_id, created_at, ${STAGE_EMBED}(name)`)
+    .eq('user_id', userId)
+    .in('lead_id', leadIds)
+    .order('created_at', { ascending: false })
+  if (error) throw error
+
+  // Rows arrive newest-first, so the first row seen per lead is its most recent
+  // project; later (older) rows for the same lead are ignored.
+  for (const row of (data ?? []) as ProjectStatusRow[]) {
+    if (statusByLead.has(row.lead_id)) continue
+    const stage = Array.isArray(row.project_stages) ? row.project_stages[0] : row.project_stages
+    if (stage?.name) statusByLead.set(row.lead_id, stage.name)
+  }
+  return statusByLead
 }
