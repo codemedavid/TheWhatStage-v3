@@ -8,17 +8,22 @@ import type {
 } from '../../_lib/queries'
 import { CreateProjectButton } from './_components/CreateProjectButton.client'
 import {
+  type DateRange,
   type SubmissionKind,
+  computeRangeMetrics,
   computeStats,
   displayName,
   extractAnswers,
   extractFormFields,
+  filterByDateRange,
   filterSubmissions,
   formatOutcomeLabel,
+  formatPercent,
   getFilters,
   getScore,
   impliedQuote,
   isImpliedSubmission,
+  resolveDateRange,
   submissionSource,
 } from './form-submissions.helpers'
 
@@ -32,7 +37,25 @@ interface Props {
   pageStatus: 'draft' | 'published' | 'archived'
   kind: SubmissionKind
   submissions: FormSubmissionRow[]
+  /** Recent-first lead created_at timestamps, windowed for the conversion ratio. */
+  leadTimestamps: string[]
+  /** Exact lead total, used as the all-time conversion denominator. */
+  leadTotal: number
 }
+
+type TileVariant = 'default' | 'success' | 'warning' | 'accent'
+interface Tile {
+  label: string
+  value: number | string
+  variant: TileVariant
+}
+
+const DATE_RANGES: { key: DateRange; label: string }[] = [
+  { key: 'today', label: 'Today' },
+  { key: 'week', label: 'This week' },
+  { key: 'month', label: 'This month' },
+  { key: 'all', label: 'All time' },
+]
 
 const PALETTE = {
   bg: '#FBF8F1',
@@ -72,16 +95,54 @@ export default function FormSubmissionsView({
   pageStatus,
   kind,
   submissions,
+  leadTimestamps,
+  leadTotal,
 }: Props) {
+  const [range, setRange] = useState<DateRange>('all')
   const [filter, setFilter] = useState('all')
   const [query, setQuery] = useState('')
   const [openId, setOpenId] = useState<string | null>(null)
 
-  const stats = useMemo(() => computeStats(kind, submissions), [kind, submissions])
-  const filters = useMemo(() => getFilters(kind, submissions), [kind, submissions])
+  const bounds = useMemo(() => resolveDateRange(range), [range])
+  const dateScoped = useMemo(
+    () => filterByDateRange(submissions, bounds),
+    [submissions, bounds],
+  )
+  const metrics = useMemo(
+    () => computeRangeMetrics(submissions, leadTimestamps, bounds, leadTotal),
+    [submissions, leadTimestamps, bounds, leadTotal],
+  )
+  const tiles = useMemo<Tile[]>(() => {
+    const conversionTile: Tile = {
+      label: 'Lead → submission',
+      value: formatPercent(metrics.conversionRate),
+      variant: 'accent',
+    }
+    // Qualification funnels live or die on their outcome mix, so keep the
+    // (range-scoped) outcome tiles and trade the redundant "This week" count
+    // for the conversion ratio.
+    if (kind === 'qualification') {
+      const outcomeTiles: Tile[] = computeStats(kind, dateScoped)
+        .filter((t) => t.label !== 'This week')
+        .slice(0, 3)
+        .map((t) => ({ label: t.label, value: t.value, variant: t.variant }))
+      return [
+        { label: 'Submissions', value: metrics.submissions, variant: 'default' },
+        ...outcomeTiles.slice(0, 2),
+        conversionTile,
+      ]
+    }
+    return [
+      { label: 'Submissions', value: metrics.submissions, variant: 'default' },
+      { label: 'Leads', value: metrics.leads, variant: 'default' },
+      conversionTile,
+      { label: 'All-time total', value: submissions.length, variant: 'default' },
+    ]
+  }, [kind, metrics, dateScoped, submissions.length])
+  const filters = useMemo(() => getFilters(kind, dateScoped), [kind, dateScoped])
   const filtered = useMemo(
-    () => filterSubmissions(submissions, kind, filter, query),
-    [submissions, kind, filter, query],
+    () => filterSubmissions(dateScoped, kind, filter, query),
+    [dateScoped, kind, filter, query],
   )
   const openRow = useMemo(
     () => submissions.find((s) => s.id === openId) ?? null,
@@ -143,9 +204,35 @@ export default function FormSubmissionsView({
           </Link>
         </div>
 
+        {/* Date-range selector */}
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          <div
+            className="inline-flex flex-wrap rounded-full border p-[3px]"
+            style={{ background: PALETTE.paper, borderColor: PALETTE.line }}
+          >
+            {DATE_RANGES.map((r) => {
+              const on = range === r.key
+              return (
+                <button
+                  key={r.key}
+                  type="button"
+                  onClick={() => setRange(r.key)}
+                  className="whitespace-nowrap rounded-full px-3.5 py-1.5 text-[13px] transition-colors"
+                  style={{
+                    background: on ? PALETTE.accent : 'transparent',
+                    color: on ? PALETTE.paper : PALETTE.ink3,
+                  }}
+                >
+                  {r.label}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+
         {/* Stat tiles */}
         <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
-          {stats.map((s) => (
+          {tiles.map((s) => (
             <StatTile key={s.label} label={s.label} value={s.value} variant={s.variant} />
           ))}
         </div>
@@ -248,7 +335,7 @@ function StatTile({
   variant,
 }: {
   label: string
-  value: number
+  value: number | string
   variant: 'default' | 'success' | 'warning' | 'accent'
 }) {
   const color =

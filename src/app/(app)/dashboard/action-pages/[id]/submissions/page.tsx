@@ -5,6 +5,7 @@ import {
   fetchActionPage,
   fetchSubmissions,
   fetchProjectInfoBySubmissionIds,
+  fetchLeadStats,
 } from '../../_lib/queries'
 import type { SubmissionListItem, SubmissionProjectInfo } from '../../_lib/queries'
 import { CreateProjectButton } from './_components/CreateProjectButton.client'
@@ -429,6 +430,7 @@ export default async function SubmissionsPage({
       ...s,
       project: projectBySubmission.get(s.id) ?? null,
     }))
+    const leadStats = await fetchLeadStats(supabase, user.id)
     return (
       <FormSubmissionsView
         pageId={id}
@@ -436,6 +438,8 @@ export default async function SubmissionsPage({
         pageStatus={page.status}
         kind={kind}
         submissions={rows}
+        leadTimestamps={leadStats.createdAt}
+        leadTotal={leadStats.total}
       />
     )
   }

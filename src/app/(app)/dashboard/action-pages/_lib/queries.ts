@@ -238,6 +238,36 @@ export async function fetchProjectInfoBySubmissionIds(
   return map
 }
 
+export interface LeadStats {
+  /** Total leads owned by the user (all time). */
+  total: number
+  /** Lead created_at timestamps, so a date-windowed denominator can be derived. */
+  createdAt: string[]
+}
+
+// Lead timestamps power the lead→submission conversion ratio on the submissions
+// view. We pull only the indexed created_at column so the denominator can be
+// windowed client-side to match whichever date filter the user selects.
+const LEAD_STATS_FETCH_LIMIT = 5000
+
+export async function fetchLeadStats(
+  supabase: SupabaseClient,
+  userId: string,
+  limit = LEAD_STATS_FETCH_LIMIT,
+): Promise<LeadStats> {
+  // Exact count drives the all-time conversion denominator even past the
+  // timestamp cap; the (recent-first) timestamp list windows shorter ranges.
+  const { data, count, error } = await supabase
+    .from('leads')
+    .select('created_at', { count: 'exact' })
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(limit)
+  if (error) throw new Error(`fetchLeadStats: ${error.message}`)
+  const createdAt = (data ?? []).map((r) => r.created_at as string)
+  return { total: count ?? createdAt.length, createdAt }
+}
+
 export interface PipelineStageOption {
   id: string
   name: string
