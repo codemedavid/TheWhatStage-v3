@@ -2,6 +2,7 @@
 import { useState, useTransition } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { exportLeadsCsv } from '../actions/export'
+import { exportContactsCsv } from '../actions/export-contacts'
 import { LeadsQuery } from '../_lib/schemas'
 
 function downloadCsv(filename: string, csv: string) {
@@ -16,10 +17,11 @@ function downloadCsv(filename: string, csv: string) {
   URL.revokeObjectURL(url)
 }
 
-export function ExportMenu() {
+export function ExportMenu({ view }: { view: 'kanban' | 'table' | 'contact' }) {
   const [open, setOpen] = useState(false)
   const [pending, start] = useTransition()
   const sp = useSearchParams()
+  const isContacts = view === 'contact'
 
   const onExport = (scope: 'filtered' | 'all') => {
     const params = LeadsQuery.parse({
@@ -30,11 +32,18 @@ export function ExportMenu() {
       from: sp.get('from') ?? undefined,
       to: sp.get('to') ?? undefined,
       sort: sp.get('sort') ?? undefined,
+      contact_filter: sp.get('contact_filter') ?? undefined,
+      contact_sort: sp.get('contact_sort') ?? undefined,
     })
     start(async () => {
-      const csv = await exportLeadsCsv(params, scope)
+      // The Contacts tab exports a richer CSV (all phones/emails + project
+      // status); Board and Table keep the standard leads export.
+      const csv = isContacts
+        ? await exportContactsCsv(params, scope)
+        : await exportLeadsCsv(params, scope)
       const stamp = new Date().toISOString().slice(0, 10)
-      downloadCsv(`leads-${scope}-${stamp}.csv`, csv)
+      const prefix = isContacts ? 'contacts' : 'leads'
+      downloadCsv(`${prefix}-${scope}-${stamp}.csv`, csv)
       setOpen(false)
     })
   }
@@ -72,7 +81,7 @@ export function ExportMenu() {
           >
             <MenuButton onClick={() => onExport('filtered')} label="Filtered view" sub="Current filters" />
             <div style={{ borderTop: '1px solid var(--lead-line)' }} />
-            <MenuButton onClick={() => onExport('all')} label="All leads" sub="No filters" />
+            <MenuButton onClick={() => onExport('all')} label={isContacts ? 'All contacts' : 'All leads'} sub="No filters" />
           </div>
         </>
       )}
