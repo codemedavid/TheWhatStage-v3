@@ -13,6 +13,7 @@ import {
   type AnalyticsOverview,
 } from '@/lib/analytics/leads-analytics'
 import { formatCount, previousPeriod } from '@/lib/analytics/metrics'
+import { fetchWorkspaces } from '../projects/_lib/workspaces'
 import { AnalyticsQuery } from './_lib/schemas'
 import { rangeLabel, resolveDateRange } from './_lib/date-range'
 import { AnalyticsToolbar } from './_components/Toolbar'
@@ -41,6 +42,7 @@ export default async function AnalyticsPage({
     to: sp.to,
     source: sp.source,
     campaign: sp.campaign,
+    workspace: sp.workspace,
   })
 
   const supabase = await createClient()
@@ -55,6 +57,7 @@ export default async function AnalyticsPage({
     to: q.to ?? null,
     source: q.source ?? null,
     campaign: q.campaign ?? null,
+    workspace: params.workspace ?? null,
   }
 
   const prev = previousPeriod(filters.from, filters.to)
@@ -70,6 +73,7 @@ export default async function AnalyticsPage({
     stageValue,
     options,
     currency,
+    workspaces,
   ] = await Promise.all([
     getAnalyticsOverview(filters),
     prev
@@ -78,11 +82,12 @@ export default async function AnalyticsPage({
     getAnalyticsTimeseries(filters),
     getLeadStageDistribution(filters),
     getLeadToProject(filters),
-    getSubmissionToProject({ from: filters.from, to: filters.to }),
+    getSubmissionToProject({ from: filters.from, to: filters.to, workspace: filters.workspace }),
     getLeadProjectCrosstab(filters),
     getProjectStageValue(filters),
     getAnalyticsFilterOptions(),
     getDefaultCurrency(),
+    fetchWorkspaces(supabase, user.id),
   ])
 
   // For "per day" averages: use the explicit range, or fall back to the span of
@@ -102,7 +107,12 @@ export default async function AnalyticsPage({
           <h1 className="text-[21px] font-semibold tracking-tight text-neutral-900">Analytics</h1>
           <p className="text-[13px] text-neutral-500">Your business numbers — {rangeLabel(params)}</p>
         </div>
-        <AnalyticsToolbar params={params} sources={options.sources} campaigns={options.campaigns} />
+        <AnalyticsToolbar
+          params={params}
+          sources={options.sources}
+          campaigns={options.campaigns}
+          workspaces={workspaces.map((w) => ({ id: w.id, name: w.name }))}
+        />
       </header>
 
       {isEmpty ? (

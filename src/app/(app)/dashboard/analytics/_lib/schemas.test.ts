@@ -14,4 +14,17 @@ describe('AnalyticsQuery', () => {
     expect(AnalyticsQuery.parse({ range: 'all' }).range).toBe('all')
     expect(AnalyticsQuery.parse({ range: 'today' }).range).toBe('today')
   })
+
+  it('preserves a valid workspace uuid', () => {
+    const ws = '550e8400-e29b-41d4-a716-446655440000'
+    expect(AnalyticsQuery.parse({ workspace: ws }).workspace).toBe(ws)
+  })
+
+  it('drops a non-uuid workspace value instead of throwing', () => {
+    expect(AnalyticsQuery.parse({ workspace: 'not-a-uuid' }).workspace).toBeUndefined()
+  })
+
+  it('leaves workspace undefined when absent', () => {
+    expect(AnalyticsQuery.parse({}).workspace).toBeUndefined()
+  })
 })

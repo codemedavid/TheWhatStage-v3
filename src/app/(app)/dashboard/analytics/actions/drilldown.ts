@@ -14,6 +14,7 @@ const Input = z.object({
   to: z.string().nullish(),
   source: z.string().nullish(),
   campaign: z.string().nullish(),
+  workspace: z.string().uuid().nullish(),
   leadRank: z.number().int().min(0),
   projectRank: z.number().int().min(-1),
   limit: z.number().int().min(1).max(500).default(100),
@@ -32,10 +33,10 @@ export async function fetchDrilldownLeads(raw: DrilldownInput): Promise<Drilldow
   if (!parsed.success) {
     return { ok: false, leads: [], error: 'Invalid drill-down request' }
   }
-  const { from, to, source, campaign, leadRank, projectRank, limit } = parsed.data
+  const { from, to, source, campaign, workspace, leadRank, projectRank, limit } = parsed.data
   try {
     const leads = await getLeadProjectLeads(
-      { from, to, source, campaign },
+      { from, to, source, campaign, workspace },
       leadRank,
       projectRank,
       limit,

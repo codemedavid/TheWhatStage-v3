@@ -10,6 +10,7 @@ export interface DrilldownFilters {
   to: string | null
   source: string | null
   campaign: string | null
+  workspace: string | null
 }
 
 interface DrilldownButtonProps {
