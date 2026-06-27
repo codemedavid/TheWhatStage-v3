@@ -10,18 +10,40 @@ const RANGES: { value: AnalyticsQuery['range']; label: string }[] = [
   { value: 'all', label: 'All' },
 ]
 
+export interface WorkspaceOption {
+  id: string
+  name: string
+}
+
 interface AnalyticsToolbarProps {
   params: AnalyticsQuery
   sources: string[]
   campaigns: CampaignOption[]
+  workspaces: WorkspaceOption[]
 }
 
-export function AnalyticsToolbar({ params, sources, campaigns }: AnalyticsToolbarProps) {
+export function AnalyticsToolbar({ params, sources, campaigns, workspaces }: AnalyticsToolbarProps) {
   const { set, isPending } = useUrlState()
   const selectClass = 'h-8 rounded-md border border-neutral-200 bg-white px-2 text-[12px] text-neutral-700'
 
   return (
     <div className="flex flex-wrap items-center gap-2" aria-busy={isPending}>
+      {workspaces.length > 1 && (
+        <select
+          value={params.workspace ?? ''}
+          aria-label="Workspace"
+          onChange={(e) => set({ workspace: e.target.value || undefined })}
+          className={selectClass}
+        >
+          <option value="">All workspaces</option>
+          {workspaces.map((w) => (
+            <option key={w.id} value={w.id}>
+              {w.name}
+            </option>
+          ))}
+        </select>
+      )}
+
       <div className="inline-flex rounded-lg border border-neutral-200 bg-white p-0.5">
         {RANGES.map(({ value, label }) => {
           const active = params.range === value

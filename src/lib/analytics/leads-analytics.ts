@@ -1,6 +1,7 @@
 import 'server-only'
 import { createClient } from '@/lib/supabase/server'
 import type { CrosstabCell } from './metrics'
+import { projectRpcArgs, rpcArgs } from './rpc-args'
 
 /**
  * Per-tenant leads & revenue analytics data access. Thin typed wrappers over the
@@ -28,6 +29,10 @@ export interface AnalyticsFilters {
   to?: string | null
   source?: string | null
   campaign?: string | null
+  /** Scope project-side metrics to one workspace; null/undefined = all workspaces.
+   *  Lead-side metrics (funnel, stage distribution) ignore this — leads have no
+   *  workspace. */
+  workspace?: string | null
 }
 
 export interface AnalyticsOverview {
@@ -73,15 +78,6 @@ export interface CampaignOption {
   name: string
 }
 
-function rpcArgs(f: AnalyticsFilters) {
-  return {
-    p_from: f.from ?? null,
-    p_to: f.to ?? null,
-    p_source: f.source ?? null,
-    p_campaign: f.campaign ?? null,
-  }
-}
-
 function mapFunnel(rows: Record<string, unknown>[], reachedKey: string): FunnelRow[] {
   return rows.map((r) => ({
     stageId: String(r.stage_id),
@@ -97,7 +93,7 @@ export async function getAnalyticsOverview(f: AnalyticsFilters): Promise<Analyti
   const supabase = await createClient()
   const rows = unwrapRpc<Record<string, unknown>[]>(
     'getAnalyticsOverview',
-    await supabase.rpc('analytics_overview', rpcArgs(f)),
+    await supabase.rpc('analytics_overview', projectRpcArgs(f)),
   )
   const r = rows[0] ?? {}
   return {
@@ -124,7 +120,7 @@ export async function getAnalyticsTimeseries(f: AnalyticsFilters): Promise<Times
   const supabase = await createClient()
   const data = unwrapRpc<Record<string, unknown>[]>(
     'getAnalyticsTimeseries',
-    await supabase.rpc('analytics_timeseries', rpcArgs(f)),
+    await supabase.rpc('analytics_timeseries', projectRpcArgs(f)),
   )
   return data.map((r) => ({
     day: String(r.day),
@@ -176,16 +172,22 @@ export async function getLeadToProject(f: AnalyticsFilters): Promise<FunnelRow[]
   const supabase = await createClient()
   const data = unwrapRpc<Record<string, unknown>[]>(
     'getLeadToProject',
-    await supabase.rpc('analytics_lead_to_project', rpcArgs(f)),
+    await supabase.rpc('analytics_lead_to_project', projectRpcArgs(f)),
   )
   return mapFunnel(data, 'projects_reached')
 }
 
-export async function getSubmissionToProject(f: Pick<AnalyticsFilters, 'from' | 'to'>): Promise<FunnelRow[]> {
+export async function getSubmissionToProject(
+  f: Pick<AnalyticsFilters, 'from' | 'to' | 'workspace'>,
+): Promise<FunnelRow[]> {
   const supabase = await createClient()
   const data = unwrapRpc<Record<string, unknown>[]>(
     'getSubmissionToProject',
-    await supabase.rpc('analytics_submission_to_project', { p_from: f.from ?? null, p_to: f.to ?? null }),
+    await supabase.rpc('analytics_submission_to_project', {
+      p_from: f.from ?? null,
+      p_to: f.to ?? null,
+      p_workspace_id: f.workspace ?? null,
+    }),
   )
   return mapFunnel(data, 'submissions_reached')
 }
@@ -221,7 +223,7 @@ export async function getLeadProjectCrosstab(f: AnalyticsFilters): Promise<Cross
   const supabase = await createClient()
   const rows = unwrapRpc<Record<string, unknown>[]>(
     'getLeadProjectCrosstab',
-    await supabase.rpc('analytics_lead_project_crosstab', rpcArgs(f)),
+    await supabase.rpc('analytics_lead_project_crosstab', projectRpcArgs(f)),
   )
   return rows.map((r) => ({
     leadStageId: String(r.lead_stage_id),
@@ -248,7 +250,7 @@ export async function getLeadProjectLeads(
   const rows = unwrapRpc<Record<string, unknown>[]>(
     'getLeadProjectLeads',
     await supabase.rpc('analytics_lead_project_leads', {
-      ...rpcArgs(f),
+      ...projectRpcArgs(f),
       p_lead_rank: leadRank,
       p_project_rank: projectRank,
       p_limit: limit,
@@ -271,7 +273,7 @@ export async function getProjectStageValue(f: AnalyticsFilters): Promise<Project
   const supabase = await createClient()
   const rows = unwrapRpc<Record<string, unknown>[]>(
     'getProjectStageValue',
-    await supabase.rpc('analytics_project_stage_value', rpcArgs(f)),
+    await supabase.rpc('analytics_project_stage_value', projectRpcArgs(f)),
   )
   return rows.map((r) => ({
     stageId: String(r.stage_id),
