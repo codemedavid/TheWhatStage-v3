@@ -10,10 +10,15 @@ lang po yung form sa baba" but never sent the action-page button).
 - "Where to fill up?" force-sends if **a page exists + stage is sendable** (skips the
   qualification gate).
 
-## Scope delivered (Phases 1–3 — the root-cause fix)
-Phases 4–6 (last-resort ladder, shortened deeplink, in-chat fill-up → chat-implied
-submission) are scoped but **not yet implemented** — they add a DB migration + a new
-public route and were deferred for explicit confirmation.
+## Scope delivered (Phases 1–3 + Phase 6)
+- Phases 1–3: the root-cause tease/force-send fix (commit `9f4f90c`).
+- Phase 6: per-chatbot in-chat fill-up fallback (commit `568b4cd`) — when the button
+  is policy-blocked, the bot sends `chat_fillup_template` and the customer's reply
+  flows into the existing chat-implied submission pipeline.
+
+Deferred (per user choice "in-chat fill-up only"): the shortened deeplink (Phase 5,
+new table + `/d/[code]` route) and the explicit `[classify.tease.escaped]` send-site
+log + 3-rung ladder (Phase 4). Not implemented.
 
 ## User journeys
 1. As a lead who said "go na po", when the bot replies "fill up lang po yung form sa
@@ -50,8 +55,11 @@ npx tsc --noEmit   # no errors in touched files
 ```
 
 ## Known gaps / follow-ups
-- Phase 4: `[classify.tease.escaped]` log + button→shortlink→in-chat ladder at the
-  send site (`process/route.ts`).
-- Phase 5: `action_page_deeplinks` table + `/d/[code]` route + `shortDeeplinkUrl()`.
-- Phase 6: `chat_fillup_template` on `chatbot_configs` + collect-in-chat →
-  `createVirtualSubmission({ meta.source: 'chat_fillup' })`.
+- Phase 6 test gap: the send-site fallback in `process/route.ts` (a large worker
+  route) is not unit-tested — the decision is gated on the unit-tested `config`
+  mapping + `sendOutbound`. Worth an integration test if the worker grows a harness.
+- Phase 6 does not yet tag the resulting submission with `meta.source: 'chat_fillup'`
+  — it reuses the existing proceed-intent → `createVirtualSubmission` path as-is. A
+  distinct source tag would require tracking that the customer was prompted (stateful).
+- Phase 4 (deferred): `[classify.tease.escaped]` log + button→shortlink→in-chat ladder.
+- Phase 5 (deferred): `action_page_deeplinks` table + `/d/[code]` route + `shortDeeplinkUrl()`.
