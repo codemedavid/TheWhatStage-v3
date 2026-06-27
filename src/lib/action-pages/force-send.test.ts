@@ -11,6 +11,7 @@ import {
   hashInstructions,
   prerequisitesAnsweredCached,
   parseLlmJsonResponse,
+  detectFormRequest,
   type LlmCheckClient,
 } from './force-send'
 
@@ -94,6 +95,36 @@ describe('detectProceedRegex', () => {
     '',
   ])('does not match small talk "%s"', (msg) => {
     expect(detectProceedRegex(msg)).toBe(false)
+  })
+})
+
+// A customer asking WHERE/HOW to fill up the form is an explicit request for the
+// link — the strongest possible send signal. The screenshot bug ("Where to fill
+// up?" answered with prose and no button) is exactly this case.
+describe('detectFormRequest', () => {
+  it.each([
+    'Where to fill up?',
+    'where is the form?',
+    "where's the form po",
+    'saan po mag-fill up?',
+    'saan ako mag fill up',
+    'paano mag-fill up po',
+    'paano po mag fill up ng form',
+    'san po yung form',
+    'anong link po',
+    'pano po mag-fill up',
+  ])('matches form-location request "%s"', (msg) => {
+    expect(detectFormRequest(msg)).toBe(true)
+  })
+
+  it.each([
+    'hello po',
+    'magkano po', // proceed intent, but not a form-location request
+    'what do you sell',
+    'salamat po',
+    '',
+  ])('does not match "%s"', (msg) => {
+    expect(detectFormRequest(msg)).toBe(false)
   })
 })
 
@@ -547,6 +578,58 @@ describe('decideForceSend', () => {
       expect(r.overrideFired).toBe(true)
       expect(r.reason).toBe('override:tease')
       expect(r.actionPage?.action_page_id).toBe('primary')
+    })
+  })
+
+  // Form-request: a customer explicitly asking WHERE/HOW to fill up the form is
+  // the strongest send signal. Send the page (page + sendable stage), bypassing
+  // the qualification + readiness gates. The screenshot bug was "Where to fill
+  // up?" answered with prose and no button.
+  describe('form-location request', () => {
+    it('fires when customer asks where to fill up, even unqualified + no proceed signal', async () => {
+      const llm = { checkPrerequisites: vi.fn(async () => false), detectProceed: vi.fn(async () => false) }
+      const r = await decideForceSend(
+        ctx({
+          latestCustomerMessage: 'Where to fill up?',
+          currentStage: { id: 'nurt', name: 'Nurture', description: null, position: 1, kind: 'nurture' },
+          stageChangeThisTurn: null,
+          actionPages: [
+            { id: 'primary', title: 'Primary', cta_label: 'Go', bot_send_instructions: 'Ask budget first.' },
+          ],
+          llm,
+        }),
+      )
+      expect(r.overrideFired).toBe(true)
+      expect(r.reason).toBe('override:form-request')
+      expect(r.actionPage?.action_page_id).toBe('primary')
+      expect(llm.checkPrerequisites).not.toHaveBeenCalled()
+      expect(llm.detectProceed).not.toHaveBeenCalled()
+    })
+
+    it('matches the Taglish "saan po mag-fill up" phrasing', async () => {
+      const r = await decideForceSend(ctx({ latestCustomerMessage: 'saan po mag-fill up?' }))
+      expect(r.overrideFired).toBe(true)
+      expect(r.reason).toBe('override:form-request')
+    })
+
+    it.each(['lost', 'dormant', 'won'] as const)(
+      'still respects the unsendable stage guard for kind %s',
+      async (k) => {
+        const r = await decideForceSend(
+          ctx({
+            latestCustomerMessage: 'Where to fill up?',
+            currentStage: { id: 'x', name: 'X', description: null, position: 5, kind: k },
+          }),
+        )
+        expect(r.overrideFired).toBe(false)
+        expect(r.reason).toBe('skip:stage')
+      },
+    )
+
+    it('still respects the cold-inbound guard (no prior customer turn)', async () => {
+      const r = await decideForceSend(ctx({ latestCustomerMessage: 'Where to fill up?', history: [] }))
+      expect(r.overrideFired).toBe(false)
+      expect(r.reason).toBe('skip:cold-inbound')
     })
   })
 })

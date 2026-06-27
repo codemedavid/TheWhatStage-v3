@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { StageBrief, StageChange, ActionPageBrief } from './classify'
-import { applyStageChange, coerceActionPage, coerceProceedInfo, coerceProceedIntent, hasPositiveLinkTease, salvageReply, sanitizeReply, stageInstruction, stageInstructionParts, stageList } from './classify'
+import { applyStageChange, coerceActionPage, coerceProceedInfo, coerceProceedIntent, hasPositiveLinkTease, salvageReply, sanitizeReply, stageInstruction, stageInstructionParts, stageList, stripLinkTeaseSentences } from './classify'
 
 // applyStageChange creates a fresh admin client after a successful move so
 // it can fire `dispatchStageEntered`. The real implementation pulls Supabase
@@ -586,6 +586,13 @@ describe('hasPositiveLinkTease', () => {
     "Here's the link for you 👇",
     'Sige po, i-fill up niyo na lang yung form',
     'I-fill out ang form para makita ang availability',
+    // Politeness particles ("lang po", "niyo lang po") between the verb and the
+    // artifact must NOT defeat detection — this is the exact production phrasing
+    // that shipped button-less (see the "fill up lang po yung form sa baba" bug).
+    'Just fill up lang po yung form sa baba para masimulan na natin kayo ☺️',
+    'Sige po, fill up lang po yung form sa baba 😊',
+    'I-click niyo lang po yung button sa baba 👇 tapos fill-up niyo lang po yung form',
+    'I-fill up niyo na lang po yung form sa baba',
   ])('returns true for a positive tease: %s', (raw) => {
     expect(hasPositiveLinkTease(raw)).toBe(true)
   })
@@ -603,6 +610,22 @@ describe('hasPositiveLinkTease', () => {
     '',
   ])('returns false for a non-actionable tease: %s', (raw) => {
     expect(hasPositiveLinkTease(raw)).toBe(false)
+  })
+})
+
+// ---- stripLinkTeaseSentences must remove the broken-promise sentence so a
+//      positive tease can never reach the customer button-less. The politeness
+//      particles ("lang po") are the production gap that let "fill up lang po
+//      yung form sa baba" survive both the strip AND the recovery flag.
+describe('stripLinkTeaseSentences removes particle-laden form teases', () => {
+  it.each([
+    'Just fill up lang po yung form sa baba para masimulan na natin kayo ☺️',
+    'Sige po, fill up lang po yung form sa baba 😊',
+    'I-fill up niyo na lang po yung form sa baba',
+  ])('strips the tease sentence: %s', (raw) => {
+    const out = stripLinkTeaseSentences(raw)
+    expect(out).not.toMatch(/fill\s*[-\s]?up/i)
+    expect(out).not.toMatch(/\bform\b/i)
   })
 })
 
