@@ -12,6 +12,12 @@ import {
   filterSubmissions,
   isImpliedSubmission,
   impliedQuote,
+  resolveDateRange,
+  filterByDateRange,
+  countWithinRange,
+  conversionRate,
+  formatPercent,
+  computeRangeMetrics,
 } from './form-submissions.helpers'
 
 function makeSubmission(
@@ -205,6 +211,129 @@ describe('filterSubmissions', () => {
     ]
     expect(filterSubmissions(withFields, 'form', 'all', 'paris').map((s) => s.id)).toEqual(['a'])
     expect(filterSubmissions(withFields, 'form', 'all', 'bob').map((s) => s.id)).toEqual(['b'])
+  })
+})
+
+describe('resolveDateRange', () => {
+  // 2026-06-20 12:00 UTC === 2026-06-20 20:00 Manila (UTC+8)
+  const now = new Date('2026-06-20T12:00:00.000Z')
+
+  it('bounds today to the Manila calendar day', () => {
+    expect(resolveDateRange('today', now)).toEqual({ from: '2026-06-20', to: '2026-06-20' })
+  })
+
+  it('bounds week from Monday through today', () => {
+    // 2026-06-20 is a Saturday; Monday of that week is 2026-06-15
+    expect(resolveDateRange('week', now)).toEqual({ from: '2026-06-15', to: '2026-06-20' })
+  })
+
+  it('bounds month from the 1st through today', () => {
+    expect(resolveDateRange('month', now)).toEqual({ from: '2026-06-01', to: '2026-06-20' })
+  })
+
+  it('clears bounds for all time', () => {
+    expect(resolveDateRange('all', now)).toEqual({ from: null, to: null })
+  })
+
+  it('passes through custom bounds', () => {
+    expect(
+      resolveDateRange('custom', now, { from: '2026-06-01', to: '2026-06-10' }),
+    ).toEqual({ from: '2026-06-01', to: '2026-06-10' })
+  })
+})
+
+describe('filterByDateRange / countWithinRange', () => {
+  const rows = [
+    makeSubmission({ id: 'today', created_at: '2026-06-20T03:00:00.000Z' }), // 11:00 Manila, 6/20
+    makeSubmission({ id: 'yesterday', created_at: '2026-06-19T03:00:00.000Z' }),
+    makeSubmission({ id: 'lastmonth', created_at: '2026-05-10T03:00:00.000Z' }),
+  ]
+
+  it('keeps only rows within an inclusive Manila-day window', () => {
+    const bounds = { from: '2026-06-19', to: '2026-06-20' }
+    expect(filterByDateRange(rows, bounds).map((r) => r.id)).toEqual(['today', 'yesterday'])
+  })
+
+  it('returns all rows when bounds are open', () => {
+    expect(filterByDateRange(rows, { from: null, to: null }).map((r) => r.id)).toEqual([
+      'today',
+      'yesterday',
+      'lastmonth',
+    ])
+  })
+
+  it('counts raw timestamps within the window', () => {
+    const stamps = rows.map((r) => r.created_at)
+    expect(countWithinRange(stamps, { from: '2026-06-20', to: '2026-06-20' })).toBe(1)
+    expect(countWithinRange(stamps, { from: null, to: null })).toBe(3)
+  })
+})
+
+describe('conversionRate / formatPercent', () => {
+  it('divides submissions by leads', () => {
+    expect(conversionRate(40, 200)).toBeCloseTo(0.2)
+  })
+
+  it('returns null when there are no leads', () => {
+    expect(conversionRate(5, 0)).toBeNull()
+  })
+
+  it('formats a rate as a rounded percentage', () => {
+    expect(formatPercent(0.2)).toBe('20%')
+    expect(formatPercent(0.125)).toBe('12.5%')
+    expect(formatPercent(null)).toBe('—')
+  })
+})
+
+describe('computeRangeMetrics', () => {
+  const now = new Date('2026-06-20T12:00:00.000Z')
+  const subs = [
+    makeSubmission({ id: 'a', created_at: '2026-06-20T03:00:00.000Z' }), // today
+    makeSubmission({ id: 'b', created_at: '2026-06-02T03:00:00.000Z' }), // this month
+    makeSubmission({ id: 'c', created_at: '2026-04-01T03:00:00.000Z' }), // older
+  ]
+  const leadStamps = [
+    '2026-06-20T01:00:00.000Z', // today
+    '2026-06-20T02:00:00.000Z', // today
+    '2026-06-02T01:00:00.000Z', // this month
+    '2026-01-01T01:00:00.000Z', // older
+  ]
+
+  it('reports submissions, leads and conversion within the selected range', () => {
+    const bounds = resolveDateRange('today', now)
+    const m = computeRangeMetrics(subs, leadStamps, bounds)
+    expect(m.submissions).toBe(1)
+    expect(m.leads).toBe(2)
+    expect(m.conversionRate).toBeCloseTo(0.5)
+  })
+
+  it('uses all rows for the all-time range', () => {
+    const bounds = resolveDateRange('all', now)
+    const m = computeRangeMetrics(subs, leadStamps, bounds)
+    expect(m.submissions).toBe(3)
+    expect(m.leads).toBe(4)
+    expect(m.conversionRate).toBeCloseTo(0.75)
+  })
+
+  it('uses the exact total for the all-time window when the list is capped', () => {
+    const bounds = resolveDateRange('all', now)
+    // leadStamps has 4 entries but the true account total is 9000 (capped list).
+    const m = computeRangeMetrics(subs, leadStamps, bounds, 9000)
+    expect(m.leads).toBe(9000)
+    expect(m.conversionRate).toBeCloseTo(3 / 9000)
+  })
+
+  it('ignores the total for a windowed range', () => {
+    const bounds = resolveDateRange('today', now)
+    const m = computeRangeMetrics(subs, leadStamps, bounds, 9000)
+    expect(m.leads).toBe(2)
+  })
+
+  it('returns a null rate when no leads fall in the range', () => {
+    const bounds = resolveDateRange('custom', now, { from: '2026-03-01', to: '2026-03-31' })
+    const m = computeRangeMetrics(subs, leadStamps, bounds)
+    expect(m.leads).toBe(0)
+    expect(m.conversionRate).toBeNull()
   })
 })
 
