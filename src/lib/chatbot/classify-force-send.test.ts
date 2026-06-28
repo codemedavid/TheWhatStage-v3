@@ -116,6 +116,42 @@ describe('answerWithClassification force-send wiring', () => {
     expect(vi.mocked(decideForceSend).mock.calls[0][0]).toMatchObject({ teasedLinkThisTurn: true })
   })
 
+  it('recovers the production "fill up lang po yung form sa baba" phrasing (screenshot bug)', async () => {
+    // Exact phrasing from the reported screenshot. Politeness particles ("lang
+    // po") between the verb and "form" used to defeat LINK_TEASE_RE, so the tease
+    // shipped button-less. This locks in the fix end-to-end.
+    mockReplyText = JSON.stringify({
+      reply: 'Just fill up lang po yung form sa baba para masimulan na natin kayo ☺️',
+      stage_change: null,
+      action_page: null,
+    })
+    const supabase = {
+      from: () => ({
+        select: () => ({
+          eq: () => ({ maybeSingle: async () => ({ data: null, error: null }) }),
+        }),
+      }),
+    } as unknown as Parameters<typeof answerWithClassification>[0]
+
+    await answerWithClassification(
+      supabase,
+      'u1',
+      'Where to fill up?',
+      [{ role: 'user', content: 'earlier' }],
+      [],
+      null,
+      {
+        actionPages: [
+          { id: 'forced', title: 'P', cta_label: 'go', bot_send_instructions: '' },
+        ],
+        leadId: 'lead-1',
+        threadId: 't1',
+      },
+    )
+
+    expect(vi.mocked(decideForceSend).mock.calls[0][0]).toMatchObject({ teasedLinkThisTurn: true })
+  })
+
   it('passes teasedLinkThisTurn=false when the reply has no tease', async () => {
     const supabase = {
       from: () => ({

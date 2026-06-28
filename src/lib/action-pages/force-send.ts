@@ -29,6 +29,19 @@ export function detectProceedRegex(message: string): boolean {
   return PROCEED_RE.test(message)
 }
 
+// A customer asking WHERE or HOW to fill up the form is explicitly requesting the
+// link — the strongest possible send signal (stronger than generic proceed
+// intent). Covers EN / TL / Taglish: "Where to fill up?", "saan po mag-fill up",
+// "paano mag-fill up", "san yung form", "anong link". This is the exact reported
+// bug: the customer asked "Where to fill up?" and got prose with no button.
+const FORM_REQUEST_RE =
+  /\b(?:where|saan|san)\b[^.?!\n]*\b(?:fill[-\s]*up|form|link|mag[-\s]?fill)\b|\b(?:pa?ano|how)\b[^.?!\n]*\b(?:fill[-\s]*up|mag[-\s]?fill)\b|\ban[oó]ng?\b[^.?!\n]*\blink\b|\bwhere'?s\s+the\s+form\b/i
+
+export function detectFormRequest(message: string): boolean {
+  if (!message) return false
+  return FORM_REQUEST_RE.test(message)
+}
+
 const FORWARD_KINDS = new Set(['qualifying', 'decision', 'won'])
 
 export function detectStageForward(
@@ -252,6 +265,20 @@ export async function decideForceSend(ctx: ForceSendContext): Promise<ForceSendD
       actionPage: buildForcedChoice(page.id, 'tease-recovery: model teased a form without attaching it'),
       overrideFired: true,
       reason: 'override:tease',
+    }
+  }
+
+  // Explicit form-location request ("Where to fill up?", "saan po mag-fill up").
+  // The customer is literally asking for the link — the strongest send signal
+  // there is, so (like the tease path) we bypass the qualification + readiness
+  // gates AND the leadId guard (the deeplink is attributed by psid + page_id, not
+  // leadId). The stage, page, and cold-inbound guards above still apply, so we
+  // never blast a form on a first cold inbound or in a lost/won/dormant stage.
+  if (detectFormRequest(ctx.latestCustomerMessage)) {
+    return {
+      actionPage: buildForcedChoice(page.id, 'form-request: customer asked where to fill up the form'),
+      overrideFired: true,
+      reason: 'override:form-request',
     }
   }
 

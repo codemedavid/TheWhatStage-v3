@@ -74,6 +74,18 @@ describe('rowToConfig — pause + takeover fields', () => {
     expect(cfg.virtualSubmissionInstructions).toBe('')
   })
 
+  it('maps chat_fillup_template (in-chat fallback when the button cannot be delivered)', () => {
+    const cfg = rowToConfig(
+      baseRow({ chat_fillup_template: 'Pakibigay po: Pangalan, Numero, Lugar 💚' }),
+    )
+    expect(cfg.chatFillupTemplate).toBe('Pakibigay po: Pangalan, Numero, Lugar 💚')
+  })
+
+  it('defaults chatFillupTemplate to empty string when null/missing', () => {
+    const cfg = rowToConfig(baseRow({ chat_fillup_template: null as unknown as string }))
+    expect(cfg.chatFillupTemplate).toBe('')
+  })
+
   it('defaults humanTakeoverMinutes to 60 when null/missing', () => {
     const cfg = rowToConfig(baseRow({ human_takeover_minutes: null as unknown as number }))
     expect(cfg.humanTakeoverMinutes).toBe(60)

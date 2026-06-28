@@ -35,6 +35,7 @@ export async function saveChatbotConfig(formData: FormData): Promise<void> {
     maxContext: num(formData.get('maxContext'), 12),
     virtualSubmissionMode: String(formData.get('virtualSubmissionMode') ?? ''),
     virtualSubmissionInstructions: String(formData.get('virtualSubmissionInstructions') ?? ''),
+    chatFillupTemplate: String(formData.get('chatFillupTemplate') ?? ''),
   })
 
   revalidatePath('/dashboard/chatbot')

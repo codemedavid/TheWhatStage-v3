@@ -317,6 +317,31 @@ export function ConfigForm({
               message or stalls the customer to collect details. Ignored when set to Off.
             </div>
           </div>
+
+          <div className="cb-field">
+            <label className="cb-field-label" htmlFor="chatFillupTemplate">
+              In-chat fill-up fallback
+            </label>
+            <textarea
+              id="chatFillupTemplate"
+              name="chatFillupTemplate"
+              rows={4}
+              maxLength={500}
+              defaultValue={initial.chatFillupTemplate ?? ''}
+              className="cb-textarea"
+              placeholder={
+                'Sent only when the form button cannot be delivered. Example:\n' +
+                'Pasensya po, di po ma-load yung form. Pakibigay na lang po dito sa chat:\n' +
+                '• Pangalan\n• Numero\n• Lugar — aasikasuhin na po namin agad 💚'
+              }
+            />
+            <div className="cb-field-help">
+              When Messenger blocks the form button (e.g. outside the 24-hour window),
+              the bot sends this message so the customer can type their details in chat
+              instead. Their reply is captured as a chat-implied submission. Leave blank
+              to keep button-only behavior.
+            </div>
+          </div>
         </div>
       </div>
 

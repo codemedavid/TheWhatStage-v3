@@ -410,22 +410,28 @@ export async function answerWithClassification(
     // but doesn't set the structured `action_page` field, so the customer sees
     // a broken promise. sanitizeReply strips the tease sentence, but we log
     // every detection so we can track how often the model misbehaves.
-    if (!actionPage && rawReply && rawReply !== text && LINK_TEASE_RE.test(rawReply)) {
+    if (!actionPage && rawReply) {
       // A POSITIVE tease ("eto na po yung form") is an explicit "send the form
       // now" decision → flag it so decideForceSend recovers the action page
       // instead of letting the sanitized reply go out button-less (a dropped
-      // sale). LINK_TEASE_RE is deliberately broad (it also strips NEGATIVE
-      // mentions like "hindi na kailangan i-fill up yung form" / "optional lang
-      // yung form"), so we must NOT force-send on those — that would attach a
-      // form right after telling the customer they don't need it.
+      // sale). We compute this DIRECTLY from the raw reply rather than gating on
+      // `rawReply !== text` (whether the sanitizer happened to strip something):
+      // detection must not depend on the strip side effect, or a future regex
+      // divergence between strip + detect could silently drop the recovery — the
+      // exact failure mode behind the "fill up lang po yung form" bug.
+      // hasPositiveLinkTease already excludes NEGATIVE mentions ("hindi na
+      // kailangan i-fill up yung form" / "optional lang"), so we never force-send
+      // a form right after telling the customer they don't need it.
       teasedLink = hasPositiveLinkTease(rawReply)
-      console.warn('[classify.tease] model teased a link with no action_page attached', {
-        userId,
-        actionPagesAvailable: actionPages.length,
-        recovering: teasedLink,
-        rawPreview: rawReply.slice(0, 200),
-        sanitizedPreview: text.slice(0, 200),
-      })
+      if (teasedLink || rawReply !== text) {
+        console.warn('[classify.tease] model teased a link with no action_page attached', {
+          userId,
+          actionPagesAvailable: actionPages.length,
+          recovering: teasedLink,
+          rawPreview: rawReply.slice(0, 200),
+          sanitizedPreview: text.slice(0, 200),
+        })
+      }
     }
     if (recommendRules && options.activeCatalogPageId) {
       productRecommendation = coerceRecommendation(
@@ -530,10 +536,15 @@ export async function answerWithClassification(
     // No structured envelope on the fallback path → no proceed-intent signal.
     proceedIntent = null
     proceedInfo = null
-    // The original (teasing) reply was discarded and regenerated here, so we
-    // can no longer claim THIS reply intends a form — clear the tease flag so
-    // decideForceSend doesn't attach a button under an unrelated fallback reply.
-    teasedLink = false
+    // Deliberately PRESERVE teasedLink here. When the original reply was a
+    // positive tease that the sanitizer emptied (e.g. the whole reply was "fill
+    // up lang po yung form sa baba"), the model already decided to send a form
+    // this turn. Regenerating filler text for the customer doesn't undo that
+    // decision — clearing the flag would silently drop the button (a dropped
+    // sale, the exact screenshot bug). The button card carries the form caption;
+    // this regenerated text is just a friendly lead-in. force-send still applies
+    // its stage / page / cold-inbound guards, so a genuinely unrelated fallback
+    // (teasedLink was already false) never attaches a button.
     // The fallback model didn't produce a structured envelope, so it never
     // reasoned about image attachment. Fall back to the same rule as
     // `answer()`: trust operator-tagged @asset/#folder refs.
@@ -1339,8 +1350,14 @@ export function sanitizeReply(raw: string): string {
 // these is treated as a tease and dropped from `reply` — the prompt forbids
 // referencing the action-page button in prose regardless of whether the
 // structured `action_page` field was actually set.
+// The `fill … form` branch tolerates up to 5 filler/politeness words between the
+// verb and the artifact ("fill up LANG PO YUNG form") — the exact Taglish
+// phrasing that shipped button-less in production. It also accepts a "sa baba" /
+// "below" target so "fill up niyo lang po sa baba" (form implied) still matches.
+// Bounded + single-segment (callers split on sentence enders first) so it can't
+// run away across clauses.
 const LINK_TEASE_RE =
-  /\b(?:e?to|heto|nandito|narito)\b[^.!?\n]{0,30}?\b(?:link|button|form|page)\b|\bhere(?:'?s|\s+is)\s+(?:the|a|your)?\s*(?:link|form|button|page)\b|\bcheck\s+(?:it|this|out|the\s+(?:link|page|form|button)|sa|ang|yung|ito|'to|niyo|mo|niya)\b|\btingnan\s+(?:mo|niyo|nyo)\b|\bi[-\s]?(?:click|tap|fill)\b|\bclick\s+(?:the|this|here|sa|yung|ito|'to)\b|\btap\s+(?:the|this|here|sa|yung)\b|\bfill\s+(?:out|in|up)\s+(?:the|this|na|yung)?\s*form\b|\bsundin\s+ang\s+link\b|\bpara\s+(?:ma)?kita\s+mo\b/i
+  /\b(?:e?to|heto|nandito|narito)\b[^.!?\n]{0,30}?\b(?:link|button|form|page)\b|\bhere(?:'?s|\s+is)\s+(?:the|a|your)?\s*(?:link|form|button|page)\b|\bcheck\s+(?:it|this|out|the\s+(?:link|page|form|button)|sa|ang|yung|ito|'to|niyo|mo|niya)\b|\btingnan\s+(?:mo|niyo|nyo)\b|\bi[-\s]?(?:click|tap|fill)\b|\bclick\s+(?:the|this|here|sa|yung|ito|'to)\b|\btap\s+(?:the|this|here|sa|yung)\b|\bfill[-\s]+(?:out|in|up)\b(?:\s+\w+){0,5}?\s+(?:form|sa\s+baba|below)\b|\bsundin\s+ang\s+link\b|\bpara\s+(?:ma)?kita\s+mo\b/i
 
 // Markers that flip a tease NEGATIVE — the model is telling the customer they
 // do NOT need to act on the link/form (so we must not force-send it). Covers
