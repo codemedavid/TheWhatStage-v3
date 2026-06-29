@@ -1,6 +1,7 @@
 'use client'
 
 import { useTransition } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import type { FacebookPage } from '@/lib/facebook/oauth'
 import { savePagesForm, disconnectForm } from '../actions'
@@ -84,13 +85,21 @@ export function PagePicker({ pages }: { pages: FacebookPage[] }) {
           </li>
         ))}
       </ul>
-      <button
-        type="submit"
-        disabled={pending}
-        className="inline-flex items-center rounded-md bg-[#059669] px-4 py-2 text-[14px] font-medium text-white hover:bg-[#047857] disabled:opacity-60"
-      >
-        {pending ? 'Saving…' : 'Save pages'}
-      </button>
+      <div className="flex flex-wrap items-center gap-3">
+        <button
+          type="submit"
+          disabled={pending}
+          className="inline-flex items-center rounded-md bg-[#059669] px-4 py-2 text-[14px] font-medium text-white hover:bg-[#047857] disabled:opacity-60"
+        >
+          {pending ? 'Saving…' : 'Save pages'}
+        </button>
+        <Link
+          href="/api/auth/facebook/start"
+          className="text-[13px] font-medium text-[#1877F2] hover:underline"
+        >
+          Don&apos;t see a page you added? Reconnect to grant access
+        </Link>
+      </div>
     </form>
   )
 }

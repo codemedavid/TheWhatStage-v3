@@ -26,6 +26,15 @@ describe('facebook/oauth', () => {
     )
   })
 
+  it('re-requests page selection so newly added pages can be granted', async () => {
+    // Without auth_type=rerequest, Facebook skips the page picker on re-connect
+    // and silently reuses the previously granted pages — newly added pages never
+    // get authorized, so /me/accounts keeps returning only the original page(s).
+    const { buildAuthUrl } = await import('./oauth')
+    const url = new URL(buildAuthUrl('signed-state'))
+    expect(url.searchParams.get('auth_type')).toBe('rerequest')
+  })
+
   it('exchanges code → short-lived token', async () => {
     vi.stubGlobal('fetch', vi.fn(async () =>
       new Response(JSON.stringify({ access_token: 'short-1', token_type: 'bearer' }), {
