@@ -39,6 +39,12 @@ export function buildAuthUrl(state: string): string {
   u.searchParams.set('state', state)
   u.searchParams.set('response_type', 'code')
   u.searchParams.set('scope', SCOPES)
+  // `auth_type=rerequest` forces Facebook to show the page-selection screen on
+  // every connect. Without it, re-connecting an already-authorized app reuses
+  // the previously granted page set and silently skips the picker — so pages
+  // the user added after the first connect never get authorized and never
+  // appear in /me/accounts. See https://developers.facebook.com/docs/pages-api
+  u.searchParams.set('auth_type', 'rerequest')
   return u.toString()
 }
 
