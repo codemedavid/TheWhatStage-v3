@@ -13,6 +13,11 @@ const SUBSCRIBED_FIELDS = [
   // Required for human-takeover detection: page-admin replies from Page
   // Inbox / Business Suite / the Messenger app only reach us as echoes.
   'message_echoes',
+  // Handover Protocol notifications (pass/take/request thread control). On
+  // multi-app pages another app can own a conversation; subscribing here lets
+  // us observe control changes. Inbound messages for threads we don't own
+  // arrive on the `standby` channel regardless — see takeThreadControl.
+  'messaging_handovers',
 ].join(',')
 
 // Retry transient Graph failures (429 throttling, 5xx) before bubbling up to
@@ -156,6 +161,31 @@ export async function subscribePageToWebhook(pageAccessToken: string): Promise<v
   url.searchParams.set('access_token', pageAccessToken)
   url.searchParams.set('subscribed_fields', SUBSCRIBED_FIELDS)
   await postJson<{ success: boolean }>(url.toString(), {})
+}
+
+/**
+ * Seize thread control for a conversation via Meta's Handover Protocol.
+ *
+ * On multi-app pages (common for businesses that already run another chatbot),
+ * exactly one app "owns" each thread. Only the owner receives normal `messages`
+ * webhooks and can reliably deliver Send API replies; every other app receives
+ * the inbound on the `standby` channel and its sends are dropped. Calling this
+ * makes our app the thread owner so the queued reply goes through and future
+ * messages arrive normally.
+ *
+ * Best-effort by contract: the caller swallows failures (e.g. when we're only a
+ * secondary receiver and Meta rejects the take) and still enqueues the reply.
+ * See https://developers.facebook.com/docs/messenger-platform/handover-protocol
+ */
+export async function takeThreadControl(
+  pageAccessToken: string,
+  recipientPsid: string,
+): Promise<void> {
+  const url = new URL(`${GRAPH}/me/take_thread_control`)
+  url.searchParams.set('access_token', pageAccessToken)
+  await postJson<{ success: boolean }>(url.toString(), {
+    recipient: { id: recipientPsid },
+  })
 }
 
 /**
