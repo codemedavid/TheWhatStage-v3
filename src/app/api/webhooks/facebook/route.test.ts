@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({
   from: vi.fn(),
   rpc: vi.fn(),
+  takeThreadControl: vi.fn(async () => {}),
   after: vi.fn((task: () => unknown) => {
     void task()
   }),
@@ -11,6 +12,15 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@/lib/supabase/admin', () => ({
   createAdminClient: () => ({ from: mocks.from, rpc: mocks.rpc }),
+}))
+
+// Handover Protocol dependencies used only by the standby path. Mocked so the
+// standby tests can assert the take-control call without real Graph/crypto.
+vi.mock('@/lib/facebook/messenger', () => ({
+  takeThreadControl: mocks.takeThreadControl,
+}))
+vi.mock('@/lib/facebook/crypto', () => ({
+  decryptToken: (v: string) => `decrypted:${v}`,
 }))
 
 vi.mock('next/server', async () => {
@@ -861,5 +871,133 @@ describe('facebook webhook comment events', () => {
       inbound_msg_id: 'message-1',
       user_id: 'user-1',
     })
+  })
+})
+
+describe('facebook webhook standby (handover) events', () => {
+  beforeEach(() => {
+    vi.resetModules()
+    vi.clearAllMocks()
+    process.env.FB_APP_SECRET = 'app-secret'
+    process.env.FB_APP_ID = '424242424242'
+    process.env.NEXT_PUBLIC_APP_URL = 'https://app.test'
+    process.env.MESSENGER_WORKER_SECRET = 'messenger-secret'
+    process.env.COMMENT_WORKER_SECRET = 'comment-secret'
+    global.fetch = vi.fn(async () => new Response(null, { status: 204 }))
+    mocks.takeThreadControl.mockResolvedValue(undefined)
+  })
+
+  it('takes thread control then enqueues a reply for a standby message', async () => {
+    makeMessengerAdminMock()
+
+    const res = await postWebhook({
+      object: 'page',
+      entry: [
+        {
+          id: 'fb-page-1',
+          standby: [
+            {
+              sender: { id: 'psid-1' },
+              recipient: { id: 'fb-page-1' },
+              message: { mid: 'mid-standby-1', text: 'Hello from standby' },
+            },
+          ],
+        },
+      ],
+    })
+
+    await Promise.resolve()
+
+    expect(res.status).toBe(200)
+    // Seizes control from the app that currently owns the thread, using the
+    // decrypted page token and the customer PSID.
+    expect(mocks.takeThreadControl).toHaveBeenCalledWith('decrypted:encrypted', 'psid-1')
+    // Then runs the normal reply path.
+    expect(mocks.rpc).toHaveBeenCalledWith('enqueue_or_extend_messenger_job', {
+      p_thread_id: 'thread-1',
+      p_inbound_msg_id: 'message-1',
+      p_user_id: 'user-1',
+      p_debounce_seconds: 6,
+    })
+  })
+
+  it('ignores standby echoes without taking control', async () => {
+    makeMessengerAdminMock()
+
+    const res = await postWebhook({
+      object: 'page',
+      entry: [
+        {
+          id: 'fb-page-1',
+          standby: [
+            {
+              sender: { id: 'fb-page-1' },
+              recipient: { id: 'psid-1' },
+              message: { mid: 'mid-echo-1', text: 'bot reply', is_echo: true },
+            },
+          ],
+        },
+      ],
+    })
+
+    await Promise.resolve()
+
+    expect(res.status).toBe(200)
+    expect(mocks.takeThreadControl).not.toHaveBeenCalled()
+    expect(mocks.rpc).not.toHaveBeenCalled()
+  })
+
+  it('does not steal the thread when the page owner is not active', async () => {
+    makeMessengerAdminMock({ ownerStatus: 'paused' })
+
+    await postWebhook({
+      object: 'page',
+      entry: [
+        {
+          id: 'fb-page-1',
+          standby: [
+            {
+              sender: { id: 'psid-1' },
+              recipient: { id: 'fb-page-1' },
+              message: { mid: 'mid-standby-2', text: 'Hi' },
+            },
+          ],
+        },
+      ],
+    })
+
+    await Promise.resolve()
+
+    expect(mocks.takeThreadControl).not.toHaveBeenCalled()
+    expect(mocks.rpc).not.toHaveBeenCalled()
+  })
+
+  it('still enqueues the reply when take_thread_control fails (best-effort)', async () => {
+    makeMessengerAdminMock()
+    mocks.takeThreadControl.mockRejectedValueOnce(new Error('not primary receiver'))
+
+    await postWebhook({
+      object: 'page',
+      entry: [
+        {
+          id: 'fb-page-1',
+          standby: [
+            {
+              sender: { id: 'psid-1' },
+              recipient: { id: 'fb-page-1' },
+              message: { mid: 'mid-standby-3', text: 'Hello' },
+            },
+          ],
+        },
+      ],
+    })
+
+    await Promise.resolve()
+
+    expect(mocks.takeThreadControl).toHaveBeenCalled()
+    expect(mocks.rpc).toHaveBeenCalledWith(
+      'enqueue_or_extend_messenger_job',
+      expect.objectContaining({ p_thread_id: 'thread-1' }),
+    )
   })
 })

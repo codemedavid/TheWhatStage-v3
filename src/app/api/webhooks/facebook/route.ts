@@ -5,6 +5,8 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { mapMetaStatusStrict, buildStatusUpdate } from '@/lib/messenger-templates/statusFlip'
 import { interruptWorkflowRun } from '@/lib/workflow/trigger'
 import { isBotPaused } from '@/lib/chatbot/takeover'
+import { takeThreadControl } from '@/lib/facebook/messenger'
+import { decryptToken } from '@/lib/facebook/crypto'
 import { bumpThreadOnInbound } from '@/lib/messenger/inbound-counters'
 import {
   DEFAULT_MESSAGE_DEBOUNCE_SECONDS,
@@ -106,6 +108,9 @@ type FbFeedChange = {
 type FbEntry = {
   id?: string // page id
   messaging?: FbMessaging[]
+  // Inbound events for threads another app currently owns (Handover Protocol).
+  // Same shape as `messaging`, delivered here instead when we aren't the owner.
+  standby?: FbMessaging[]
   changes?: FbFeedChange[]
 }
 type FbPayload = { object?: string; entry?: FbEntry[] }
@@ -159,6 +164,19 @@ export async function POST(req: NextRequest) {
         console.error('[fb.webhook] event handling failed', e)
         hadInfraError = true
         Sentry.captureException(e, { tags: { area: 'fb.webhook.event' } })
+      }
+    }
+
+    // Standby: inbound messages for threads another app owns (multi-app pages).
+    // Seize control, then process the message through the normal reply path.
+    for (const ev of entry.standby ?? []) {
+      try {
+        const jobId = await handleStandby(admin, fbPageId, ev)
+        if (jobId) messengerEnqueued.push(jobId)
+      } catch (e) {
+        console.error('[fb.webhook] standby handling failed', e)
+        hadInfraError = true
+        Sentry.captureException(e, { tags: { area: 'fb.webhook.standby' } })
       }
     }
 
@@ -357,6 +375,63 @@ async function handleOperatorEcho(
     threadId: thread.id,
     pauseMinutes,
   })
+}
+
+/**
+ * Handle an inbound message that arrived on the `standby` channel — i.e. for a
+ * thread another app currently owns (Handover Protocol, multi-app pages). We
+ * seize control so our Send API reply can be delivered, then route the message
+ * through the same persist-and-enqueue path as a first-party inbound.
+ *
+ * take_thread_control is best-effort: if we're only a secondary receiver Meta
+ * rejects it, but we still enqueue — the reply may land within the 24h window,
+ * and the failure is logged rather than dropping the message. Returns the
+ * enqueued job id, or null for events that don't warrant a reply.
+ */
+async function handleStandby(
+  admin: AdminClient,
+  fbPageId: string,
+  ev: FbMessaging,
+): Promise<string | null> {
+  const msg = ev.message
+  // Only real inbound customer messages justify seizing control. Skip echoes
+  // (the owning app's own sends), read/delivery receipts, and control events.
+  if (!msg || msg.is_echo) return null
+  const psid = ev.sender?.id
+  if (!psid || !msg.mid) return null
+
+  // Resolve the page + owner. We need the page token to take control, and we
+  // only take control for active owners — stealing a thread we won't reply to
+  // would leave the customer with no answer from anyone.
+  const { data: page, error: pageErr } = await admin
+    .from('facebook_pages')
+    .select('id, page_access_token, facebook_connections(user_id)')
+    .eq('fb_page_id', fbPageId)
+    .maybeSingle()
+  if (pageErr) throw new Error(`[fb.webhook] standby page lookup failed: ${pageErr.message}`)
+  if (!page) {
+    console.warn('[fb.webhook] standby for unknown page', { fbPageId })
+    return null
+  }
+  const conn = (page as { facebook_connections?: { user_id?: string } | { user_id?: string }[] })
+    .facebook_connections
+  const userId = Array.isArray(conn) ? conn[0]?.user_id : conn?.user_id
+  if (!userId) return null
+  if (!(await isUserActive(admin, userId))) return null
+
+  // Seize control from the app that owns the thread. Best-effort: log + swallow
+  // so a take failure never blocks taking delivery of the message.
+  try {
+    const token = decryptToken((page as { page_access_token: string }).page_access_token)
+    await takeThreadControl(token, psid)
+  } catch (e) {
+    console.error('[fb.webhook] standby take_thread_control failed', e)
+    Sentry.captureException(e, { level: 'warning', tags: { area: 'fb.webhook.standby.take' } })
+  }
+
+  // Process identically to a first-party inbound (thread upsert, message
+  // insert, reply enqueue, all gating included).
+  return handleEvent(admin, fbPageId, ev)
 }
 
 async function handleEvent(
