@@ -1,6 +1,12 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { render, screen, fireEvent, within } from '@testing-library/react'
 import SalesSubmissionsView, { type SalesSubmissionRow } from './SalesSubmissionsView'
+
+// CreateProjectButton calls useRouter() unconditionally; stub the app router
+// hook rather than mounting a real Next.js router context.
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: vi.fn() }),
+}))
 
 function makeRow(overrides: Partial<SalesSubmissionRow> = {}): SalesSubmissionRow {
   return {
