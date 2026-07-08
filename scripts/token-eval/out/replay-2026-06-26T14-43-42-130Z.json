@@ -1,0 +1,43 @@
+{
+  "summary": {
+    "tenant": "1c1f133e-0a4a-4e37-9af8-36e538fc60f2",
+    "turns": 2,
+    "avgPromptTokens": 6970,
+    "avgCachePct": 49.7,
+    "avgCompletionTokens": 157,
+    "fallbackRate": 0,
+    "salvageRate": 0,
+    "parseFailRate": 0,
+    "leakCount": 0
+  },
+  "metrics": [
+    {
+      "threadId": "98c517de-cd39-48a9-8196-abfe8f9e9027",
+      "historyTurns": 0,
+      "promptTokens": 6473,
+      "cachedPromptTokens": 0,
+      "completionTokens": 116,
+      "cachePct": 0,
+      "fallbackFired": false,
+      "salvaged": false,
+      "parseFailed": false,
+      "actionPageSet": false,
+      "leakInReply": false,
+      "replyPreview": "Hello po 🤩 Ano po name ng business niyo po? Para macheck po namin ano fit na package for your business"
+    },
+    {
+      "threadId": "dbc51676-ed85-4625-9e37-d95c75305140",
+      "historyTurns": 40,
+      "promptTokens": 7466,
+      "cachedPromptTokens": 7424,
+      "completionTokens": 198,
+      "cachePct": 99.4,
+      "fallbackFired": false,
+      "salvaged": false,
+      "parseFailed": false,
+      "actionPageSet": false,
+      "leakInReply": false,
+      "replyPreview": "You're very welcome po sir Albert! Sana magustuhan niyo po, pakishare din po sa iba ☺️"
+    }
+  ]
+}

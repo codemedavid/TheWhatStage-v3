@@ -4,12 +4,13 @@ import { createClient } from '@/lib/supabase/server'
 import { decryptToken } from '@/lib/facebook/crypto'
 import { fetchUserPages } from '@/lib/facebook/oauth'
 import { ErrorBanner } from './_components/error-banner'
+import { WarnBanner } from './_components/warn-banner'
 import { ConnectButton } from './_components/connect-button'
 import { PagePicker } from './_components/page-picker'
 import { ConnectedView } from './_components/connected-view'
 import { CapiSection } from './_components/capi-section'
 
-type SearchParams = { error?: string; detail?: string }
+type SearchParams = { error?: string; detail?: string; warn?: string }
 
 export default async function FacebookSettingsPage({
   searchParams,
@@ -18,7 +19,7 @@ export default async function FacebookSettingsPage({
 }) {
   const session = await getSession()
   if (!session) redirect('/login')
-  const { error, detail } = await searchParams
+  const { error, detail, warn } = await searchParams
 
   const supabase = await createClient()
 
@@ -93,6 +94,7 @@ export default async function FacebookSettingsPage({
   return (
     <section className="space-y-4">
       <ErrorBanner code={error} detail={detail} />
+      <WarnBanner code={warn} />
       {body}
     </section>
   )
