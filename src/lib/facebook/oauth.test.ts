@@ -210,6 +210,46 @@ describe('facebook/oauth', () => {
     expect(pages.map((p) => p.id)).toEqual(['p1'])
   })
 
+  describe('granted-permission introspection', () => {
+    it('returns only the granted permissions from /me/permissions', async () => {
+      // Meta's /me/permissions lists every requested permission with a status of
+      // 'granted' or 'declined'. A user can approve pages_messaging while
+      // declining pages_utility_messaging in the same dialog, so we must key off
+      // status, not mere presence.
+      stubGraph((url) => {
+        if (url.includes('/me/permissions')) {
+          return {
+            data: [
+              { permission: 'pages_messaging', status: 'granted' },
+              { permission: 'pages_utility_messaging', status: 'declined' },
+              { permission: 'business_management', status: 'granted' },
+            ],
+          }
+        }
+        return { data: [] }
+      })
+      const { fetchGrantedPermissions } = await import('./oauth')
+      const granted = await fetchGrantedPermissions('long-1')
+      expect(granted.has('pages_messaging')).toBe(true)
+      expect(granted.has('business_management')).toBe(true)
+      expect(granted.has('pages_utility_messaging')).toBe(false)
+    })
+
+    it('sends the token to /me/permissions', async () => {
+      const calls = stubGraph(() => ({ data: [] }))
+      const { fetchGrantedPermissions } = await import('./oauth')
+      await fetchGrantedPermissions('long-xyz')
+      expect(calls.some((u) => u.includes('/me/permissions') && u.includes('access_token=long-xyz'))).toBe(true)
+    })
+
+    it('reports utility messaging as granted only when present in the granted set', async () => {
+      const { isUtilityMessagingGranted } = await import('./oauth')
+      expect(isUtilityMessagingGranted(new Set(['pages_messaging', 'pages_utility_messaging']))).toBe(true)
+      expect(isUtilityMessagingGranted(new Set(['pages_messaging']))).toBe(false)
+      expect(isUtilityMessagingGranted(new Set())).toBe(false)
+    })
+  })
+
   it('throws on non-2xx Graph response', async () => {
     vi.stubGlobal('fetch', vi.fn(async () =>
       new Response(JSON.stringify({ error: { message: 'bad code' } }), { status: 400 }),
