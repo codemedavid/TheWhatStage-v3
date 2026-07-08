@@ -37,6 +37,12 @@ function redirectUri(): string {
   return `${base}/api/auth/facebook/callback`
 }
 
+// The single permission that gates the Message Templates API (creating & sending
+// UTILITY templates / out-of-window messaging). Exported so the connect flow can
+// warn the moment Meta withholds it, instead of the user only discovering the gap
+// when a template submit fails with code 200.
+export const UTILITY_MESSAGING_PERMISSION = 'pages_utility_messaging'
+
 export function buildAuthUrl(state: string): string {
   const u = new URL(DIALOG)
   u.searchParams.set('client_id', appId())
@@ -91,6 +97,29 @@ export async function fetchMe(longLivedToken: string): Promise<string> {
   u.searchParams.set('access_token', longLivedToken)
   const data = await getJson<{ id: string }>(u.toString())
   return data.id
+}
+
+/**
+ * Read the permissions the user actually granted for this token via
+ * /me/permissions. Meta lists every requested permission with a status of
+ * 'granted' or 'declined' — a user can approve pages_messaging while declining
+ * pages_utility_messaging in the same dialog — so we key off status, not mere
+ * presence. Returns the set of `granted` permission names.
+ */
+export async function fetchGrantedPermissions(userToken: string): Promise<Set<string>> {
+  const u = new URL(`${GRAPH}/me/permissions`)
+  u.searchParams.set('access_token', userToken)
+  const data = await getJson<{ data?: Array<{ permission?: string; status?: string }> }>(u.toString())
+  const granted = new Set<string>()
+  for (const row of data.data ?? []) {
+    if (row.permission && row.status === 'granted') granted.add(row.permission)
+  }
+  return granted
+}
+
+/** True when the granted-permission set includes pages_utility_messaging. */
+export function isUtilityMessagingGranted(granted: Set<string>): boolean {
+  return granted.has(UTILITY_MESSAGING_PERMISSION)
 }
 
 const PAGE_FIELDS = 'id,name,category,access_token,picture{url}'
