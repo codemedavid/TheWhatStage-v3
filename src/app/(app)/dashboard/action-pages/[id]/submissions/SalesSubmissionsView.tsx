@@ -3,7 +3,9 @@
 import { useMemo, useState, useTransition, useEffect } from 'react'
 import Link from 'next/link'
 import type { OrderPayment } from '@/lib/order-payments/types'
+import type { SubmissionProjectInfo } from '../../_lib/queries'
 import { verifyPayment, rejectPayment } from './payment-actions'
+import { CreateProjectButton } from './_components/CreateProjectButton.client'
 
 export interface SalesSubmissionRow {
   id: string
@@ -28,6 +30,7 @@ export interface SalesSubmissionRow {
     slug: string
   } | null
   payment: OrderPayment | null
+  project: SubmissionProjectInfo | null
 }
 
 interface Props {
@@ -410,12 +413,21 @@ function SubmissionCard({
   const phone = pickField(fields, ['phone', 'contact_phone']) ?? row.lead?.phone
   const location = pickField(fields, ['location', 'city', 'address'])
 
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault()
+      onOpen()
+    }
+  }
+
   return (
-    <button
-      type="button"
+    <div
+      role="button"
+      tabIndex={0}
       onClick={onOpen}
+      onKeyDown={onKeyDown}
       className="group grid w-full grid-cols-[auto_1fr_auto] items-center gap-4 rounded-2xl border p-4 text-left transition-all"
-      style={{ background: PALETTE.paper, borderColor: PALETTE.line }}
+      style={{ background: PALETTE.paper, borderColor: PALETTE.line, cursor: 'pointer' }}
       onMouseEnter={(e) => {
         e.currentTarget.style.borderColor = PALETTE.ink4
         e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.04)'
@@ -513,8 +525,16 @@ function SubmissionCard({
             No payment
           </span>
         )}
+        {/* Stop propagation so the project action doesn't open the drawer */}
+        <span onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+          <CreateProjectButton
+            submissionId={row.id}
+            leadId={row.lead_id}
+            existingProject={row.project}
+          />
+        </span>
       </div>
-    </button>
+    </div>
   )
 }
 
@@ -746,8 +766,39 @@ function SubmissionDrawer({
             )}
           </DrawerSection>
 
-          {/* 04 — Activity */}
-          <DrawerSection num="04" title="Activity">
+          {/* 04 — Project */}
+          <DrawerSection num="04" title="Project">
+            <div
+              className="flex items-center justify-between gap-3 rounded-xl border p-4"
+              style={{ background: PALETTE.bg, borderColor: PALETTE.line }}
+            >
+              <div>
+                <div
+                  className="mb-0.5 text-[14px] font-medium"
+                  style={{ color: PALETTE.ink2 }}
+                >
+                  {row.project ? 'Tracked as a project' : 'Turn this into a project'}
+                </div>
+                <div className="text-[12.5px]" style={{ color: PALETTE.ink3 }}>
+                  {row.project
+                    ? 'Open the deal on the Projects board to keep working it.'
+                    : row.lead_id
+                      ? 'Create a project to track this deal through your stages.'
+                      : 'Link a lead first to create a project from this submission.'}
+                </div>
+              </div>
+              <div className="shrink-0">
+                <CreateProjectButton
+                  submissionId={row.id}
+                  leadId={row.lead_id}
+                  existingProject={row.project}
+                />
+              </div>
+            </div>
+          </DrawerSection>
+
+          {/* 05 — Activity */}
+          <DrawerSection num="05" title="Activity">
             <Timeline row={row} />
           </DrawerSection>
         </div>

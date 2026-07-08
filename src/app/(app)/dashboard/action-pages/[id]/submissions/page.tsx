@@ -197,7 +197,10 @@ export default async function SubmissionsPage({
     }
 
     const submissionIds = merged.map((r) => r.id)
-    const paymentsMap = await listBySubmissionIds(supabase, user.id, submissionIds)
+    const [paymentsMap, projectBySubmission] = await Promise.all([
+      listBySubmissionIds(supabase, user.id, submissionIds),
+      fetchProjectInfoBySubmissionIds(supabase, user.id, submissionIds),
+    ])
 
     const submissionRows: SalesSubmissionRow[] = merged.map((r) => {
       const lead = Array.isArray(r.leads) ? r.leads[0] : r.leads
@@ -226,6 +229,7 @@ export default async function SubmissionsPage({
           : null,
         source_action_page: sourceById.get(r.action_page_id) ?? null,
         payment: paymentsMap.get(r.id) ?? null,
+        project: projectBySubmission.get(r.id) ?? null,
       }
     })
 
