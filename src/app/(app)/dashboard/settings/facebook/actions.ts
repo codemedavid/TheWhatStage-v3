@@ -6,7 +6,7 @@ import { getSession } from '@/lib/auth/get-session'
 import { createClient } from '@/lib/supabase/server'
 import { decryptToken, encryptToken } from '@/lib/facebook/crypto'
 import { fetchUserPages } from '@/lib/facebook/oauth'
-import { subscribePageToWebhook } from '@/lib/facebook/messenger'
+import { subscribePageToWebhook, unsubscribePageFromWebhook } from '@/lib/facebook/messenger'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { dispatchCapiEvent } from '@/lib/facebook/capi'
 import crypto from 'node:crypto'
@@ -107,14 +107,53 @@ export async function disconnectForm(): Promise<void> {
   if (!session) redirect('/login')
 
   const supabase = await createClient()
+
+  const { data: conn, error: cErr } = await supabase
+    .from('facebook_connections')
+    .select('id')
+    .eq('user_id', session.userId)
+    .maybeSingle<{ id: string }>()
+  if (cErr) {
+    console.error('[disconnectForm] load connection failed:', cErr)
+    errRedirect('disconnect_failed', cErr.message)
+  }
+  if (!conn) {
+    // Nothing connected — treat as already disconnected.
+    revalidatePath(SETTINGS_PATH)
+    return
+  }
+
+  // Soft-disconnect (pause): mark the connection disconnected instead of
+  // deleting it. A hard delete cascades facebook_pages -> messenger_threads ->
+  // messenger_messages, which times out on busy pages and wipes the chat
+  // history we need to keep. This one-row UPDATE preserves every page, thread,
+  // message, and lead so a later reconnect can keep talking to those leads.
   const { error } = await supabase
     .from('facebook_connections')
-    .delete()
-    .eq('user_id', session.userId)
+    .update({ disconnected_at: new Date().toISOString() })
+    .eq('id', conn.id)
   if (error) {
     console.error('[disconnectForm] failed:', error)
     errRedirect('disconnect_failed', error.message)
   }
+
+  // Best-effort: stop Meta delivering Messenger events for each page so the bot
+  // goes quiet while paused. Failures here never block the disconnect — the
+  // page stays subscribed at worst, and reconnect re-subscribes regardless.
+  const { data: pages } = await supabase
+    .from('facebook_pages')
+    .select('page_access_token')
+    .eq('connection_id', conn.id)
+  await Promise.allSettled(
+    (pages ?? []).map(async (p) => {
+      try {
+        await unsubscribePageFromWebhook(decryptToken(p.page_access_token))
+      } catch (e) {
+        console.error('[disconnectForm] unsubscribe failed', e)
+      }
+    }),
+  )
+
   revalidatePath(SETTINGS_PATH)
 }
 

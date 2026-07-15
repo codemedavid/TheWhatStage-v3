@@ -133,6 +133,35 @@ async function postJson<T>(url: string, body: Record<string, unknown>): Promise<
   throw graphError(lastStatus, lastText)
 }
 
+async function deleteJson<T>(url: string): Promise<T> {
+  let lastStatus = 0
+  let lastText = ''
+  for (let attempt = 0; attempt <= GRAPH_MAX_RETRIES; attempt++) {
+    const res = await fetch(url, {
+      method: 'DELETE',
+      signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
+    })
+    const text = await res.text()
+    if (res.ok) {
+      const parsed = JSON.parse(text) as T & { error?: unknown }
+      if (!parsed || typeof parsed !== 'object' || !('error' in parsed)) {
+        return parsed as T
+      }
+      lastStatus = 200
+      lastText = text
+    } else {
+      lastStatus = res.status
+      lastText = text
+    }
+    if (attempt < GRAPH_MAX_RETRIES && shouldRetryGraph(lastStatus)) {
+      await sleep(graphRetryDelayMs(attempt, res.headers.get('retry-after')))
+      continue
+    }
+    break
+  }
+  throw graphError(lastStatus, lastText)
+}
+
 async function getJson<T>(url: string): Promise<T> {
   let lastStatus = 0
   let lastText = ''
@@ -161,6 +190,19 @@ export async function subscribePageToWebhook(pageAccessToken: string): Promise<v
   url.searchParams.set('access_token', pageAccessToken)
   url.searchParams.set('subscribed_fields', SUBSCRIBED_FIELDS)
   await postJson<{ success: boolean }>(url.toString(), {})
+}
+
+/**
+ * Unsubscribe our app from a page's webhook events. Used on disconnect to
+ * *pause* delivery without deleting any data: Meta stops sending Messenger
+ * events for the page, so the bot stops replying, while every thread, message,
+ * and lead row stays intact for a later reconnect. Idempotent — safe to call
+ * even if the page was never subscribed.
+ */
+export async function unsubscribePageFromWebhook(pageAccessToken: string): Promise<void> {
+  const url = new URL(`${GRAPH}/me/subscribed_apps`)
+  url.searchParams.set('access_token', pageAccessToken)
+  await deleteJson<{ success: boolean }>(url.toString())
 }
 
 /**

@@ -10,7 +10,8 @@ import {
   fetchGrantedPermissions,
   isUtilityMessagingGranted,
 } from '@/lib/facebook/oauth'
-import { encryptToken } from '@/lib/facebook/crypto'
+import { decryptToken, encryptToken } from '@/lib/facebook/crypto'
+import { subscribePageToWebhook } from '@/lib/facebook/messenger'
 
 function settingsRedirect(params?: { error?: string; warn?: string }): NextResponse {
   const url = new URL('/dashboard/settings/facebook', process.env.NEXT_PUBLIC_APP_URL!)
@@ -72,6 +73,10 @@ export async function GET(req: NextRequest) {
           fb_user_id: fbUserId,
           long_lived_token: encryptToken(longLived),
           token_expires_at: expiresAt ? expiresAt.toISOString() : null,
+          // Reconnecting clears any prior pause. Existing pages (and their
+          // Messenger history + leads) were preserved by soft-disconnect and
+          // are re-subscribed below so the bot resumes.
+          disconnected_at: null,
         },
         { onConflict: 'user_id' },
       )
@@ -86,6 +91,24 @@ export async function GET(req: NextRequest) {
     }
     return settingsRedirect({ error: 'exchange_failed' })
   }
+
+  // Resume Messenger delivery for pages that were preserved through a prior
+  // soft-disconnect. New connections have no pages yet (the user picks them on
+  // the settings page, which subscribes them), so this is a no-op then.
+  // Best-effort: a failed re-subscribe never blocks the reconnect.
+  const { data: pages } = await supabase
+    .from('facebook_pages')
+    .select('page_access_token')
+    .eq('connection_id', connectionId)
+  await Promise.allSettled(
+    (pages ?? []).map(async (p) => {
+      try {
+        await subscribePageToWebhook(decryptToken(p.page_access_token))
+      } catch (e) {
+        console.error('[fb.callback] re-subscribe failed', e)
+      }
+    }),
+  )
 
   return settingsRedirect(
     utilityMessagingMissing ? { warn: 'utility_messaging_missing' } : undefined,

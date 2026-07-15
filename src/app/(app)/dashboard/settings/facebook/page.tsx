@@ -25,13 +25,16 @@ export default async function FacebookSettingsPage({
 
   const { data: conn } = await supabase
     .from('facebook_connections')
-    .select('id, long_lived_token')
+    .select('id, long_lived_token, disconnected_at')
     .eq('user_id', session.userId)
     .maybeSingle()
 
   let body: React.ReactNode
 
-  if (!conn) {
+  // A soft-disconnected (paused) connection is treated as not connected: the
+  // row and its pages/threads/leads are preserved for a later reconnect, but
+  // the UI offers the Connect button as if starting fresh.
+  if (!conn || conn.disconnected_at) {
     body = <ConnectButton />
   } else {
     const { data: pages } = await supabase
