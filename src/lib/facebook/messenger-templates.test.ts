@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import {
   createMessengerTemplate,
   fetchAllMessengerTemplates,
+  probePageUtilityMessaging,
   MetaTemplateError,
 } from './messenger-templates'
 
@@ -91,5 +92,35 @@ describe('fetchAllMessengerTemplates', () => {
   it('throws MetaTemplateError on a non-OK page', async () => {
     fetchMock.mockResolvedValueOnce(res(400, { error: { message: 'bad', code: 100 } }))
     await expect(fetchAllMessengerTemplates({ fbPageId: 'p1', pageAccessToken: 'tok' })).rejects.toBeInstanceOf(MetaTemplateError)
+  })
+})
+
+describe('probePageUtilityMessaging', () => {
+  it('returns "ok" when the templates endpoint responds successfully', async () => {
+    fetchMock.mockResolvedValueOnce(res(200, { data: [] }))
+    const status = await probePageUtilityMessaging({ fbPageId: 'p1', pageAccessToken: 'tok' })
+    expect(status).toBe('ok')
+    // Cheap probe: limit the read to a single row.
+    expect(fetchMock.mock.calls[0][0]).toContain('limit=1')
+  })
+
+  it('returns "missing" when Meta reports the permission error (code 200 / 403)', async () => {
+    fetchMock.mockResolvedValueOnce(
+      res(403, { error: { message: '(#200) Requires pages_utility_messaging', code: 200, error_subcode: 33 } }),
+    )
+    const status = await probePageUtilityMessaging({ fbPageId: 'p1', pageAccessToken: 'tok' })
+    expect(status).toBe('missing')
+  })
+
+  it('returns "unknown" for a non-permission Graph error (does not misreport as missing)', async () => {
+    fetchMock.mockResolvedValueOnce(res(400, { error: { message: 'bad token', code: 190 } }))
+    const status = await probePageUtilityMessaging({ fbPageId: 'p1', pageAccessToken: 'tok' })
+    expect(status).toBe('unknown')
+  })
+
+  it('returns "unknown" when the network call throws (never blocks the caller)', async () => {
+    fetchMock.mockRejectedValueOnce(new Error('network down'))
+    const status = await probePageUtilityMessaging({ fbPageId: 'p1', pageAccessToken: 'tok' })
+    expect(status).toBe('unknown')
   })
 })
