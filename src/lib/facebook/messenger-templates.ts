@@ -237,6 +237,43 @@ export async function fetchAllMessengerTemplates(args: {
   return out
 }
 
+/** Per-page utility-messaging capability, derived from a live Graph probe. */
+export type UtilityMessagingStatus = 'ok' | 'missing' | 'unknown'
+
+/**
+ * Detect whether a single page can use the Message Templates API — i.e. whether
+ * `pages_utility_messaging` is effectively granted for THIS page's token.
+ *
+ * `/me/permissions` is user-token scoped and can't answer this per page: two
+ * pages under the same login can differ (Meta grants the permission immediately
+ * to app admins/testers/developers, but withholds it for other owners' pages
+ * until App Review passes). The only reliable per-page signal is hitting the
+ * templates endpoint with the page's own token and reading Meta's response:
+ *   - 2xx                       → 'ok'      (permission is usable)
+ *   - permission error (200/403)→ 'missing' (surfaces before a template submit fails)
+ *   - anything else / network   → 'unknown' (never assert a false "missing")
+ *
+ * A cheap read (`limit=1`) — we only care about the status code, not the rows.
+ * Best-effort by contract: this never throws, so callers can probe pages in
+ * parallel without a failure blocking a connect/save.
+ */
+export async function probePageUtilityMessaging(args: {
+  fbPageId: string
+  pageAccessToken: string
+}): Promise<UtilityMessagingStatus> {
+  const url = new URL(`${GRAPH}/${args.fbPageId}/message_templates`)
+  url.searchParams.set('access_token', args.pageAccessToken)
+  url.searchParams.set('limit', '1')
+  try {
+    const res = await fetch(url.toString(), { method: 'GET' })
+    if (res.ok) return 'ok'
+    const err = parseMetaError(res.status, await res.text())
+    return err.isPermissionError ? 'missing' : 'unknown'
+  } catch {
+    return 'unknown'
+  }
+}
+
 /**
  * Delete a template by name. Idempotent — Meta returns 200 with `success:true`
  * even when no matching template exists.
