@@ -283,6 +283,91 @@ export async function sendMessengerText(args: TextSendArgs): Promise<{ message_i
   return { message_id: firstId ?? '' }
 }
 
+// --- Human-like multi-bubble send -----------------------------------------
+// The split-messages feature delivers a reply as several ordered bubbles paced
+// like a human typing: a typing indicator + a short, length-scaled pause before
+// each bubble AFTER the first. Pure timing math lives in bubbleDelayMs so it is
+// unit-testable without real timers; the sleep is injectable for the same reason.
+
+const BUBBLE_DELAY_PER_CHAR_MS = 45
+const BUBBLE_DELAY_MIN_MS = 800
+const BUBBLE_DELAY_MAX_MS = 2200
+
+/** How long to "type" before a bubble — scales with its length, clamped so the
+ *  total added latency stays bounded (the worker runs in a serverless route). */
+export function bubbleDelayMs(text: string): number {
+  const raw = text.length * BUBBLE_DELAY_PER_CHAR_MS
+  return Math.max(BUBBLE_DELAY_MIN_MS, Math.min(BUBBLE_DELAY_MAX_MS, raw))
+}
+
+function realSleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+export interface TextSequenceArgs {
+  pageAccessToken: string
+  recipientPsid: string
+  /** Pre-segmented bubbles (see segmentReply). Each is still passed through
+   *  splitMessengerText for the 2000-char Graph safety net. */
+  segments: string[]
+  messagingType?: 'RESPONSE' | 'UPDATE' | 'MESSAGE_TAG'
+  tag?: 'HUMAN_AGENT'
+  /** Injectable for tests; defaults to a real setTimeout-based sleep. */
+  sleep?: (ms: number) => Promise<void>
+}
+
+export interface SentTextPart {
+  message_id: string
+  /** The exact text delivered in this bubble (post 2000-char split). */
+  text: string
+}
+
+/**
+ * Send `segments` as ordered, human-paced bubbles. Returns one part per
+ * delivered bubble (a segment over 2000 chars yields several parts) so the
+ * caller can persist one message row per bubble.
+ *
+ * IDEMPOTENCY: like the >2000-char path in sendMessengerText, there is no Graph
+ * idempotency key. If a later bubble throws after earlier ones delivered, the
+ * job retry re-sends from the top (duplicated leading bubbles). The caller's
+ * job-level stamp (outbound_text_fb_id) still prevents re-sending a fully
+ * completed sequence, so this only affects a mid-sequence failure.
+ */
+export async function sendMessengerTextSequence(
+  args: TextSequenceArgs,
+): Promise<{ parts: SentTextPart[] }> {
+  const sleep = args.sleep ?? realSleep
+  const sendArgs: TextSendArgs = {
+    pageAccessToken: args.pageAccessToken,
+    recipientPsid: args.recipientPsid,
+    text: '',
+    ...(args.messagingType ? { messagingType: args.messagingType } : {}),
+    ...(args.tag ? { tag: args.tag } : {}),
+  }
+  const parts: SentTextPart[] = []
+  let isFirst = true
+  for (const segment of args.segments) {
+    const chunks = splitMessengerText(segment)
+    const bubbles = chunks.length ? chunks : [segment]
+    for (const bubble of bubbles) {
+      if (!isFirst) {
+        // Presence signal + humanized pause before this bubble. The typing
+        // signal is best-effort — a failure must never block the actual text.
+        await sendMessengerSenderAction({
+          pageAccessToken: args.pageAccessToken,
+          recipientPsid: args.recipientPsid,
+          action: 'typing_on',
+        }).catch(() => {})
+        await sleep(bubbleDelayMs(bubble))
+      }
+      const r = await sendOneText(sendArgs, bubble)
+      parts.push({ message_id: r.message_id, text: bubble })
+      isFirst = false
+    }
+  }
+  return { parts }
+}
+
 /**
  * Send a Messenger button-template message — a one-line text plus a single
  * URL button. Used by the bot to surface action pages with a CTA.
