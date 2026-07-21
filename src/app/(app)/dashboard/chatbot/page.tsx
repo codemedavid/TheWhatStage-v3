@@ -11,6 +11,7 @@ import { ChatbotTabs } from './_components/ChatbotTabs'
 import { AutoFollowupForm } from './_components/AutoFollowupForm'
 import { HumanTakeoverForm } from './_components/HumanTakeoverForm'
 import { MessageDebounceForm } from './_components/MessageDebounceForm'
+import { SplitMessagesForm } from './_components/SplitMessagesForm'
 import type { PersonalityTemplate } from '@/lib/chatbot/personality/types'
 import './chatbot.css'
 
@@ -72,6 +73,9 @@ export default async function ChatbotPage() {
       {/* Reply-timing control belongs with the bot's core reply behavior, on the
           default tab, so it's discoverable instead of buried under follow-ups. */}
       <MessageDebounceForm />
+      {/* Human-like reply splitting sits with the other core reply-behavior
+          controls so operators can find the on/off toggle next to timing. */}
+      <SplitMessagesForm />
     </>
   )
 
