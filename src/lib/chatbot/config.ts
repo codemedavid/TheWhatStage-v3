@@ -5,6 +5,11 @@ import {
   FOLLOWUP_SETTINGS_SCHEMA,
   type FollowupSettings,
 } from '@/lib/followups/settings'
+import { DEFAULT_SPLIT_MAX_BUBBLES } from './reply-segments'
+
+/** Allowed range for the per-reply bubble cap the operator can configure. */
+export const MIN_SPLIT_MAX_BUBBLES = 2
+export const MAX_SPLIT_MAX_BUBBLES = 5
 
 export interface ActionPageRecommendationRules {
   rules: string
@@ -83,6 +88,12 @@ export type ChatbotConfigRow = {
    *  type their details in chat so the form promise is still honored; the reply
    *  flows into a chat-implied submission. Empty = no in-chat fallback. */
   chat_fillup_template?: string | null
+  /** When true, the bot splits its reply into several human-like chat bubbles
+   *  (greeting first, then the follow-up question). Optional on legacy rows —
+   *  absent = disabled. */
+  split_messages_enabled?: boolean | null
+  /** Hard cap on how many bubbles a split reply produces. Optional; clamped. */
+  split_max_bubbles?: number | null
   created_at: string
   updated_at: string
 }
@@ -119,6 +130,10 @@ export type ChatbotConfig = ChatbotPersona & {
   /** In-chat fallback template sent when the action-page button can't be
    *  delivered. Empty string = no in-chat fallback (button-only). */
   chatFillupTemplate: string
+  /** When true, split each reply into human-like bubbles at send time. */
+  splitMessagesEnabled: boolean
+  /** Hard cap on bubbles per split reply (clamped to the allowed range). */
+  splitMaxBubbles: number
   updatedAt: string
 }
 
@@ -148,6 +163,10 @@ export const DEFAULT_CHATBOT_CONFIG: ChatbotConfig = {
   virtualSubmissionMode: 'suggest',
   virtualSubmissionInstructions: '',
   chatFillupTemplate: '',
+  // Ships OFF: existing tenants keep the current single-bubble behaviour until
+  // an operator opts in from the chatbot settings page.
+  splitMessagesEnabled: false,
+  splitMaxBubbles: DEFAULT_SPLIT_MAX_BUBBLES,
   updatedAt: '',
 }
 
@@ -251,6 +270,12 @@ export function rowToConfig(row: ChatbotConfigRow): ChatbotConfig {
     virtualSubmissionMode: coerceVirtualSubmissionMode(row.virtual_submission_mode),
     virtualSubmissionInstructions: row.virtual_submission_instructions ?? '',
     chatFillupTemplate: row.chat_fillup_template ?? '',
+    splitMessagesEnabled: row.split_messages_enabled ?? DEFAULT_CHATBOT_CONFIG.splitMessagesEnabled,
+    splitMaxBubbles: clamp(
+      Math.round(row.split_max_bubbles ?? DEFAULT_CHATBOT_CONFIG.splitMaxBubbles),
+      MIN_SPLIT_MAX_BUBBLES,
+      MAX_SPLIT_MAX_BUBBLES,
+    ),
     updatedAt: row.updated_at ?? '',
   }
 }
@@ -348,6 +373,28 @@ export async function setAutoClassifyEnabled(
       { onConflict: 'user_id' },
     )
   if (error) throw new Error(`setAutoClassifyEnabled: ${error.message}`)
+}
+
+export async function setSplitMessageSettings(
+  supabase: SupabaseClient,
+  userId: string,
+  input: { enabled: boolean; maxBubbles?: number },
+): Promise<void> {
+  const payload: Record<string, unknown> = {
+    user_id: userId,
+    split_messages_enabled: !!input.enabled,
+  }
+  if (input.maxBubbles !== undefined) {
+    payload.split_max_bubbles = clamp(
+      Math.round(input.maxBubbles),
+      MIN_SPLIT_MAX_BUBBLES,
+      MAX_SPLIT_MAX_BUBBLES,
+    )
+  }
+  const { error } = await supabase
+    .from('chatbot_configs')
+    .upsert(payload, { onConflict: 'user_id' })
+  if (error) throw new Error(`setSplitMessageSettings: ${error.message}`)
 }
 
 export async function setPrimaryActionPageId(
