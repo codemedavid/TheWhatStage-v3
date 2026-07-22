@@ -11,6 +11,7 @@ type Page = {
   name: string
   category: string | null
   picture_url: string | null
+  utility_messaging_ok: boolean | null
 }
 
 export function ConnectedView({ pages }: { pages: Page[] }) {
@@ -49,13 +50,20 @@ export function ConnectedView({ pages }: { pages: Page[] }) {
         {pages.map((p) => (
           <li key={p.id} className="flex items-center gap-3 py-3">
             <PageAvatar src={p.picture_url} name={p.name} size={40} />
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
               <div className="truncate text-[14px] font-medium text-[#111827]">
                 {p.name}
               </div>
               {p.category && (
                 <div className="truncate text-[12px] text-[#6B7280]">
                   {p.category}
+                </div>
+              )}
+              {p.utility_messaging_ok === false && (
+                <div className="mt-1 text-[12px] text-[#B42318]">
+                  Utility messaging not granted — template submissions will fail.
+                  Reconnect and approve <code>pages_utility_messaging</code>, or
+                  request it in Meta App Review.
                 </div>
               )}
             </div>

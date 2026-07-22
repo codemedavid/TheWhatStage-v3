@@ -37,6 +37,7 @@ import {
   summarizeConversation,
   type AnswerHistory,
 } from '@/lib/chatbot/answer'
+import { segmentReply } from '@/lib/chatbot/reply-segments'
 import { type SelectedMediaAsset } from '@/lib/media/selector'
 import {
   answerWithClassification,
@@ -830,12 +831,22 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
       // if a previous attempt already got a message_id, skip the call.
       // sendOutbound enforces the 24h / marketing-opt-in / OTN channel policy.
       let textFbId = job.outbound_text_fb_id
+      // Per-bubble rows to persist (populated only on a fresh send). When the
+      // split feature is off this is a single entry = the whole reply, so the
+      // behaviour is byte-for-byte the previous single-bubble path.
+      let sentParts: { message_id: string; text: string }[] | undefined
       if (!textFbId) {
+        // Human-like split: only when the operator enabled it. segmentReply
+        // returns [reply] for single-sentence replies, so short replies stay
+        // as one bubble even with the feature on.
+        const segments = config.splitMessagesEnabled
+          ? segmentReply(reply, { maxBubbles: config.splitMaxBubbles })
+          : [reply]
         const result = await sendOutbound({
           admin,
           thread: { id: thread.id, psid: thread.psid, last_inbound_at: thread.last_inbound_at },
           pageToken,
-          payload: { kind: 'text', text: reply },
+          payload: { kind: 'text', text: reply, segments },
           kind: 'bot',
         })
         if (!result.sent) {
@@ -848,6 +859,7 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
           await markDone(admin, job.id, 'skipped', 'policy_blocked')
           return
         }
+        sentParts = result.parts
         // Graph returns a message_id on success. In the rare case it reports
         // sent:true with no id, fall back to a synthetic per-job marker so the
         // idempotency key is ALWAYS persisted — otherwise a retry would re-send
@@ -861,20 +873,26 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
           .eq('id', job.id)
       }
 
-      // Persist the outbound message and update thread tail. The unique
-      // constraint on fb_message_id catches the case where a previous
-      // attempt already wrote this row (FB ack + row insert succeeded,
-      // then a *later* step failed and forced retry).
+      // Persist the outbound message(s) and update thread tail. One row per
+      // delivered bubble so the inbox thread reads naturally. The unique
+      // constraint on fb_message_id catches the case where a previous attempt
+      // already wrote a row (FB ack + row insert succeeded, then a *later* step
+      // failed and forced retry). On the resumed path (textFbId already set from
+      // a prior attempt, so sentParts is undefined) fall back to a single row
+      // for the whole reply — the prior attempt's per-bubble rows already exist.
+      const rowsToInsert = (sentParts && sentParts.length ? sentParts : [
+        { message_id: textFbId, text: reply },
+      ]).map((part, i) => ({
+        thread_id: thread.id,
+        user_id: thread.user_id,
+        direction: 'outbound' as const,
+        sender: 'bot' as const,
+        fb_message_id: part.message_id || `${textFbId}:${i}`,
+        body: part.text,
+      }))
       const { error: textInsertErr } = await admin
         .from('messenger_messages')
-        .insert({
-          thread_id: thread.id,
-          user_id: thread.user_id,
-          direction: 'outbound',
-          sender: 'bot',
-          fb_message_id: textFbId,
-          body: reply,
-        })
+        .insert(rowsToInsert)
       if (textInsertErr && (textInsertErr as { code?: string }).code !== '23505') {
         throw textInsertErr
       }

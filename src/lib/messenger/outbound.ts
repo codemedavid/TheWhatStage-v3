@@ -5,10 +5,12 @@ import {
   sendMessengerGenericTemplate,
   sendMessengerImage,
   sendMessengerText,
+  sendMessengerTextSequence,
   sendMessengerUtilityTemplate,
   isHumanAgentUnapprovedError,
   type MessengerAttachmentType,
   type MessengerGenericElement,
+  type SentTextPart,
 } from '@/lib/facebook/messenger'
 import { deeplinkActionPageUrl } from '@/lib/action-pages/urls'
 
@@ -18,7 +20,12 @@ type AdminClient = ReturnType<typeof createAdminClient>
 // Public payload shapes — callers pick one kind and fill its fields.
 // ---------------------------------------------------------------------------
 export type OutboundPayload =
-  | { kind: 'text'; text: string }
+  // `segments` (optional) carries a pre-split, human-like list of bubbles for
+  // the split-messages feature. When present with 2+ entries the send is paced
+  // as ordered bubbles; otherwise `text` is sent as a single message (the
+  // 2000-char safety split inside sendMessengerText still applies). `text` is
+  // always the full reply, used for previews/logging and the single-send path.
+  | { kind: 'text'; text: string; segments?: string[] }
   | { kind: 'button'; text: string; url: string; ctaLabel: string }
   | { kind: 'image'; imageUrl: string }
   // Media attachment by URL — video/audio (voice notes)/file (documents).
@@ -116,7 +123,11 @@ export async function resolveSendPolicy(
 // Unified outbound send
 // ---------------------------------------------------------------------------
 export type OutboundResult =
-  | { sent: true; messageId: string }
+  // `parts` is present for the text path: one entry per delivered bubble (with
+  // its own Graph message_id and exact text). Single sends return a single
+  // part. Non-text sends omit it. `messageId` is always the FIRST part's id so
+  // existing idempotency stamps stay stable.
+  | { sent: true; messageId: string; parts?: SentTextPart[] }
   | { sent: false; reason: string }
 
 export async function sendOutbound(args: {
@@ -206,16 +217,34 @@ export async function sendOutbound(args: {
   const useHumanAgent = policy.mode === 'HUMAN_AGENT'
 
   let messageId: string
+  // Populated only on the text path so the worker can persist one row per bubble.
+  let textParts: SentTextPart[] | undefined
 
   try {
     if (payload.kind === 'text') {
-      const result = await sendMessengerText({
-        pageAccessToken: pageToken,
-        recipientPsid: thread.psid,
-        text: payload.text,
-        ...(useHumanAgent ? { messagingType: 'MESSAGE_TAG', tag: 'HUMAN_AGENT' } : {}),
-      })
-      messageId = result.message_id
+      const humanAgent = useHumanAgent
+        ? ({ messagingType: 'MESSAGE_TAG', tag: 'HUMAN_AGENT' } as const)
+        : {}
+      // 2+ segments → paced human-like bubbles; otherwise a single send.
+      if (payload.segments && payload.segments.length > 1) {
+        const seq = await sendMessengerTextSequence({
+          pageAccessToken: pageToken,
+          recipientPsid: thread.psid,
+          segments: payload.segments,
+          ...humanAgent,
+        })
+        textParts = seq.parts
+        messageId = seq.parts[0]?.message_id ?? ''
+      } else {
+        const result = await sendMessengerText({
+          pageAccessToken: pageToken,
+          recipientPsid: thread.psid,
+          text: payload.text,
+          ...humanAgent,
+        })
+        messageId = result.message_id
+        textParts = [{ message_id: result.message_id, text: payload.text }]
+      }
     } else if (payload.kind === 'button') {
       const result = await sendMessengerButton({
         pageAccessToken: pageToken,
@@ -285,7 +314,7 @@ export async function sendOutbound(args: {
     .update({ last_outbound_at: new Date().toISOString() })
     .eq('id', thread.id)
 
-  return { sent: true, messageId }
+  return { sent: true, messageId, ...(textParts ? { parts: textParts } : {}) }
 }
 
 // ---------------------------------------------------------------------------

@@ -7,6 +7,7 @@ import { createClient } from '@/lib/supabase/server'
 import { decryptToken, encryptToken } from '@/lib/facebook/crypto'
 import { fetchUserPages } from '@/lib/facebook/oauth'
 import { subscribePageToWebhook, unsubscribePageFromWebhook } from '@/lib/facebook/messenger'
+import { probePageUtilityMessaging, type UtilityMessagingStatus } from '@/lib/facebook/messenger-templates'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { dispatchCapiEvent } from '@/lib/facebook/capi'
 import crypto from 'node:crypto'
@@ -78,8 +79,16 @@ export async function savePagesForm(formData: FormData): Promise<void> {
   }
   console.log('[savePagesForm] inserted/upserted', inserted?.length ?? 0, 'rows')
 
-  // Subscribe each selected page to Messenger webhook events. Failures here
-  // do not block the save — the dashboard surfaces the issue separately.
+  // Subscribe each selected page to Messenger webhook events, and probe whether
+  // pages_utility_messaging is usable for THIS page (see probePageUtilityMessaging).
+  // Both are best-effort — failures never block the save. The probe result is
+  // cached on the row so the settings page can flag pages that will fail a
+  // template submit, before the operator discovers it the hard way.
+  const statusToFlag: Record<UtilityMessagingStatus, boolean | null> = {
+    ok: true,
+    missing: false,
+    unknown: null,
+  }
   await Promise.allSettled(
     selected.map(async (p) => {
       try {
@@ -88,6 +97,14 @@ export async function savePagesForm(formData: FormData): Promise<void> {
       } catch (e) {
         console.error('[savePagesForm] subscribe failed', p.id, e)
       }
+      const status = await probePageUtilityMessaging({
+        fbPageId: p.id,
+        pageAccessToken: p.accessToken,
+      })
+      await supabase
+        .from('facebook_pages')
+        .update({ utility_messaging_ok: statusToFlag[status] })
+        .eq('fb_page_id', p.id)
     }),
   )
 
