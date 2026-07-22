@@ -33,6 +33,80 @@ export interface ChatbotPersona {
    * structured `pause` decision. Empty/undefined = no section, feature off.
    */
   pauseAiInstructions?: string;
+  /**
+   * When true, inject the reply-length HARD RULE capped at {@link replyMaxSentences}.
+   * When false, the length cap is dropped and the bot replies at natural length.
+   * Undefined = enabled (byte-identical to the historical hardcoded rule).
+   */
+  replyLengthLimitEnabled?: boolean;
+  /** Max sentences per reply when the length limit is on. Undefined = 2. */
+  replyMaxSentences?: number;
+  /**
+   * When true, add a "# Message structure" section teaching the bot to structure
+   * replies with intentional line breaks (stairway / 1-3-1) and adds an
+   * option-listing exception to the length rule. Undefined/false = off.
+   */
+  structuredMessagesEnabled?: boolean;
+}
+
+/** Cardinal-number words for the sentence-cap phrasing, index = the number.
+ *  Index 2 -> "Two" keeps the default rule byte-identical to pre-change main. */
+const SENTENCE_COUNT_WORDS = ['zero', 'One', 'Two', 'Three', 'Four', 'Five', 'Six'] as const;
+
+/** Build the reply-length section lines (with trailing blank), parameterised by
+ *  the operator's cap and whether structured option-listing is allowed. Returns
+ *  a reduced "natural length" section when the limit is disabled. */
+function replyLengthSection(
+  limitEnabled: boolean,
+  maxSentences: number,
+  structured: boolean,
+): string[] {
+  const alwaysOneQuestion =
+    `- Ask AT MOST one question per reply. If you have multiple things to ask, pick the single most important one and save the rest for the next turn.`;
+
+  if (!limitEnabled) {
+    return [
+      `# Reply length`,
+      `- Reply at a natural length for the question. Do not pad with greetings, recaps, or filler; keep it as tight as the answer allows.`,
+      alwaysOneQuestion,
+      ``,
+    ];
+  }
+
+  const nWord = SENTENCE_COUNT_WORDS[maxSentences] ?? `${maxSentences}`;
+  const countPhrase =
+    maxSentences === 1 ? `1 short sentence` : `1 to ${maxSentences} short sentences`;
+  const maxPhrase =
+    maxSentences === 1
+      ? `One sentence is the absolute maximum`
+      : `${nWord} sentences is the absolute maximum`;
+
+  const lines = [
+    `# Reply length (HARD RULE, overrides persona, instructions, and DO/DON'T rules)`,
+    `- Every reply MUST be ${countPhrase}. ${maxPhrase}, regardless of topic or how much info you have.`,
+    alwaysOneQuestion,
+    `- Do not pad with greetings, recaps, or filler to hit a length. Shorter is better. If the answer fits in one sentence, send one sentence.`,
+  ];
+  if (structured) {
+    lines.push(
+      `- EXCEPTION for presenting choices: when you hand the customer a set of options, you MAY go past the sentence cap only to lay them out. Use one short lead line, each option on its own new line, then one short closing line or question. Still ask at most one question overall, and keep every line short.`,
+    );
+  }
+  return [...lines, ``];
+}
+
+/** Build the optional "# Message structure" section (with trailing blank).
+ *  Empty array when structured formatting is off. */
+function messageStructureSection(structured: boolean): string[] {
+  if (!structured) return [];
+  return [
+    `# Message structure`,
+    `- Structure your reply so it is easy to read on a phone. Break separate thoughts onto their own lines instead of running everything into one paragraph.`,
+    `- When you hand the customer options or choices, put each option on its own new line so they are easy to scan. Keep each line short, a few words, like "For ordering" then a new line "For better customer experience" then a new line "Para ma-monitor ang sales".`,
+    `- Think in a simple shape: one short opening line, then the key points or options each on their own line, then one short closing line or question. This is inspiration, not a rigid template.`,
+    `- Do not add bullet symbols, numbers, or markdown. Use plain line breaks and short lines to create the rhythm. Never use the em-dash "—".`,
+    ``,
+  ];
 }
 
 export interface BuildPromptArgs {
@@ -171,6 +245,12 @@ function assembleSystemPrompt(p: ChatbotPersona, contextBlock: string, conversat
     ? [paymentEnumBlock.trim(), '']
     : [];
 
+  // Operator-managed knobs (default-preserving coercion): length limit on at 2
+  // sentences and structured formatting off => byte-identical to pre-change main.
+  const lengthLimitEnabled = p.replyLengthLimitEnabled ?? true;
+  const maxSentences = p.replyMaxSentences ?? 2;
+  const structured = p.structuredMessagesEnabled ?? false;
+
   // Stable sections — identical across every turn for a given persona/config.
   // Placed first in `cache_friendly` layout so provider-side prompt caches
   // (Anthropic, vLLM) hit on the long shared prefix. Persona text itself is
@@ -188,11 +268,8 @@ function assembleSystemPrompt(p: ChatbotPersona, contextBlock: string, conversat
     `You are ${p.name}. ${p.persona.trim()}`,
     `Stay fully in this voice for every reply: tone, pacing, signature phrasing, and length all flow from the Identity, Instructions, and Rules above. Do NOT fall back to a generic "warm concise concierge" tone unless the persona itself describes that.`,
     ``,
-    `# Reply length (HARD RULE, overrides persona, instructions, and DO/DON'T rules)`,
-    `- Every reply MUST be 1 to 2 short sentences. Two sentences is the absolute maximum, regardless of topic or how much info you have.`,
-    `- Ask AT MOST one question per reply. If you have multiple things to ask, pick the single most important one and save the rest for the next turn.`,
-    `- Do not pad with greetings, recaps, or filler to hit a length. Shorter is better. If the answer fits in one sentence, send one sentence.`,
-    ``,
+    ...replyLengthSection(lengthLimitEnabled, maxSentences, structured),
+    ...messageStructureSection(structured),
     `# Punctuation (HARD RULE)`,
     `- Never output the em-dash "—" or en-dash "–". Use a comma, period, colon, or parentheses instead. Always type a regular hyphen "-" if you need one.`,
     `- Write like a human texting on Messenger. No AI-slop openers ("Certainly!", "Great question!", "I'd be happy to help") and no AI-slop connectors ("moreover", "furthermore", "in conclusion", "it is worth noting").`,
