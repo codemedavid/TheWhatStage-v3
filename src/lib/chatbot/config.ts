@@ -11,6 +11,23 @@ import { DEFAULT_SPLIT_MAX_BUBBLES } from './reply-segments'
 export const MIN_SPLIT_MAX_BUBBLES = 2
 export const MAX_SPLIT_MAX_BUBBLES = 5
 
+/** Allowed range + default for the operator-managed reply-length cap (sentences).
+ *  When the length limit is enabled, the reply-length HARD RULE is injected into
+ *  the system prompt parameterised by this number. Default 2 preserves the
+ *  historical "1 to 2 short sentences" behaviour byte-for-byte. */
+export const MIN_REPLY_MAX_SENTENCES = 1
+export const MAX_REPLY_MAX_SENTENCES = 6
+export const DEFAULT_REPLY_MAX_SENTENCES = 2
+
+/** How a structured reply is rendered to the customer:
+ *  - single  = one Messenger message with internal line breaks preserved
+ *  - bubbles = one paced chat bubble per line (via splitStructuredLines) */
+export type StructuredMessageLayout = 'single' | 'bubbles'
+
+export function coerceStructuredLayout(raw: unknown): StructuredMessageLayout {
+  return raw === 'bubbles' ? 'bubbles' : 'single'
+}
+
 export interface ActionPageRecommendationRules {
   rules: string
   requiredSlots: string[]
@@ -94,6 +111,17 @@ export type ChatbotConfigRow = {
   split_messages_enabled?: boolean | null
   /** Hard cap on how many bubbles a split reply produces. Optional; clamped. */
   split_max_bubbles?: number | null
+  /** When true, the bot is prompted to structure replies with intentional line
+   *  breaks (stairway / 1-3-1). Optional on legacy rows — absent = disabled. */
+  structured_messages_enabled?: boolean | null
+  /** How a structured reply renders: 'single' (one message, line breaks kept) or
+   *  'bubbles' (one bubble per line). Optional; coerced to 'single'. */
+  structured_message_layout?: string | null
+  /** When true, the reply-length HARD RULE is injected (default). When false, the
+   *  bot replies at natural length. Optional on legacy rows — absent = enabled. */
+  reply_length_limit_enabled?: boolean | null
+  /** Max sentences per reply when the length limit is on. Optional; clamped. */
+  reply_max_sentences?: number | null
   created_at: string
   updated_at: string
 }
@@ -134,6 +162,14 @@ export type ChatbotConfig = ChatbotPersona & {
   splitMessagesEnabled: boolean
   /** Hard cap on bubbles per split reply (clamped to the allowed range). */
   splitMaxBubbles: number
+  /** When true, prompt the bot to structure replies with line breaks. */
+  structuredMessagesEnabled: boolean
+  /** How a structured reply renders: one message vs one bubble per line. */
+  structuredMessageLayout: StructuredMessageLayout
+  /** When true, inject the reply-length HARD RULE (capped at replyMaxSentences). */
+  replyLengthLimitEnabled: boolean
+  /** Max sentences per reply when the length limit is on (clamped). */
+  replyMaxSentences: number
   updatedAt: string
 }
 
@@ -167,6 +203,13 @@ export const DEFAULT_CHATBOT_CONFIG: ChatbotConfig = {
   // an operator opts in from the chatbot settings page.
   splitMessagesEnabled: false,
   splitMaxBubbles: DEFAULT_SPLIT_MAX_BUBBLES,
+  // Ships OFF: existing tenants keep the current single-message behaviour. The
+  // reply-length limit ships ON at 2 sentences, byte-identical to the previous
+  // hardcoded "1 to 2 short sentences" rule.
+  structuredMessagesEnabled: false,
+  structuredMessageLayout: 'single',
+  replyLengthLimitEnabled: true,
+  replyMaxSentences: DEFAULT_REPLY_MAX_SENTENCES,
   updatedAt: '',
 }
 
@@ -275,6 +318,16 @@ export function rowToConfig(row: ChatbotConfigRow): ChatbotConfig {
       Math.round(row.split_max_bubbles ?? DEFAULT_CHATBOT_CONFIG.splitMaxBubbles),
       MIN_SPLIT_MAX_BUBBLES,
       MAX_SPLIT_MAX_BUBBLES,
+    ),
+    structuredMessagesEnabled:
+      row.structured_messages_enabled ?? DEFAULT_CHATBOT_CONFIG.structuredMessagesEnabled,
+    structuredMessageLayout: coerceStructuredLayout(row.structured_message_layout),
+    replyLengthLimitEnabled:
+      row.reply_length_limit_enabled ?? DEFAULT_CHATBOT_CONFIG.replyLengthLimitEnabled,
+    replyMaxSentences: clamp(
+      Math.round(row.reply_max_sentences ?? DEFAULT_CHATBOT_CONFIG.replyMaxSentences),
+      MIN_REPLY_MAX_SENTENCES,
+      MAX_REPLY_MAX_SENTENCES,
     ),
     updatedAt: row.updated_at ?? '',
   }
@@ -395,6 +448,41 @@ export async function setSplitMessageSettings(
     .from('chatbot_configs')
     .upsert(payload, { onConflict: 'user_id' })
   if (error) throw new Error(`setSplitMessageSettings: ${error.message}`)
+}
+
+export async function setStructuredMessageSettings(
+  supabase: SupabaseClient,
+  userId: string,
+  input: {
+    structuredEnabled?: boolean
+    layout?: StructuredMessageLayout | string
+    lengthLimitEnabled?: boolean
+    maxSentences?: number
+  },
+): Promise<void> {
+  const payload: Record<string, unknown> = { user_id: userId }
+  // Omit-when-absent contract: callers only write the fields they manage, so a
+  // partial update never clobbers a setting owned by another form.
+  if (input.structuredEnabled !== undefined) {
+    payload.structured_messages_enabled = !!input.structuredEnabled
+  }
+  if (input.layout !== undefined) {
+    payload.structured_message_layout = coerceStructuredLayout(input.layout)
+  }
+  if (input.lengthLimitEnabled !== undefined) {
+    payload.reply_length_limit_enabled = !!input.lengthLimitEnabled
+  }
+  if (input.maxSentences !== undefined) {
+    payload.reply_max_sentences = clamp(
+      Math.round(input.maxSentences),
+      MIN_REPLY_MAX_SENTENCES,
+      MAX_REPLY_MAX_SENTENCES,
+    )
+  }
+  const { error } = await supabase
+    .from('chatbot_configs')
+    .upsert(payload, { onConflict: 'user_id' })
+  if (error) throw new Error(`setStructuredMessageSettings: ${error.message}`)
 }
 
 export async function setPrimaryActionPageId(

@@ -37,7 +37,7 @@ import {
   summarizeConversation,
   type AnswerHistory,
 } from '@/lib/chatbot/answer'
-import { segmentReply } from '@/lib/chatbot/reply-segments'
+import { selectReplySegments } from '@/lib/chatbot/reply-delivery'
 import { type SelectedMediaAsset } from '@/lib/media/selector'
 import {
   answerWithClassification,
@@ -836,17 +836,17 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
       // behaviour is byte-for-byte the previous single-bubble path.
       let sentParts: { message_id: string; text: string }[] | undefined
       if (!textFbId) {
-        // Human-like split: only when the operator enabled it. segmentReply
-        // returns [reply] for single-sentence replies, so short replies stay
-        // as one bubble even with the feature on.
-        const segments = config.splitMessagesEnabled
-          ? segmentReply(reply, { maxBubbles: config.splitMaxBubbles })
-          : [reply]
+        // Decide how the reply is delivered (structured/single vs bubbles vs the
+        // human-split sentence path vs one message). See selectReplySegments.
+        const segments = selectReplySegments(reply, config)
         const result = await sendOutbound({
           admin,
           thread: { id: thread.id, psid: thread.psid, last_inbound_at: thread.last_inbound_at },
           pageToken,
-          payload: { kind: 'text', text: reply, segments },
+          // Single-segment sends use `text`, so it must be the NORMALIZED reply
+          // (segments[0]) — the raw reply may still hold an inline "A) x B) y"
+          // option run that selectReplySegments just broke onto its own lines.
+          payload: { kind: 'text', text: segments[0] ?? reply, segments },
           kind: 'bot',
         })
         if (!result.sent) {
