@@ -12,6 +12,8 @@ import { AutoFollowupForm } from './_components/AutoFollowupForm'
 import { HumanTakeoverForm } from './_components/HumanTakeoverForm'
 import { MessageDebounceForm } from './_components/MessageDebounceForm'
 import { SplitMessagesForm } from './_components/SplitMessagesForm'
+import { StructuredMessagesForm } from './_components/StructuredMessagesForm'
+import { ReplyLengthForm } from './_components/ReplyLengthForm'
 import type { PersonalityTemplate } from '@/lib/chatbot/personality/types'
 import './chatbot.css'
 
@@ -76,6 +78,10 @@ export default async function ChatbotPage() {
       {/* Human-like reply splitting sits with the other core reply-behavior
           controls so operators can find the on/off toggle next to timing. */}
       <SplitMessagesForm />
+      {/* Structured formatting (stairway / 1-3-1) and the operator-managed reply
+          length sit with the other core reply-behavior controls. */}
+      <StructuredMessagesForm />
+      <ReplyLengthForm />
     </>
   )
 
