@@ -48,6 +48,47 @@ describe('selectReplySegments', () => {
     ).toEqual([R])
   })
 
+  it('breaks an inline option run into bubbles for structured + bubbles', () => {
+    const flat = 'Ano po goal niyo? A) Better ordering B) Mas malaki orders C) Matrack ang sales'
+    expect(
+      selectReplySegments(flat, {
+        structuredMessagesEnabled: true,
+        structuredMessageLayout: 'bubbles',
+        splitMessagesEnabled: false,
+        splitMaxBubbles: 5,
+      }),
+    ).toEqual([
+      'Ano po goal niyo?',
+      'A. Better ordering',
+      'B. Mas malaki orders',
+      'C. Matrack ang sales',
+    ])
+  })
+
+  it('breaks an inline option run into line breaks for structured + single', () => {
+    const flat = 'Ano po goal niyo? A) Better ordering B) Mas malaki orders'
+    expect(
+      selectReplySegments(flat, {
+        structuredMessagesEnabled: true,
+        structuredMessageLayout: 'single',
+        splitMessagesEnabled: false,
+        splitMaxBubbles: 3,
+      }),
+    ).toEqual(['Ano po goal niyo?\nA. Better ordering\nB. Mas malaki orders'])
+  })
+
+  it('normalizes an inline option run even in legacy mode (safety net)', () => {
+    const flat = 'Ano po goal niyo? A) Better ordering B) Mas malaki orders'
+    expect(
+      selectReplySegments(flat, {
+        structuredMessagesEnabled: false,
+        structuredMessageLayout: 'single',
+        splitMessagesEnabled: false,
+        splitMaxBubbles: 3,
+      }),
+    ).toEqual(['Ano po goal niyo?\nA. Better ordering\nB. Mas malaki orders'])
+  })
+
   it('falls back to sentence-based split when only split-messages is on', () => {
     const reply = 'Salamat po. Ano po budget niyo?'
     expect(
