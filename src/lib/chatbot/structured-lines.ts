@@ -29,6 +29,73 @@
 /** Conservative default so a long option list never explodes into many bubbles. */
 export const DEFAULT_STRUCTURED_MAX_BUBBLES = 3
 
+/** A run must have at least this many markers to count as an option list —
+ *  a single "B)" in prose is conversation, not an enumeration. */
+const MIN_ENUMERATION_RUN = 2
+
+/** Matches an option marker: "A)" / "a." / "1)" / "12." preceded by start-of-text
+ *  or whitespace and followed by whitespace + content. Group 2 = label, 3 = punct. */
+const ENUM_MARKER_RE = /(^|\s)([A-Ha-h]|\d{1,2})([).])(?=\s+\S)/g
+
+interface EnumMarker {
+  /** Index of the label character (after the leading space, if any). */
+  start: number
+  /** Index just past the marker punctuation. */
+  end: number
+  label: string
+}
+
+/** Sequence position of a marker label: A/a=1, B/b=2, ... or the number itself. */
+function markerOrdinal(label: string): number {
+  return /\d/.test(label) ? parseInt(label, 10) : label.toUpperCase().charCodeAt(0) - 64
+}
+
+/**
+ * Safety net for the structured-messages feature: when the model runs an option
+ * list into ONE line — "Ano po goal niyo? A) Better ordering B) Mas malaki
+ * orders" — break each option onto its own line so the reply is readable on a
+ * phone. Markers are rewritten from "X)" to "X." because Messenger converts
+ * inline "B)" / "8)" into emoticons (😎), which is exactly how the bug was spotted.
+ *
+ * Deliberately conservative: it only fires when the text is a single line
+ * containing a run of >= 2 same-kind markers that starts the sequence (A or 1)
+ * and ascends consecutively. Anything else — prose mentioning "option B)",
+ * non-consecutive numbers, text the model already line-broke — passes through
+ * byte-identical.
+ */
+export function breakInlineEnumeration(text: string): string {
+  if (!text.trim()) return text
+  // Trust line breaks the model already produced.
+  if (text.split('\n').filter((l) => l.trim()).length > 1) return text
+
+  const markers: EnumMarker[] = []
+  for (const m of text.matchAll(ENUM_MARKER_RE)) {
+    markers.push({
+      start: (m.index ?? 0) + m[1].length,
+      end: (m.index ?? 0) + m[0].length,
+      label: m[2],
+    })
+  }
+  if (markers.length < MIN_ENUMERATION_RUN) return text
+
+  // All markers must be the same kind and form A, B, C… / 1, 2, 3… from the top.
+  const allNumeric = markers.every((m) => /\d/.test(m.label))
+  const allLetters = markers.every((m) => /[A-Ha-h]/.test(m.label))
+  if (!allNumeric && !allLetters) return text
+  const isConsecutiveFromStart = markers.every((m, i) => markerOrdinal(m.label) === i + 1)
+  if (!isConsecutiveFromStart) return text
+
+  const lines: string[] = []
+  const lead = text.slice(0, markers[0].start).trim()
+  if (lead) lines.push(lead)
+  markers.forEach((marker, i) => {
+    const contentEnd = i + 1 < markers.length ? markers[i + 1].start : text.length
+    const content = text.slice(marker.end, contentEnd).trim()
+    lines.push(`${marker.label}. ${content}`)
+  })
+  return lines.join('\n')
+}
+
 export interface StructuredSplitOptions {
   /** Hard ceiling on bubble count; trailing overflow merges into the last one. */
   maxBubbles?: number

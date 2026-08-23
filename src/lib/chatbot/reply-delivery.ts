@@ -1,5 +1,5 @@
 import { segmentReply } from './reply-segments'
-import { splitStructuredLines } from './structured-lines'
+import { breakInlineEnumeration, splitStructuredLines } from './structured-lines'
 import type { StructuredMessageLayout } from './config'
 
 /** The subset of chatbot config that governs how a reply is delivered. */
@@ -22,15 +22,22 @@ export interface ReplyDeliverySettings {
  *
  * Each splitter returns a single-element array for a one-line/one-sentence
  * reply, so short replies stay as one bubble in every mode.
+ *
+ * In EVERY mode the reply first passes through breakInlineEnumeration: when the
+ * model runs an "A) x B) y C) z" option list into one flat line, the options are
+ * broken onto their own lines (and "X)" markers rewritten to "X." so Messenger
+ * doesn't emoticon-convert "B)" into 😎) before any layout decision applies.
+ * Callers sending a single segment should send segments[0], not the raw reply.
  */
 export function selectReplySegments(reply: string, settings: ReplyDeliverySettings): string[] {
+  const normalized = breakInlineEnumeration(reply)
   if (settings.structuredMessagesEnabled) {
     return settings.structuredMessageLayout === 'bubbles'
-      ? splitStructuredLines(reply, { maxBubbles: settings.splitMaxBubbles })
-      : [reply]
+      ? splitStructuredLines(normalized, { maxBubbles: settings.splitMaxBubbles })
+      : [normalized]
   }
   if (settings.splitMessagesEnabled) {
-    return segmentReply(reply, { maxBubbles: settings.splitMaxBubbles })
+    return segmentReply(normalized, { maxBubbles: settings.splitMaxBubbles })
   }
-  return [reply]
+  return [normalized]
 }

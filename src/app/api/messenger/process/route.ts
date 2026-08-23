@@ -843,7 +843,10 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
           admin,
           thread: { id: thread.id, psid: thread.psid, last_inbound_at: thread.last_inbound_at },
           pageToken,
-          payload: { kind: 'text', text: reply, segments },
+          // Single-segment sends use `text`, so it must be the NORMALIZED reply
+          // (segments[0]) — the raw reply may still hold an inline "A) x B) y"
+          // option run that selectReplySegments just broke onto its own lines.
+          payload: { kind: 'text', text: segments[0] ?? reply, segments },
           kind: 'bot',
         })
         if (!result.sent) {
