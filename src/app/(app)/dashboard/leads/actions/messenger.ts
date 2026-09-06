@@ -1,32 +1,35 @@
 'use server'
 
-import { z } from 'zod'
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
-import { decryptToken } from '@/lib/facebook/crypto'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { sendOutbound, type OutboundPayload } from '@/lib/messenger/outbound'
-import { deeplinkActionPageUrl } from '@/lib/action-pages/urls'
+import type { OutboundPayload } from '@/lib/messenger/outbound'
 import type { MessengerAttachmentType } from '@/lib/facebook/messenger'
 import { resetThreadCountersByLead } from '@/lib/messenger/reset-counters'
+import {
+  resolveMessageAttachments,
+  type ConversationMessage,
+} from '@/lib/messenger/attachments'
+import {
+  dispatchOperatorSendFor,
+  listSendableActionPagesFor,
+  sendActionPageFor,
+  type ActionPageSendOverrides,
+  type OperatorAttachment,
+  type OperatorSendSpec,
+  type OperatorThread,
+  type SendResult,
+  type SendableActionPage,
+} from '@/lib/messenger/operator-send'
 
-export interface ConversationAttachment {
-  type: 'image' | 'video' | 'audio' | 'file' | 'action_page'
-  /** Display URL — freshly signed for storage-backed media, null if unavailable. */
-  url: string | null
-  name: string | null
-}
-
-export interface ConversationMessage {
-  id: string
-  direction: 'inbound' | 'outbound'
-  sender: 'user' | 'bot' | 'operator'
-  body: string
-  created_at: string
-  error: string | null
-  attachments: ConversationAttachment[]
-}
+export type { ConversationAttachment, ConversationMessage } from '@/lib/messenger/attachments'
+export type {
+  ActionPageSendOverrides,
+  OperatorAttachment,
+  SendResult,
+  SendableActionPage,
+} from '@/lib/messenger/operator-send'
 
 export interface ConversationComment {
   id: string
@@ -189,92 +192,6 @@ export async function markThreadRead(leadId: string): Promise<void> {
   await resetThreadCountersByLead(supabase, leadId, { resetMissed: true })
   // Refresh the badge surfaces (projects board, leads, submissions, nav counter).
   revalidatePath('/dashboard', 'layout')
-}
-
-type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>
-
-interface RawMessageRow {
-  id: string
-  direction: 'inbound' | 'outbound'
-  sender: 'user' | 'bot' | 'operator'
-  body: string
-  created_at: string
-  error: string | null
-  attachments: unknown
-}
-
-const DISPLAY_URL_TTL_SECONDS = 60 * 60
-
-/**
- * Normalize the heterogeneous `attachments` jsonb into display-ready entries.
- * Outbound operator rows persist re-signable `storage_path`/`media_asset_id`
- * (signed URLs expire) plus direct `url`s for external/action-page sends;
- * inbound Meta rows use `{ type, payload: { url } }`. Storage-backed entries are
- * re-signed in a single batched pass.
- */
-async function resolveMessageAttachments(
-  supabase: SupabaseServerClient,
-  rows: RawMessageRow[],
-): Promise<ConversationMessage[]> {
-  const storagePaths = new Set<string>()
-  for (const row of rows) {
-    for (const raw of Array.isArray(row.attachments) ? row.attachments : []) {
-      const path = (raw as { storage_path?: unknown }).storage_path
-      if (typeof path === 'string' && path) storagePaths.add(path)
-    }
-  }
-
-  const signedByPath = new Map<string, string>()
-  await Promise.all(
-    [...storagePaths].map(async (path) => {
-      const { data } = await supabase.storage
-        .from('media-assets')
-        .createSignedUrl(path, DISPLAY_URL_TTL_SECONDS)
-      if (data?.signedUrl) signedByPath.set(path, data.signedUrl)
-    }),
-  )
-
-  const normalizeType = (raw: string | undefined): ConversationAttachment['type'] => {
-    switch (raw) {
-      case 'image':
-      case 'video':
-      case 'audio':
-      case 'file':
-      case 'action_page':
-        return raw
-      default:
-        return 'file'
-    }
-  }
-
-  return rows.map((row) => {
-    const attachments: ConversationAttachment[] = (
-      Array.isArray(row.attachments) ? row.attachments : []
-    ).map((raw) => {
-      const a = raw as {
-        type?: string
-        url?: string
-        storage_path?: string
-        name?: string
-        payload?: { url?: string }
-      }
-      const url =
-        (a.storage_path && signedByPath.get(a.storage_path)) ||
-        a.url ||
-        a.payload?.url ||
-        null
-      return { type: normalizeType(a.type), url, name: a.name ?? null }
-    })
-    return {
-      id: row.id,
-      direction: row.direction,
-      sender: row.sender,
-      body: row.body,
-      created_at: row.created_at,
-      error: row.error,
-      attachments,
-    }
-  })
 }
 
 export interface LatestStageRationale {
@@ -491,181 +408,17 @@ export async function setAutoReply(leadId: string, enabled: boolean): Promise<vo
   revalidatePath('/dashboard/leads', 'layout')
 }
 
-/**
- * A stored attachment descriptor on an outbound operator message. The display
- * URL for storage-backed entries is minted fresh on load (signed URLs expire),
- * so we persist the re-signable `storage_path`/`media_asset_id` rather than the
- * short-lived signed URL. `url` is persisted directly only for external-URL and
- * action-page sends, where there is nothing to re-sign.
- */
-export interface OperatorAttachment {
-  type: MessengerAttachmentType | 'action_page'
-  storage_path?: string
-  media_asset_id?: string
-  action_page_id?: string
-  url?: string
-  name?: string
-}
-
-/**
- * Shared dispatch for every operator-initiated send (text, action page, media).
- * Fetches the thread + page token, sends via the unified outbound pipeline
- * (HUMAN_AGENT policy), persists an audit row, stamps the bot-pause window, and
- * releases any workflow run lock — identical side effects regardless of payload.
- */
-interface OperatorThread {
-  id: string
-  psid: string
-  page_id: string
-}
-
-interface OperatorSendSpec {
-  payload: OutboundPayload
-  body: string
-  attachments?: OperatorAttachment[]
-}
-
-/**
- * Outcome of an operator-initiated send. A `policy_blocked:*` or FB API failure
- * is an EXPECTED, already-persisted result (the failed message row carries the
- * machine-readable error and is shown inline in the thread), so it is returned
- * as `{ ok: false }` rather than thrown. Throwing a server action surfaces in
- * production as an opaque "Server Components render" 500, which is the wrong
- * signal for a routine, recoverable send failure.
- *
- * Genuine infrastructure failures (no thread, missing page token, DB errors)
- * still throw — those are not recorded and the operator cannot act on them.
- */
-export type SendResult = { ok: true } | { ok: false; error: string }
-
+// Thin cookie-session wrapper over the shared operator send: the lib does the
+// thread lookup, policy send, audit row, and bot pause; we refresh the inbox.
 async function dispatchOperatorSend(args: {
   context: string
   leadId: string
   build: (thread: OperatorThread) => OperatorSendSpec | Promise<OperatorSendSpec>
 }): Promise<SendResult> {
-  const { context, leadId, build } = args
   const { supabase, userId } = await requireUser()
-
-  const { data: thread, error: threadErr } = await supabase
-    .from('messenger_threads')
-    .select('id, psid, page_id, last_inbound_at, controlled_by_run_id, facebook_pages(page_access_token)')
-    .eq('lead_id', leadId)
-    .maybeSingle()
-  if (threadErr) throw new Error(`${context}: ${threadErr.message}`)
-  if (!thread) throw new Error(`${context}: no Messenger thread for lead`)
-
-  const pageRow = Array.isArray(thread.facebook_pages)
-    ? thread.facebook_pages[0]
-    : (thread.facebook_pages as { page_access_token?: string } | null)
-  if (!pageRow?.page_access_token) {
-    throw new Error(`${context}: missing page access token`)
-  }
-  const pageToken = decryptToken(pageRow.page_access_token)
-
-  const { payload, body, attachments } = await build({
-    id: thread.id,
-    psid: thread.psid,
-    page_id: thread.page_id,
-  })
-
-  // Use service-role client for sendOutbound (needs to read marketing_optins table).
-  const admin = createAdminClient()
-
-  let sentId: string | null = null
-  let sendError: string | null = null
-  try {
-    const result = await sendOutbound({
-      admin,
-      thread: {
-        id: thread.id,
-        psid: thread.psid,
-        last_inbound_at: (thread as { last_inbound_at?: string | null }).last_inbound_at ?? null,
-      },
-      pageToken,
-      payload,
-      kind: 'operator',
-    })
-    if (result.sent) {
-      sentId = result.messageId
-    } else {
-      sendError = `policy_blocked:${result.reason}`
-    }
-  } catch (e) {
-    sendError = e instanceof Error ? e.message : String(e)
-  }
-
-  await supabase.from('messenger_messages').insert({
-    thread_id: thread.id,
-    user_id: userId,
-    direction: 'outbound',
-    sender: 'operator',
-    fb_message_id: sentId,
-    body,
-    attachments: attachments ?? null,
-    error: sendError,
-  })
-
-  // Stamp bot_paused_until regardless of send success/failure — the operator's
-  // intent to take over is what matters, not whether the FB API accepted the message.
-  const { data: cfg } = await supabase
-    .from('chatbot_configs')
-    .select('human_takeover_minutes')
-    .eq('user_id', userId)
-    .maybeSingle()
-  const pauseMinutes = cfg?.human_takeover_minutes ?? 0
-  if (pauseMinutes > 0) {
-    await supabase
-      .from('messenger_threads')
-      .update({ bot_paused_until: new Date(Date.now() + pauseMinutes * 60_000).toISOString() })
-      .eq('id', thread.id)
-  }
-
-  if (!sendError) {
-    const threadUpdate: Record<string, unknown> = {
-      last_message_at: new Date().toISOString(),
-      last_message_preview: body.slice(0, 200),
-    }
-
-    // §9 operator override: clear the workflow run lock so the bot can resume
-    // normal operation when the run's wait expires, and pause the active run
-    // with a 24-hour auto-resume timer.
-    const runId = (thread as { controlled_by_run_id?: string | null }).controlled_by_run_id ?? null
-    if (runId) {
-      threadUpdate.controlled_by_run_id = null
-      const resumeAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
-
-      // Read the run's current state, merge the pause reason, then write back.
-      // Race window is acceptable — operator override is a rare, manual event.
-      const { data: runRow } = await admin
-        .from('workflow_runs')
-        .select('state')
-        .eq('id', runId)
-        .in('status', ['running', 'waiting'])
-        .maybeSingle<{ state: Record<string, unknown> }>()
-      if (runRow) {
-        await admin
-          .from('workflow_runs')
-          .update({
-            status: 'waiting',
-            next_run_at: resumeAt,
-            state: { ...runRow.state, waiting_for: 'operator_took_over' },
-          })
-          .eq('id', runId)
-      }
-    }
-
-    await supabase
-      .from('messenger_threads')
-      .update(threadUpdate)
-      .eq('id', thread.id)
-  }
-
+  const result = await dispatchOperatorSendFor({ supabase, userId, ...args })
   revalidatePath('/dashboard/leads', 'layout')
-
-  // A recorded send failure (policy block / FB rejection) is returned, not
-  // thrown — the failed message row already carries `error` for inline display.
-  if (sendError) return { ok: false, error: sendError }
-  return { ok: true }
+  return result
 }
 
 export async function replyAsOperator(leadId: string, text: string): Promise<SendResult> {
@@ -681,50 +434,11 @@ export async function replyAsOperator(leadId: string, text: string): Promise<Sen
 // ---------------------------------------------------------------------------
 // Operator-triggered action-page send
 // ---------------------------------------------------------------------------
-const DEEPLINK_TTL_SECONDS = 30 * 24 * 60 * 60
 
-export interface SendableActionPage {
-  id: string
-  title: string
-  kind: string
-  description: string | null
-  cta_label: string | null
-}
-
-/**
- * Published action pages the operator can send into a conversation. Drafts and
- * archived pages are excluded so unfinished pages never reach a lead.
- */
 export async function listSendableActionPages(): Promise<SendableActionPage[]> {
   const { supabase, userId } = await requireUser()
-  const { data, error } = await supabase
-    .from('action_pages')
-    .select('id, title, kind, description, cta_label')
-    .eq('user_id', userId)
-    .eq('status', 'published')
-    .order('updated_at', { ascending: false })
-  if (error) throw new Error(`listSendableActionPages: ${error.message}`)
-  return (data ?? []) as SendableActionPage[]
+  return listSendableActionPagesFor(supabase, userId)
 }
-
-// Meta limits: button text ≤ 640 chars, button label ≤ 20 chars.
-const ACTION_PAGE_TEXT_MAX = 640
-const ACTION_PAGE_CTA_MAX = 20
-
-/**
- * Per-send overrides for the message body and CTA label. Both are optional —
- * when omitted (or blank after trimming) the action page's saved defaults are
- * used. These never mutate the saved action_pages record.
- */
-export interface ActionPageSendOverrides {
-  messageText?: string
-  ctaLabel?: string
-}
-
-const actionPageOverridesSchema = z.object({
-  messageText: z.string().trim().min(1).max(ACTION_PAGE_TEXT_MAX).optional(),
-  ctaLabel: z.string().trim().min(1).max(ACTION_PAGE_CTA_MAX).optional(),
-})
 
 export async function sendActionPageAsOperator(
   leadId: string,
@@ -732,58 +446,9 @@ export async function sendActionPageAsOperator(
   overrides?: ActionPageSendOverrides,
 ): Promise<SendResult> {
   const { supabase, userId } = await requireUser()
-
-  // Validate per-send overrides at the boundary. Invalid/blank values fall back
-  // to the saved defaults rather than blocking the send.
-  const parsed = actionPageOverridesSchema.safeParse(overrides ?? {})
-  const overrideText = parsed.success ? parsed.data.messageText : undefined
-  const overrideCta = parsed.success ? parsed.data.ctaLabel : undefined
-
-  // Load + authorize the page here (own client / RLS) so the deeplink builder
-  // only deals with already-validated data.
-  const { data: page, error: pageErr } = await supabase
-    .from('action_pages')
-    .select('id, title, description, slug, cta_label, signing_secret, status')
-    .eq('id', actionPageId)
-    .eq('user_id', userId)
-    .maybeSingle<{
-      id: string
-      title: string
-      description: string | null
-      slug: string
-      cta_label: string | null
-      signing_secret: string
-      status: string
-    }>()
-  if (pageErr) throw new Error(`sendActionPageAsOperator: ${pageErr.message}`)
-  if (!page) throw new Error('sendActionPageAsOperator: action page not found')
-  if (page.status !== 'published') {
-    throw new Error('sendActionPageAsOperator: action page is not published')
-  }
-
-  return dispatchOperatorSend({
-    context: 'sendActionPageAsOperator',
-    leadId,
-    build: (thread) => {
-      const exp = Math.floor(Date.now() / 1000) + DEEPLINK_TTL_SECONDS
-      const url = deeplinkActionPageUrl(page.signing_secret, {
-        slug: page.slug,
-        psid: thread.psid,
-        pageId: thread.page_id,
-        exp,
-      })
-      const defaultText = [page.title, page.description?.trim()].filter(Boolean).join('\n\n')
-      const text = (overrideText ?? defaultText).slice(0, ACTION_PAGE_TEXT_MAX)
-      const ctaLabel = (overrideCta || page.cta_label?.trim() || 'Open').slice(0, ACTION_PAGE_CTA_MAX)
-      // History preview + attachment name reflect what was actually sent.
-      const body = text || page.title
-      return {
-        payload: { kind: 'button', text: body, url, ctaLabel },
-        body,
-        attachments: [{ type: 'action_page', action_page_id: page.id, url, name: body }],
-      }
-    },
-  })
+  const result = await sendActionPageFor(supabase, userId, leadId, actionPageId, overrides)
+  revalidatePath('/dashboard/leads', 'layout')
+  return result
 }
 
 // ---------------------------------------------------------------------------

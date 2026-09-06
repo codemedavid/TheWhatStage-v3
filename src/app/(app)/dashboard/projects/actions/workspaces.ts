@@ -4,7 +4,8 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { WorkspaceInput } from '../_lib/schemas'
-import { DEFAULT_PROJECT_STAGES, projectStagesTag } from '../_lib/queries'
+import { projectStagesTag } from '../_lib/queries'
+import { createWorkspaceFor } from '../_lib/mutations'
 import { deleteWorkspaceGuard, resolveDefaultStageId } from '../_lib/workspaces'
 import { describeActionError, isRedirectError, type ActionResult, type VoidActionResult } from '../_lib/action-result'
 import { seedProjectSequenceRun, cancelActiveProjectSequenceRuns, ensureProjectSequenceRun } from '@/lib/projects/sequences/seed'
@@ -27,33 +28,10 @@ function bust(userId: string): void {
 export async function createWorkspace(raw: unknown): Promise<ActionResult<{ id: string }>> {
   const parsed = WorkspaceInput.safeParse(raw)
   if (!parsed.success) return { ok: false, error: describeActionError(parsed.error) }
-  const input = parsed.data
   const { supabase, userId } = await requireUser()
 
   try {
-    const { data: maxRow } = await supabase
-      .from('project_workspaces').select('position')
-      .eq('user_id', userId).order('position', { ascending: false }).limit(1).maybeSingle()
-    const nextPos = ((maxRow?.position as number | undefined) ?? -1) + 1
-
-    const { data: ws, error } = await supabase
-      .from('project_workspaces')
-      .insert({
-        user_id: userId,
-        name: input.name,
-        description: input.description ?? null,
-        color: input.color ?? null,
-        position: nextPos,
-        is_default: false,
-      })
-      .select('id').single()
-    if (error) throw error
-    const workspaceId = ws.id as string
-
-    const rows = DEFAULT_PROJECT_STAGES.map((s) => ({ user_id: userId, workspace_id: workspaceId, ...s }))
-    const { error: stageErr } = await supabase.from('project_stages').insert(rows)
-    if (stageErr) throw stageErr
-
+    const workspaceId = await createWorkspaceFor(supabase, userId, parsed.data)
     bust(userId)
     return { ok: true, id: workspaceId }
   } catch (e) {

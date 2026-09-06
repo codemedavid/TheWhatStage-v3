@@ -88,7 +88,11 @@ const buckets = new Map<string, { count: number; resetAt: number }>()
  * limit (allowed) and `false` when it should be rejected with 429. Fails OPEN:
  * any internal error returns `true` so a limiter bug never hard-breaks uploads.
  */
-export function checkRateLimit(key: string, nowMs: number = Date.now()): boolean {
+export function checkRateLimit(
+  key: string,
+  nowMs: number = Date.now(),
+  limit: number = RATE_LIMIT,
+): boolean {
   try {
     const existing = buckets.get(key)
     if (!existing || existing.resetAt <= nowMs) {
@@ -101,7 +105,7 @@ export function checkRateLimit(key: string, nowMs: number = Date.now()): boolean
       }
       return true
     }
-    if (existing.count >= RATE_LIMIT) return false
+    if (existing.count >= limit) return false
     existing.count += 1
     return true
   } catch {
