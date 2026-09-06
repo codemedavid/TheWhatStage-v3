@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { ProjectStageInput } from '../_lib/schemas'
 import { projectStagesTag } from '../_lib/queries'
+import { createProjectStageFor } from '../_lib/mutations'
 
 async function requireUser() {
   const supabase = await createClient()
@@ -13,32 +14,8 @@ async function requireUser() {
 }
 
 export async function createProjectStage(workspaceId: string, raw: unknown): Promise<void> {
-  const input = ProjectStageInput.parse(raw)
   const { supabase, userId } = await requireUser()
-
-  // Reject a workspace the caller does not own before inserting into it.
-  const { data: ws } = await supabase
-    .from('project_workspaces').select('id')
-    .eq('id', workspaceId).eq('user_id', userId).maybeSingle()
-  if (!ws) throw new Error('Workspace not found')
-
-  const { data: maxRow } = await supabase
-    .from('project_stages').select('position')
-    .eq('user_id', userId).eq('workspace_id', workspaceId).order('position', { ascending: false })
-    .limit(1).maybeSingle()
-  const nextPos = (maxRow?.position ?? -1) + 1
-
-  const { error } = await supabase.from('project_stages').insert({
-    user_id: userId,
-    workspace_id: workspaceId,
-    name: input.name,
-    description: input.description ?? null,
-    kind: input.kind ?? 'open',
-    color: input.color ?? null,
-    position: nextPos,
-    is_default: false,
-  })
-  if (error) throw error
+  await createProjectStageFor(supabase, userId, workspaceId, raw)
   revalidateTag(projectStagesTag(userId), 'max')
   revalidatePath('/dashboard/projects', 'layout')
 }

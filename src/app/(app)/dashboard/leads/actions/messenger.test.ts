@@ -45,9 +45,11 @@ function makeSupabaseStub(opts: {
   return (table: string) => {
     if (table === 'messenger_threads') {
       return {
-        select: () => ({
-          eq: () => ({ maybeSingle: async () => ({ data: opts.thread, error: null }) }),
-        }),
+        select: () => {
+          // Lookup filters by lead_id AND user_id, so `eq` must chain.
+          const chain = { eq: () => chain, maybeSingle: async () => ({ data: opts.thread, error: null }) }
+          return chain
+        },
         update: (patch: Record<string, unknown>) => {
           opts.threadUpdateSpy?.(patch)
           return { eq: async () => ({ error: null }) }

@@ -9,6 +9,7 @@ const tabs = [
   { href: '/dashboard/settings/billing', label: 'Billing & Usage' },
   { href: '/dashboard/settings/facebook', label: 'Facebook' },
   { href: '/dashboard/settings/notifications', label: 'Notifications' },
+  { href: '/dashboard/settings/api-keys', label: 'API keys' },
 ]
 
 export function SettingsTabs() {
