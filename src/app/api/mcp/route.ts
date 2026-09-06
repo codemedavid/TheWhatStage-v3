@@ -1,6 +1,9 @@
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { parseBearer, resolveApiKey } from '@/lib/api-keys/resolve'
+import { parseBearer } from '@/lib/api-keys/resolve'
+import { resolveMcpPrincipal } from '@/lib/mcp/auth'
+import { publicOrigin, protectedResourceMetadataUrl } from '@/lib/oauth/origin'
+import { CORS_HEADERS, preflightResponse } from '@/lib/oauth/http'
 import { checkRateLimit } from '@/lib/action-pages/upload-guard'
 import { createWhatStageMcpServer } from '@/lib/mcp/server'
 
@@ -14,34 +17,41 @@ const REQUESTS_PER_MINUTE = 120
 function jsonRpcError(status: number, code: number, message: string, headers?: HeadersInit): Response {
   return new Response(
     JSON.stringify({ jsonrpc: '2.0', error: { code, message }, id: null }),
-    { status, headers: { 'content-type': 'application/json', ...headers } },
+    { status, headers: { 'content-type': 'application/json', ...CORS_HEADERS, ...headers } },
   )
 }
 
+// A 401 carries the RFC 9728 pointer so an MCP client can discover the OAuth
+// flow on its own: fetch the resource metadata, find the authorization server,
+// register, and send the operator to /oauth/authorize.
+function unauthorized(req: Request): Response {
+  const metadataUrl = protectedResourceMetadataUrl(publicOrigin(req))
+  return jsonRpcError(401, -32001, 'Sign in required. Connect this MCP server through OAuth or use an API key.', {
+    'www-authenticate': `Bearer realm="whatstage-mcp", resource_metadata="${metadataUrl}"`,
+  })
+}
+
 /**
- * Streamable HTTP MCP endpoint. Stateless: each POST authenticates the API
- * key, builds a server bound to that tenant, handles the one request, and
- * discards it. No sessions, so GET (SSE stream) and DELETE are not offered.
+ * Streamable HTTP MCP endpoint. Stateless: each POST authenticates the bearer
+ * (OAuth access token or API key), builds a server bound to that tenant,
+ * handles the one request, and discards it. No sessions, so GET (SSE stream)
+ * and DELETE are not offered.
  */
 export async function POST(req: Request): Promise<Response> {
   const admin = createAdminClient()
-  let key
+  let principal
   try {
-    key = await resolveApiKey(admin, parseBearer(req.headers.get('authorization')))
+    principal = await resolveMcpPrincipal(admin, parseBearer(req.headers.get('authorization')))
   } catch (e) {
-    console.error('[mcp] api key lookup failed', e)
-    return jsonRpcError(500, -32603, 'Could not verify API key.')
+    console.error('[mcp] bearer lookup failed', e)
+    return jsonRpcError(500, -32603, 'Could not verify credentials.')
   }
-  if (!key) {
-    return jsonRpcError(401, -32001, 'Invalid or missing API key.', {
-      'www-authenticate': 'Bearer realm="whatstage-mcp"',
-    })
-  }
-  if (!checkRateLimit(`mcp:${key.keyId}`, Date.now(), REQUESTS_PER_MINUTE)) {
+  if (!principal) return unauthorized(req)
+  if (!checkRateLimit(`mcp:${principal.principalId}`, Date.now(), REQUESTS_PER_MINUTE)) {
     return jsonRpcError(429, -32000, 'Rate limit exceeded. Try again in a minute.', { 'retry-after': '60' })
   }
 
-  const server = createWhatStageMcpServer({ admin, userId: key.userId, scopes: key.scopes })
+  const server = createWhatStageMcpServer({ admin, userId: principal.userId, scopes: principal.scopes })
   const transport = new WebStandardStreamableHTTPServerTransport({
     sessionIdGenerator: undefined,
     enableJsonResponse: true,
@@ -49,7 +59,7 @@ export async function POST(req: Request): Promise<Response> {
   try {
     await server.connect(transport)
     return await transport.handleRequest(req, {
-      authInfo: { token: 'redacted', clientId: key.keyId, scopes: key.scopes },
+      authInfo: { token: 'redacted', clientId: principal.principalId, scopes: principal.scopes },
     })
   } catch (e) {
     console.error('[mcp] request failed', e)
@@ -63,6 +73,10 @@ export async function POST(req: Request): Promise<Response> {
 
 export function GET(): Response {
   return jsonRpcError(405, -32000, 'This MCP endpoint is stateless; use POST.', { allow: 'POST' })
+}
+
+export function OPTIONS(): Response {
+  return preflightResponse()
 }
 
 export function DELETE(): Response {
