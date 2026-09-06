@@ -6,6 +6,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { signUpSchema, signInSchema } from '@/lib/auth/schemas'
 import { isAccountStatus, pathForBlockedStatus } from '@/lib/auth/account-status'
 import { getPostAuthRedirect } from '@/lib/onboarding/post-auth-redirect'
+import { safeNextPath } from '@/lib/oauth/safe-next'
 
 export type AuthFormState = {
   formError?: string
@@ -111,5 +112,7 @@ export async function signInAction(
     }
   }
 
-  redirect(await getPostAuthRedirect())
+  // A same-origin return path (e.g. an in-flight OAuth consent request) wins
+  // over the onboarding destination; anything else is ignored.
+  redirect(safeNextPath(formData.get('next')) ?? (await getPostAuthRedirect()))
 }

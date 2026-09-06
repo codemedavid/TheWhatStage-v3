@@ -2,6 +2,8 @@ import { redirect } from 'next/navigation'
 import { getSession } from '@/lib/auth/get-session'
 import { createClient } from '@/lib/supabase/server'
 import { ApiKeysPanel, type ApiKeyListItem } from './_components/api-keys-panel'
+import { ConnectedAppsPanel } from './_components/connected-apps-panel'
+import { groupGrantsByClient, type GrantRow } from './_lib/connected-apps'
 
 function mcpEndpointUrl(): string {
   const base = (process.env.NEXT_PUBLIC_APP_URL ?? '').replace(/\/+$/, '')
@@ -29,5 +31,20 @@ export default async function ApiKeysSettingsPage() {
     createdAt: k.created_at as string,
   }))
 
-  return <ApiKeysPanel keys={keys} endpointUrl={mcpEndpointUrl()} />
+  const { data: grants } = await supabase
+    .from('oauth_tokens')
+    .select('client_id, scopes, created_at, last_used_at, oauth_clients(client_name)')
+    .eq('user_id', session.userId)
+    .is('revoked_at', null)
+    .gt('refresh_expires_at', new Date().toISOString())
+    .order('created_at', { ascending: false })
+  const apps = groupGrantsByClient((grants ?? []) as GrantRow[])
+
+  return (
+    <ApiKeysPanel
+      keys={keys}
+      endpointUrl={mcpEndpointUrl()}
+      connectedApps={<ConnectedAppsPanel apps={apps} />}
+    />
+  )
 }

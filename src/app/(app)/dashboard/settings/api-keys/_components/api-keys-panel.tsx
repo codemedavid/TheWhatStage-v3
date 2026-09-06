@@ -16,6 +16,8 @@ export interface ApiKeyListItem {
 interface ApiKeysPanelProps {
   keys: ApiKeyListItem[]
   endpointUrl: string
+  /** Rendered between the endpoint card and the API-key cards. */
+  connectedApps?: React.ReactNode
 }
 
 const CARD = 'rounded-xl border border-[#E5E7EB] bg-white p-6 shadow-[0_1px_2px_rgba(16,24,40,0.04)]'
@@ -29,14 +31,13 @@ function formatDate(iso: string | null): string {
   return new Date(iso).toLocaleString()
 }
 
-function claudeDesktopSnippet(endpointUrl: string, key: string): string {
+function claudeDesktopSnippet(endpointUrl: string, key?: string): string {
   return JSON.stringify(
     {
       mcpServers: {
-        whatstage: {
-          url: endpointUrl,
-          headers: { Authorization: `Bearer ${key}` },
-        },
+        whatstage: key
+          ? { url: endpointUrl, headers: { Authorization: `Bearer ${key}` } }
+          : { url: endpointUrl },
       },
     },
     null,
@@ -44,11 +45,12 @@ function claudeDesktopSnippet(endpointUrl: string, key: string): string {
   )
 }
 
-function claudeCodeCommand(endpointUrl: string, key: string): string {
-  return `claude mcp add --transport http whatstage ${endpointUrl} --header "Authorization: Bearer ${key}"`
+function claudeCodeCommand(endpointUrl: string, key?: string): string {
+  const base = `claude mcp add --transport http whatstage ${endpointUrl}`
+  return key ? `${base} --header "Authorization: Bearer ${key}"` : base
 }
 
-export function ApiKeysPanel({ keys, endpointUrl }: ApiKeysPanelProps) {
+export function ApiKeysPanel({ keys, endpointUrl, connectedApps }: ApiKeysPanelProps) {
   const [name, setName] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [revealed, setRevealed] = useState<{ name: string; plaintext: string } | null>(null)
@@ -101,9 +103,32 @@ export function ApiKeysPanel({ keys, endpointUrl }: ApiKeysPanelProps) {
         </p>
         <dl className="mt-4 text-[13px]">
           <dt className="text-[12px] font-medium uppercase tracking-wide text-[#6B7280]">Endpoint</dt>
-          <dd className="mt-1 font-mono text-[#111827]">{endpointUrl}</dd>
+          <dd className="mt-1 flex items-center gap-2">
+            <code className="font-mono text-[#111827]">{endpointUrl}</code>
+            <button type="button" className={BUTTON_QUIET} onClick={() => copy(endpointUrl)}>
+              {copied ? 'Copied' : 'Copy'}
+            </button>
+          </dd>
         </dl>
+        <p className="mt-4 text-[13px] text-[#374151]">
+          Add the endpoint in your AI app (claude.ai &rarr; Settings &rarr; Connectors &rarr; Add custom connector, or
+          Claude Desktop / Cursor MCP settings). No key needed: the app opens a WhatStage sign-in page and you approve
+          the connection there.
+        </p>
+        <details className="mt-3 text-[13px] text-[#374151]">
+          <summary className="cursor-pointer font-medium">Setup snippets</summary>
+          <p className="mt-2 text-[12px] font-medium">Claude Desktop / Cursor config</p>
+          <pre className="mt-1 overflow-x-auto rounded-lg bg-[#F9FAFB] p-3 font-mono text-[11px] text-[#111827]">
+            {claudeDesktopSnippet(endpointUrl)}
+          </pre>
+          <p className="mt-3 text-[12px] font-medium">Claude Code</p>
+          <pre className="mt-1 overflow-x-auto rounded-lg bg-[#F9FAFB] p-3 font-mono text-[11px] text-[#111827]">
+            {claudeCodeCommand(endpointUrl)}
+          </pre>
+        </details>
       </div>
+
+      {connectedApps}
 
       {revealed ? (
         <div className="rounded-xl border border-[#A7F3D0] bg-[#ECFDF5] p-6">
@@ -137,7 +162,10 @@ export function ApiKeysPanel({ keys, endpointUrl }: ApiKeysPanelProps) {
       ) : null}
 
       <form onSubmit={handleCreate} className={CARD}>
-        <h3 className="text-[14px] font-semibold text-[#111827]">Create a key</h3>
+        <h3 className="text-[14px] font-semibold text-[#111827]">API keys (advanced)</h3>
+        <p className="mt-1 text-[13px] text-[#6B7280]">
+          For scripts and tools that cannot open a sign-in page. A key grants the same access as a connected app.
+        </p>
         <div className="mt-3 flex gap-2">
           <input
             type="text"

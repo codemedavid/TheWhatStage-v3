@@ -71,3 +71,23 @@ export async function revokeApiKey(rawId: unknown): Promise<VoidActionResult> {
     return { ok: false, error: describeActionError(e) }
   }
 }
+
+// Disconnect an OAuth-connected app: every live token it holds for this user
+// is revoked, so its next MCP call gets a 401 and it must re-run the login flow.
+export async function revokeConnectedApp(rawClientId: unknown): Promise<VoidActionResult> {
+  const parsed = z.string().min(1).max(200).safeParse(rawClientId)
+  if (!parsed.success) return { ok: false, error: 'Invalid app id.' }
+  const { supabase, userId } = await requireUser()
+  try {
+    const { error } = await supabase
+      .from('oauth_tokens')
+      .update({ revoked_at: new Date().toISOString() })
+      .eq('client_id', parsed.data).eq('user_id', userId).is('revoked_at', null)
+    if (error) throw error
+    revalidatePath(SETTINGS_PATH)
+    return { ok: true }
+  } catch (e) {
+    if (isRedirectError(e)) throw e
+    return { ok: false, error: describeActionError(e) }
+  }
+}
