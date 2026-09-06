@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import type { TemplateButton, TemplateCategory } from '@/lib/messenger-templates/types'
 import { renderTemplate } from '@/lib/messenger-templates/types'
 import type { VariableMap, VariableRule } from '@/lib/messenger-templates/render'
+import { MessageComposer } from '@/app/(app)/_components/MessageComposer'
 
 /* ── design tokens (matches the rest of the dashboard) ── */
 const S = {
@@ -597,7 +598,7 @@ export function AgentClient({ stages, templates, actionPages, categories, pendin
                       const idx = String(i + 1)
                       const rule: VariableRule = variableRules[idx] ?? { kind: 'static', text: '' }
                       return (
-                        <div key={idx} style={{ display:'flex', gap:6, alignItems:'center' }}>
+                        <div key={idx} style={{ display:'flex', gap:6, alignItems:'flex-start' }}>
                           <span style={{ fontFamily:S.mono, fontSize:12, color:S.ink3, width:36 }}>{`{{${idx}}}`}</span>
                           <select
                             value={rule.kind}
@@ -616,16 +617,18 @@ export function AgentClient({ stages, templates, actionPages, categories, pendin
                             <option value="lead_field">Lead field</option>
                           </select>
                           {rule.kind === 'static' ? (
-                            <input
-                              type="text"
-                              value={rule.text}
-                              onChange={(e) => setVariableRules({
-                                ...variableRules,
-                                [idx]: { kind: 'static', text: e.target.value },
-                              })}
-                              placeholder={`Value for {{${idx}}}`}
-                              style={{ flex:1, padding:'6px 10px', borderRadius:6, border:`1px solid ${S.border}`, fontSize:13, background:S.surface, color:S.ink }}
-                            />
+                            <div style={{ flex:1 }}>
+                              <MessageComposer
+                                value={rule.text}
+                                onChange={(text) => setVariableRules({
+                                  ...variableRules,
+                                  [idx]: { kind: 'static', text },
+                                })}
+                                placeholder={`Value for {{${idx}}}`}
+                                ariaLabel={`Value for variable ${idx}`}
+                                minHeight={36}
+                              />
+                            </div>
                           ) : (
                             <select
                               value={rule.field}
@@ -723,19 +726,16 @@ export function AgentClient({ stages, templates, actionPages, categories, pendin
         {/* ── Command Bar ── */}
         <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
           {sendMode === 'per_lead_ai' && (
-            <textarea
+            <MessageComposer
               value={command}
-              onChange={(e) => setCommand(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) startPreview() }}
+              onChange={setCommand}
+              onSubmit={startPreview}
+              toolbar={false}
               placeholder='e.g. "Follow up with all my Interested leads — remind them about our limited-time offer"'
-              rows={3}
-              style={{
-                width:'100%', padding:'12px 14px', borderRadius:12,
-                border:`1px solid ${S.border}`, fontFamily:'inherit', fontSize:14,
-                color:S.ink, background:S.surface, resize:'vertical', outline:'none',
-                lineHeight:1.5, boxSizing:'border-box',
-              }}
+              ariaLabel="What should the agent say?"
+              minHeight={78}
               disabled={phase === 'sending'}
+              textareaStyle={{ padding:'12px 14px', borderRadius:12, fontSize:14 }}
             />
           )}
           <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:12, flexWrap:'wrap' }}>
@@ -924,15 +924,15 @@ export function AgentClient({ stages, templates, actionPages, categories, pendin
                           {row.policy === 'paused:optin' && 'No marketing opt-in on file.'}
                         </span>
                       ) : (
-                        <textarea
+                        <MessageComposer
                           value={row.draft}
-                          onChange={(e) => editDraft(row.lead_id, e.target.value)}
-                          rows={2}
-                          style={{
-                            width:'100%', padding:'8px 10px', borderRadius:8,
-                            border:`1px solid ${S.border}`, fontFamily:'inherit',
-                            fontSize:13.5, color:S.ink2, background: row.user_included ? S.surface : S.surface2,
-                            resize:'vertical', outline:'none', lineHeight:1.5, boxSizing:'border-box',
+                          onChange={(text) => editDraft(row.lead_id, text)}
+                          ariaLabel={`Message to ${row.name ?? 'lead'}`}
+                          minHeight={56}
+                          textareaStyle={{
+                            padding:'8px 10px',
+                            color:S.ink2,
+                            background: row.user_included ? S.surface : S.surface2,
                           }}
                         />
                       )}

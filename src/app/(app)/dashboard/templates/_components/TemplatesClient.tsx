@@ -27,6 +27,7 @@ import { SelectionBulkBar } from './SelectionBulkBar'
 import { TemplateListRow } from './TemplateListRow'
 import { PermissionBanner } from './PermissionBanner'
 import { CategoryChips } from '../../_components/CategoryChips'
+import { MessageComposer } from '../../../_components/MessageComposer'
 import { useTemplatePolling } from '../_hooks/useTemplatePolling'
 
 type Template = MessengerMessageTemplateWithCategories
@@ -564,7 +565,14 @@ export function TemplatesClient({ initialTemplates, initialCategories, initialSt
                 <input type="text" value={draft.language} onChange={(e) => setDraft({ ...draft, language: e.target.value })} style={{ ...inputStyle, maxWidth: 160 }} placeholder="en_US" />
               </Field>
               <Field label={`Body (${variableCount} variable${variableCount === 1 ? '' : 's'})`} hint="Use {{1}}, {{2}}, … for placeholders that get filled in at send time.">
-                <textarea value={draft.body_text} onChange={(e) => setBody(e.target.value)} rows={5} style={{ ...inputStyle, fontFamily: 'inherit', resize: 'vertical' }} />
+                <MessageComposer
+                  value={draft.body_text}
+                  onChange={setBody}
+                  ariaLabel="Template body"
+                  minHeight={110}
+                  maxLength={1024}
+                  hint="*bold* _italic_ ~strike~ `code` — Messenger renders these."
+                />
               </Field>
 
               {variableCount > 0 && (
