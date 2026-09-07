@@ -74,3 +74,30 @@ describe('extractMediaRefs', () => {
     })
   })
 })
+
+describe('buildMediaRagText kind labels', () => {
+  const base = {
+    folderName: 'Voice',
+    folderSlug: 'voice',
+    folderDescription: null,
+    assetName: 'Warm intro',
+    assetSlug: 'warm-intro',
+    assetDescription: 'Friendly hello for new inquiries.',
+  }
+
+  it('labels audio assets as voice messages', () => {
+    const text = buildMediaRagText({ ...base, mimeType: 'audio/mpeg' })
+    expect(text).toContain('Voice message slug: @warm-intro')
+    expect(text).toContain('Voice message description: Friendly hello for new inquiries.')
+    expect(text).not.toContain('Image slug')
+  })
+
+  it('labels video assets as videos', () => {
+    const text = buildMediaRagText({ ...base, mimeType: 'video/mp4' })
+    expect(text).toContain('Video slug: @warm-intro')
+  })
+
+  it('defaults to image wording when no mime is given', () => {
+    expect(buildMediaRagText(base)).toContain('Image slug: @warm-intro')
+  })
+})
