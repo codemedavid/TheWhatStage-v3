@@ -1,3 +1,5 @@
+import { mediaKindFromMime, mediaKindLabel } from './kind'
+
 export interface BuildMediaRagTextInput {
   folderName: string
   folderSlug: string
@@ -5,6 +7,8 @@ export interface BuildMediaRagTextInput {
   assetName: string
   assetSlug: string
   assetDescription: string | null
+  /** Drives the kind label; defaults to image wording when absent. */
+  mimeType?: string | null
 }
 
 export interface MediaRefs {
@@ -16,7 +20,14 @@ function uniquePush(values: string[], value: string) {
   if (!values.includes(value)) values.push(value)
 }
 
+function ragKindLabel(mimeType: string | null | undefined): string {
+  const kind = mediaKindFromMime(mimeType) ?? 'image'
+  const label = mediaKindLabel(kind)
+  return label.charAt(0).toUpperCase() + label.slice(1)
+}
+
 export function buildMediaRagText(input: BuildMediaRagTextInput): string {
+  const label = ragKindLabel(input.mimeType)
   return [
     `# ${input.assetName.trim() || input.assetSlug}`,
     '',
@@ -24,8 +35,8 @@ export function buildMediaRagText(input: BuildMediaRagTextInput): string {
     `Folder slug: #${input.folderSlug}`,
     `Folder description: ${(input.folderDescription ?? '').trim() || '(none)'}`,
     '',
-    `Image slug: @${input.assetSlug}`,
-    `Image description: ${(input.assetDescription ?? '').trim() || '(none)'}`,
+    `${label} slug: @${input.assetSlug}`,
+    `${label} description: ${(input.assetDescription ?? '').trim() || '(none)'}`,
   ].join('\n')
 }
 
