@@ -17,6 +17,9 @@ vi.mock('@/lib/supabase/admin', () => ({
   createAdminClient: vi.fn(() => ({})),
 }))
 
+const { loadAssetsMock, sendMediaMock } = vi.hoisted(() => ({ loadAssetsMock: vi.fn(), sendMediaMock: vi.fn() }))
+vi.mock('@/lib/media/send', () => ({ loadSendableAssets: loadAssetsMock, sendMediaAssets: sendMediaMock }))
+
 import { handleSendForTest } from './executor'
 import type { SendNodeConfig } from './types'
 
@@ -151,5 +154,52 @@ describe('executor handleSend — utility_template', () => {
     })
     expect(result.edge).toBe('policy_blocked')
     expect(result.payload.reason).toBe('template_not_found')
+  })
+})
+
+describe('executor handleSend — media', () => {
+  beforeEach(() => {
+    loadAssetsMock.mockReset()
+    sendMediaMock.mockReset()
+  })
+
+  it('sends a library asset through the shared media path and follows success', async () => {
+    const asset = { id: 'a1', name: 'Voice', slug: 'voice', storagePath: 'p', mimeType: 'audio/mpeg' }
+    loadAssetsMock.mockResolvedValue([asset])
+    sendMediaMock.mockResolvedValue({ sent: [{ assetId: 'a1', messageId: 'mid_9' }], skipped: [] })
+    const ctx = { ...baseCtx, thread: { ...baseCtx.thread, user_id: 'u1' } }
+    const result = await handleSendForTest(makeAdmin(null), ctx as never, {
+      id: 'n1',
+      type: 'send',
+      config: { payload: { kind: 'media', media_asset_id: 'a1' } } satisfies SendNodeConfig as never,
+    })
+    expect(result.edge).toBe('success')
+    expect(result.payload).toEqual({ messageId: 'mid_9' })
+    expect(sendMediaMock).toHaveBeenCalledWith(expect.objectContaining({ assets: [asset], kind: 'workflow_human_agent' }))
+  })
+
+  it('follows policy_blocked when the media send is blocked', async () => {
+    loadAssetsMock.mockResolvedValue([{ id: 'a1', name: 'V', slug: 'v', storagePath: 'p', mimeType: 'video/mp4' }])
+    sendMediaMock.mockResolvedValue({ sent: [], skipped: [{ assetId: 'a1', reason: 'send_blocked:window' }] })
+    const ctx = { ...baseCtx, thread: { ...baseCtx.thread, user_id: 'u1' } }
+    const result = await handleSendForTest(makeAdmin(null), ctx as never, {
+      id: 'n1',
+      type: 'send',
+      config: { payload: { kind: 'media', media_asset_id: 'a1' } } as never,
+    })
+    expect(result.edge).toBe('policy_blocked')
+    expect(result.payload).toEqual({ reason: 'send_blocked:window' })
+  })
+
+  it('errors when the asset is missing or archived', async () => {
+    loadAssetsMock.mockResolvedValue([])
+    const ctx = { ...baseCtx, thread: { ...baseCtx.thread, user_id: 'u1' } }
+    const result = await handleSendForTest(makeAdmin(null), ctx as never, {
+      id: 'n1',
+      type: 'send',
+      config: { payload: { kind: 'media', media_asset_id: 'gone' } } as never,
+    })
+    expect(result.edge).toBe('error')
+    expect(result.error).toMatch(/media asset/i)
   })
 })
