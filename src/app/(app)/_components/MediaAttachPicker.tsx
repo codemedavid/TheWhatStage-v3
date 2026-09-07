@@ -10,16 +10,21 @@ interface KnownAsset {
   mime_type: string
 }
 
-// Compact "attach media" row for a sequence step: shows the picked library
-// items as chips and opens the shared picker (all kinds) to change them.
-export function StepMediaPicker({
+// Compact "attach media" row used by sequence steps and agent campaigns:
+// shows the picked library items as chips and opens the shared picker (all
+// kinds) to change them.
+export function MediaAttachPicker({
   value,
   max,
   onChange,
+  label = '+ Attach image, video or voice message',
+  disabled = false,
 }: {
   value: string[]
   max: number
   onChange: (ids: string[]) => void
+  label?: string
+  disabled?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const [known, setKnown] = useState<Map<string, KnownAsset>>(new Map())
@@ -40,7 +45,7 @@ export function StepMediaPicker({
         })
       })
       .catch((e: unknown) => {
-        if ((e as { name?: string }).name !== 'AbortError') console.warn('[StepMediaPicker] hydrate failed', e)
+        if ((e as { name?: string }).name !== 'AbortError') console.warn('[MediaAttachPicker] hydrate failed', e)
       })
     return () => ctrl.abort()
   }, [unknownKey])
@@ -63,7 +68,7 @@ export function StepMediaPicker({
           <span
             key={id}
             className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11.5px]"
-            style={{ borderColor: 'var(--lead-line)', color: 'var(--lead-ink)' }}
+            style={{ borderColor: 'currentColor', opacity: 0.9 }}
             title={a?.name ?? id}
           >
             <span aria-hidden>{kind === 'audio' ? '🎙' : kind === 'video' ? '▶' : '🖼'}</span>
@@ -72,6 +77,7 @@ export function StepMediaPicker({
               type="button"
               aria-label={`Remove ${a?.name ?? 'attachment'}`}
               onClick={() => onChange(value.filter((v) => v !== id))}
+              disabled={disabled}
               className="ml-0.5 opacity-60 hover:opacity-100"
             >
               ×
@@ -83,10 +89,11 @@ export function StepMediaPicker({
         <button
           type="button"
           onClick={() => setOpen(true)}
-          className="rounded-full border border-dashed px-2.5 py-0.5 text-[11.5px]"
-          style={{ borderColor: 'var(--lead-line)', color: 'var(--lead-ink-3, var(--lead-ink))' }}
+          disabled={disabled}
+          className="rounded-full border border-dashed px-2.5 py-0.5 text-[11.5px] opacity-80 hover:opacity-100 disabled:opacity-40"
+          style={{ borderColor: 'currentColor' }}
         >
-          + Attach image, video or voice message
+          {label}
         </button>
       )}
       <MediaPickerModal

@@ -6,6 +6,7 @@ import type { TemplateButton, TemplateCategory } from '@/lib/messenger-templates
 import { renderTemplate } from '@/lib/messenger-templates/types'
 import type { VariableMap, VariableRule } from '@/lib/messenger-templates/render'
 import { MessageComposer } from '@/app/(app)/_components/MessageComposer'
+import { MediaAttachPicker } from '@/app/(app)/_components/MediaAttachPicker'
 
 /* ── design tokens (matches the rest of the dashboard) ── */
 const S = {
@@ -165,6 +166,7 @@ export function AgentClient({ stages, templates, actionPages, categories, pendin
   const [stageName, setStageName] = useState<string>('')
   const [lastActiveDays, setLastActiveDays] = useState<string>('')
   const [actionPageId, setActionPageId] = useState<string>('')
+  const [mediaAssetIds, setMediaAssetIds] = useState<string[]>([])
 
   const [filterCategoryIds, setFilterCategoryIds] = useState<string[]>([])
   const filteredTemplates = useMemo(() => {
@@ -273,6 +275,7 @@ export function AgentClient({ stages, templates, actionPages, categories, pendin
             templateId,
             templateVariables: variableRules,
             attachedActionPageId: actionPageId || null,
+            mediaAssetIds,
             stageName: stageName.trim() || null,
             lastActiveWithinDays: lastActiveDays ? Number(lastActiveDays) : null,
             // command_text is still persisted on the campaign row for history;
@@ -281,7 +284,7 @@ export function AgentClient({ stages, templates, actionPages, categories, pendin
               ? `[Template] ${selectedTemplate.display_name}`
               : '[Template]',
           }
-        : { command }
+        : { command, mediaAssetIds }
 
     fetch('/api/agent/preview', {
       method: 'POST',
@@ -738,6 +741,19 @@ export function AgentClient({ stages, templates, actionPages, categories, pendin
               textareaStyle={{ padding:'12px 14px', borderRadius:12, fontSize:14 }}
             />
           )}
+          <div style={{ color:S.ink3, fontSize:12 }}>
+            <MediaAttachPicker
+              value={mediaAssetIds}
+              max={3}
+              onChange={setMediaAssetIds}
+              disabled={phase === 'sending'}
+            />
+            {mediaAssetIds.length > 0 && (
+              <div style={{ marginTop:6, color:S.ink4 }}>
+                Sent right after the text to leads who messaged in the last 24 hours; older threads get the text only.
+              </div>
+            )}
+          </div>
           <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:12, flexWrap:'wrap' }}>
             <span style={{ fontSize:12, color:S.ink4 }}>
               {sendMode === 'per_lead_ai' ? 'Cmd+Enter to preview · ' : ''}Up to 200 leads

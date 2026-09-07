@@ -17,7 +17,7 @@ import {
 import { CSS } from '@dnd-kit/utilities'
 import { DELAY_PRESETS, humanizeDelay } from '../_lib/sequence-format'
 import { MAX_SEQUENCE_STEPS, MAX_STEP_MEDIA } from '../_lib/schemas'
-import { StepMediaPicker } from './StepMediaPicker.client'
+import { MediaAttachPicker } from '@/app/(app)/_components/MediaAttachPicker'
 
 // crypto.randomUUID is secure-context only (undefined on plain-HTTP LAN/dev
 // origins). Mirror the guarded pattern used elsewhere in the app so the editor
@@ -278,7 +278,7 @@ function SortableStep({
         className="mt-1.5 w-full rounded-md border px-2.5 py-1.5 text-[13px]"
         style={inputBase}
       />
-      <StepMediaPicker
+      <MediaAttachPicker
         value={step.media_asset_ids}
         max={MAX_STEP_MEDIA}
         onChange={(ids) => onUpdate(step.uid, { media_asset_ids: ids })}

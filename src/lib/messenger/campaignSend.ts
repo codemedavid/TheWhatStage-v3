@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { sendCampaignMedia } from './campaignMedia'
 import { sendOutbound, type OutboundPayload } from './outbound'
 import { isInsideWindow } from '@/lib/agent/classifyPolicy'
 import {
@@ -33,6 +34,7 @@ interface CampaignMessage {
 interface CampaignRow {
   id: string
   status: string
+  media_asset_ids: string[] | null
   user_id: string
   send_mode: 'per_lead_ai' | 'shared_template'
   template_id: string | null
@@ -86,7 +88,7 @@ export async function handleCampaignSend(
   // Load parent campaign to check for cancellation.
   const { data: campaign } = await admin
     .from('agent_campaigns')
-    .select('id, status, user_id, send_mode, template_id, template_variables, attached_action_page_id, attached_button_index')
+    .select('id, status, user_id, send_mode, template_id, template_variables, attached_action_page_id, attached_button_index, media_asset_ids')
     .eq('id', msg.campaign_id)
     .maybeSingle<CampaignRow>()
 
@@ -239,6 +241,14 @@ export async function handleCampaignSend(
     if (error && (error as { code?: string }).code !== '23505') {
       console.warn('[campaignSend] message insert failed', error.message)
     }
+  })
+
+  // Library media (image / video / voice) rides right behind the text.
+  await sendCampaignMedia(admin, {
+    campaign: { id: campaign.id, user_id: campaign.user_id, media_asset_ids: campaign.media_asset_ids },
+    thread: { id: thread.id, psid: thread.psid, last_inbound_at: thread.last_inbound_at },
+    pageToken,
+    insideWindow,
   })
 
   // Check if campaign is complete.

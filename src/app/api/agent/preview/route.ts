@@ -44,6 +44,15 @@ function createLimiter(concurrency: number) {
   }
 }
 
+const MAX_CAMPAIGN_MEDIA = 3
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+function parseMediaAssetIds(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return []
+  const ids = raw.filter((v): v is string => typeof v === 'string' && UUID_RE.test(v))
+  return Array.from(new Set(ids)).slice(0, MAX_CAMPAIGN_MEDIA)
+}
+
 export async function POST(req: NextRequest) {
   const supabase = await createClient()
   const claims = await supabase.auth.getClaims()
@@ -62,6 +71,7 @@ export async function POST(req: NextRequest) {
   let command = ''
   let imageMediaAssetId: string | null = null
   let imageUrl: string | null = null
+  let mediaAssetIds: string[] = []
   let mode: 'per_lead_ai' | 'shared_template' = 'per_lead_ai'
   let templateId: string | null = null
   let templateVariables: VariableMap = {}
@@ -74,6 +84,7 @@ export async function POST(req: NextRequest) {
     command = typeof body.command === 'string' ? body.command.trim() : ''
     imageMediaAssetId = typeof body.imageMediaAssetId === 'string' ? body.imageMediaAssetId : null
     imageUrl = typeof body.imageUrl === 'string' ? body.imageUrl : null
+    mediaAssetIds = parseMediaAssetIds(body.mediaAssetIds)
     if (body.mode === 'shared_template') mode = 'shared_template'
     if (typeof body.templateId === 'string') templateId = body.templateId
     if (body.templateVariables && typeof body.templateVariables === 'object') {
@@ -105,6 +116,22 @@ export async function POST(req: NextRequest) {
   }
 
   const admin = createAdminClient()
+
+  if (mediaAssetIds.length > 0) {
+    const { data: owned } = await admin
+      .from('media_assets')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('is_archived', false)
+      .in('id', mediaAssetIds)
+    if ((owned?.length ?? 0) !== mediaAssetIds.length) {
+      return new Response(JSON.stringify({ error: 'invalid_attachment_reference' }), {
+        status: 400,
+        headers: { 'content-type': 'application/json' },
+      })
+    }
+  }
+
   const enc = new TextEncoder()
 
   const stream = new ReadableStream<Uint8Array>({
@@ -175,6 +202,7 @@ export async function POST(req: NextRequest) {
             intent,
             image_media_asset_id: imageMediaAssetId,
             image_url: imageUrl,
+            media_asset_ids: mediaAssetIds,
             status: 'previewing',
             total: audience.length,
             send_mode: mode,
