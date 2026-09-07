@@ -1,12 +1,23 @@
 'use client'
 
 import { useRef, useState } from 'react'
+import { mediaKindFromMime } from '@/lib/media/kind'
 
 type MediaThumb = {
   id: string
   name: string
   slug: string
   signedUrl: string | null
+  mimeType: string | null
+}
+
+function MediaThumbPreview({ thumb }: { thumb: MediaThumb }) {
+  if (!thumb.signedUrl) return <span className="cb-msg-media-fallback">{thumb.name}</span>
+  const kind = mediaKindFromMime(thumb.mimeType)
+  if (kind === 'video') return <video src={thumb.signedUrl} controls preload="metadata" />
+  if (kind === 'audio') return <audio src={thumb.signedUrl} controls preload="metadata" />
+  // eslint-disable-next-line @next/next/no-img-element
+  return <img src={thumb.signedUrl} alt={thumb.name} loading="lazy" />
 }
 
 type Msg = {
@@ -124,6 +135,7 @@ export function TestChat({ name = 'Assistant' }: { name?: string }) {
                     name: string
                     slug: string
                     signedUrl?: string | null
+                    mimeType?: string | null
                   }>
                 }
               | { type: 'done' }
@@ -144,6 +156,7 @@ export function TestChat({ name = 'Assistant' }: { name?: string }) {
                 name: mItem.name,
                 slug: mItem.slug,
                 signedUrl: mItem.signedUrl ?? null,
+                mimeType: mItem.mimeType ?? null,
               }))
               setMessages((m) => {
                 const copy = [...m]
@@ -254,12 +267,7 @@ export function TestChat({ name = 'Assistant' }: { name?: string }) {
                     <div className="cb-msg-media">
                       {m.media.map((thumb) => (
                         <div key={thumb.id} className="cb-msg-media-thumb" title={thumb.name}>
-                          {thumb.signedUrl ? (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img src={thumb.signedUrl} alt={thumb.name} loading="lazy" />
-                          ) : (
-                            <span className="cb-msg-media-fallback">{thumb.name}</span>
-                          )}
+                          <MediaThumbPreview thumb={thumb} />
                         </div>
                       ))}
                     </div>

@@ -870,17 +870,18 @@ export function stageInstructionParts(
   const schema = `{${schemaParts.join(', ')}}`
 
   const attachImagesBlock =
-    'ATTACH IMAGES — decide whether to send photos this turn:\n' +
+    'ATTACH IMAGES / MEDIA — decide whether to send photos, a short video, or a voice message this turn:\n' +
     '- Default `attach_images` to `false`. The vast majority of replies are text only.\n' +
     '- Set `attach_images` to `true` ONLY when ONE of these is clearly true:\n' +
     '    (a) The customer explicitly asked to see something — "show me", "send a photo/pic", "may photos po ba", "pakita", "ipakita mo yung sample", "patingin", "can I see the menu/QR/portfolio", or any equivalent in any language.\n' +
     '    (b) The customer\'s latest message is about a specific item / product / payment QR / portfolio piece whose photo would DIRECTLY answer the question (e.g. they asked about a specific product variant and the knowledge has its image; they asked how to pay via GCash and the knowledge has the QR).\n' +
     '    (c) You are also setting `action_page` to a sales or product page AND the hero image is a natural part of the pitch.\n' +
+    '    (d) A listed [voice message] or [video] candidate directly fits this moment — a voice message for a warm first hello, reassurance, or a personal close; a video when the customer asks how something works, wants proof, or asks for a demo/walkthrough.\n' +
     '- Set `attach_images` to `false` for: greetings, qualifying questions (asking back about the customer\'s business / needs / timeline / budget), generic pricing chit-chat without a specific item picked, objection handling, scheduling, off-topic, anything where adding a photo would feel random or unrelated.\n' +
     '- Quality test: ask yourself "would a thoughtful human salesperson reach for their phone to send a photo RIGHT NOW based on this message?". If the answer is no or "maybe later", set `false`.\n' +
     '- When in doubt → `false`. A skipped image is far less damaging than an irrelevant brand/logo/product photo arriving out of context.\n' +
-    '- This flag gates ALL image sends this turn — gallery shots, product covers, payment QRs, brand/logo assets, sales-page hero. The system still picks WHICH images go out; you only decide WHETHER any go out at all.\n' +
-    '- If a "# Attached images" section appears in the system prompt, treat those as CANDIDATES only — they are sent only when you set `attach_images: true`. If you set `attach_images: false`, do NOT mention or hint at images in `reply` (no "here are some screenshots", no "see below"). If you set `true`, briefly acknowledge them.'
+    '- This flag gates ALL media sends this turn — gallery shots, product covers, payment QRs, brand/logo assets, sales-page hero, videos, voice messages. The system still picks WHICH items go out; you only decide WHETHER any go out at all.\n' +
+    '- If a "# Attached media" section appears in the system prompt, treat those as CANDIDATES only — they are sent only when you set `attach_images: true`. If you set `attach_images: false`, do NOT mention or hint at media in `reply` (no "here are some screenshots", no "sending a voice message", no "see below"). If you set `true`, briefly acknowledge them.'
   // Split the action-page block into a stable prose preamble (placed BEFORE
   // the volatile stageList/actionPageList) and a volatile list (placed at the
   // very end). The preamble text is byte-identical across every turn, so

@@ -42,6 +42,7 @@ const mocks = vi.hoisted(() => ({
   sendMessengerSenderAction: vi.fn(async () => undefined),
   sendMessengerText: vi.fn(async () => ({ message_id: 'mid.text.1' })),
   sendMessengerImage: vi.fn(async () => ({ message_id: 'mid.img.1' })),
+  sendMessengerAttachment: vi.fn(async (_args: { attachmentType: string; url: string }) => ({ message_id: 'mid.att.1' })),
   deeplinkActionPageUrl: vi.fn(() => 'https://app.test/a/current?p=signed'),
   sendPropertyRecommendation: vi.fn(async () => ({
     sent: true,
@@ -80,6 +81,7 @@ vi.mock('@/lib/facebook/messenger', () => ({
   sendMessengerSenderAction: mocks.sendMessengerSenderAction,
   sendMessengerText: mocks.sendMessengerText,
   sendMessengerImage: mocks.sendMessengerImage,
+  sendMessengerAttachment: mocks.sendMessengerAttachment,
 }))
 
 vi.mock('@/lib/action-pages/urls', () => ({
@@ -1127,7 +1129,8 @@ describe('POST /api/messenger/process', () => {
       const res = await POST(makeWorkerRequest() as Parameters<typeof POST>[0])
       expect(res.status).toBe(200)
       // Full-size images, one bubble each (user-chosen delivery) — never a carousel.
-      expect(mocks.sendMessengerImage).toHaveBeenCalledTimes(2)
+      expect(mocks.sendMessengerAttachment).toHaveBeenCalledTimes(2)
+      expect(mocks.sendMessengerAttachment.mock.calls[0][0]).toMatchObject({ attachmentType: 'image' })
       expect(mocks.sendMessengerGenericTemplate).not.toHaveBeenCalled()
       // Cross-turn dedup keys persisted so later unrelated turns won't re-send.
       const threadUpdates = (updates['messenger_threads'] ?? []) as Array<{ attached_item_keys?: unknown }>
@@ -1135,6 +1138,36 @@ describe('POST /api/messenger/process', () => {
       expect(keyUpdate?.attached_item_keys).toEqual(
         expect.arrayContaining(['media:m1', 'media:m2']),
       )
+    })
+
+    it('attach_images:true with voice + video → sends by attachment type but only ONE voice/video per turn', async () => {
+      const { admin } = makeWorkerAdminMock()
+      mocks.admin = admin
+      mocks.answerWithClassification.mockResolvedValueOnce({
+        text: 'Sinend ko po quick voice message:',
+        sourceTitles: [],
+        stageChange: null,
+        actionPage: null,
+        productRecommendation: null,
+        propertyRecommendation: null,
+        media: [
+          { ...mediaAsset('voice'), mimeType: 'audio/mpeg', storagePath: 'voice/hello.mp3' },
+          mediaAsset('m1'),
+          { ...mediaAsset('vid'), mimeType: 'video/mp4', storagePath: 'vid/demo.mp4' },
+        ],
+        attachImages: true,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } as any)
+
+      const res = await POST(makeWorkerRequest() as Parameters<typeof POST>[0])
+      expect(res.status).toBe(200)
+      const types = mocks.sendMessengerAttachment.mock.calls.map((c) => c[0].attachmentType)
+      expect(types).toEqual(['audio', 'image'])
+      const inserted = (admin as unknown as { inserts?: Record<string, unknown[]> }).inserts
+      if (inserted) {
+        const rows = (inserted['messenger_messages'] ?? []) as Array<{ body?: string }>
+        expect(rows.some((r) => r.body === '[audio] Proof voice')).toBe(true)
+      }
     })
 
     it('attach_images:false → never sends media even if candidates leaked through', async () => {
@@ -1156,7 +1189,7 @@ describe('POST /api/messenger/process', () => {
 
       const res = await POST(makeWorkerRequest() as Parameters<typeof POST>[0])
       expect(res.status).toBe(200)
-      expect(mocks.sendMessengerImage).not.toHaveBeenCalled()
+      expect(mocks.sendMessengerAttachment).not.toHaveBeenCalled()
     })
   })
 
