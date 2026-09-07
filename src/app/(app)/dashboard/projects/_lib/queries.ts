@@ -272,6 +272,7 @@ export type StageSequenceStep = {
   channel: 'messenger'
   /** When false, the step is kept but skipped by firing/seeding/preview. */
   enabled: boolean
+  media_asset_ids: string[]
 }
 
 export type StageSequence = {
@@ -297,7 +298,7 @@ export async function fetchStageSequence(
 
   const { data: steps, error: stepErr } = await supabase
     .from('project_stage_sequence_steps')
-    .select('id, position, delay_minutes, instruction, manual_message, fallback_message, channel, enabled')
+    .select('id, position, delay_minutes, instruction, manual_message, fallback_message, channel, enabled, media_asset_ids')
     .eq('sequence_id', seq.id).order('position', { ascending: true })
   if (stepErr) throw stepErr
 

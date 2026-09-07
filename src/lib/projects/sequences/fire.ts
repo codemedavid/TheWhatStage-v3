@@ -19,7 +19,9 @@ import {
   retrieveKnowledge,
   type BatchDraft,
 } from '@/lib/sequences/shared'
-import type { SequenceSendContext } from '@/lib/sequences/shared'
+import type { SequenceSendContext, SequenceThread } from '@/lib/sequences/shared'
+import { loadSendableAssets, sendMediaAssets } from '@/lib/media/send'
+import { isInsideWindow } from '@/lib/agent/classifyPolicy'
 import { manualOverride, aiDraftSteps } from '@/lib/sequences/manual'
 
 // Last-resort line when a step has no fallback_message and the LLM draft is
@@ -71,6 +73,7 @@ interface StepRow {
   instruction: string
   manual_message: string | null
   fallback_message: string | null
+  media_asset_ids?: string[] | null
   // Absent on legacy/mocked rows; treated as enabled. A false value means the
   // operator turned this touch off — it is skipped (never sent, never shifts the
   // remaining steps' timing).
@@ -137,7 +140,7 @@ export async function handleProjectSequenceRun(
 
   const { data: steps } = await admin
     .from('project_stage_sequence_steps')
-    .select('position, delay_minutes, instruction, manual_message, fallback_message, enabled')
+    .select('position, delay_minutes, instruction, manual_message, fallback_message, enabled, media_asset_ids')
     .eq('sequence_id', run.sequence_id)
     .order('position', { ascending: true })
   // Drop disabled steps and re-index the survivors to a contiguous 0..M-1 range.
@@ -207,8 +210,39 @@ export async function handleProjectSequenceRun(
   })
   if (!sent.sent) { await markFailed(admin, run.id, `send_blocked:${sent.reason}`); return { outcome: 'failed', reason: `send_blocked:${sent.reason}` } }
 
+  await sendStepMedia(admin, { run, step, thread: ctx.thread, pageToken: ctx.pageToken })
+
   await advanceRun(admin, run, stepRows)
   return { outcome: 'sent' }
+}
+
+// Library media attached to the step goes out right after the text, inside
+// the 24h window only — attachments can't ride the HUMAN_AGENT tag the text
+// falls back to, and a media-only failure never fails the step.
+async function sendStepMedia(
+  admin: SupabaseClient,
+  args: { run: { id: string; user_id: string }; step: { media_asset_ids?: string[] | null }; thread: SequenceThread; pageToken: string },
+): Promise<void> {
+  const ids = args.step.media_asset_ids ?? []
+  if (ids.length === 0) return
+  if (!isInsideWindow(args.thread.last_inbound_at)) {
+    console.warn('[projects.sequence] step media skipped — outside 24h window', { runId: args.run.id, count: ids.length })
+    return
+  }
+  try {
+    const assets = await loadSendableAssets(admin, args.run.user_id, ids)
+    await sendMediaAssets({
+      admin,
+      thread: { id: args.thread.id, psid: args.thread.psid, last_inbound_at: args.thread.last_inbound_at, user_id: args.run.user_id },
+      pageToken: args.pageToken,
+      assets,
+      kind: 'bot',
+      sender: 'bot',
+      logTag: 'projects.sequence',
+    })
+  } catch (e) {
+    console.warn('[projects.sequence] step media failed', { runId: args.run.id, err: e instanceof Error ? e.message : String(e) })
+  }
 }
 
 // Build the knowledge-retrieval query for the whole sequence: every step goal

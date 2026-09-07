@@ -387,7 +387,7 @@ describe('handleFollowupSend — attachments', () => {
     expect(mintDeeplinkMock).not.toHaveBeenCalled()
     expect(warn).toHaveBeenCalledWith(
       '[followups.fire] attachments skipped — outside 24h window',
-      expect.objectContaining({ dropped_image_count: 1, dropped_action_page: true }),
+      expect.objectContaining({ dropped_media_count: 1, dropped_action_page: true }),
     )
     warn.mockRestore()
   })
@@ -501,7 +501,7 @@ describe('handleFollowupSend — multi-image attachments', () => {
 
   it('sends text → 3 images → button in pick order when policy is RESPONSE', async () => {
     mintAssetMock.mockImplementation(async (_admin: unknown, id: string) =>
-      `https://signed/${id}.jpg`,
+      ({ url: `https://signed/${id}.jpg`, mimeType: 'image/jpeg', name: id }),
     )
     const seed = multiSeed({
       ids: [
@@ -546,7 +546,7 @@ describe('handleFollowupSend — multi-image attachments', () => {
 
   it('skips image #2 silently when mintMediaAssetUrl returns null for it', async () => {
     mintAssetMock.mockImplementation(async (_admin: unknown, id: string) =>
-      id === '22222222-2222-4222-9222-222222222222' ? null : `https://signed/${id}.jpg`,
+      id === '22222222-2222-4222-9222-222222222222' ? null : { url: `https://signed/${id}.jpg`, mimeType: 'image/jpeg', name: id },
     )
     const seed = multiSeed({
       ids: [

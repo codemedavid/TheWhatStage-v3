@@ -4,6 +4,33 @@ import { deeplinkActionPageUrl } from '@/lib/action-pages/urls'
 const SIGNED_URL_TTL_SECONDS = 60 * 60          // 1 hour
 const DEEPLINK_TTL_SECONDS = 30 * 24 * 60 * 60  // 30 days
 
+export interface MintedMediaAsset {
+  url: string
+  mimeType: string
+  name: string
+}
+
+/** Signed URL plus the mime (drives the Messenger attachment type) and name. */
+export async function mintMediaAsset(
+  admin: SupabaseClient,
+  assetId: string,
+  userId: string,
+): Promise<MintedMediaAsset | null> {
+  const { data: asset } = await admin
+    .from('media_assets')
+    .select('storage_path, is_archived, mime_type, name')
+    .eq('id', assetId)
+    .eq('user_id', userId)
+    .maybeSingle<{ storage_path: string; is_archived: boolean; mime_type: string; name: string }>()
+  if (!asset || asset.is_archived) return null
+
+  const { data: signed, error } = await admin.storage
+    .from('media-assets')
+    .createSignedUrl(asset.storage_path, SIGNED_URL_TTL_SECONDS)
+  if (error || !signed?.signedUrl) return null
+  return { url: signed.signedUrl, mimeType: asset.mime_type, name: asset.name }
+}
+
 export async function mintMediaAssetUrl(
   admin: SupabaseClient,
   assetId: string,

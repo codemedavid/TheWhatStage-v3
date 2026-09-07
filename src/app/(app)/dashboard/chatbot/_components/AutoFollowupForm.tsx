@@ -6,13 +6,30 @@ import {
   type FollowupSettings,
 } from '@/lib/followups/settings'
 import { MediaPickerModal } from './MediaPickerModal'
+import { mediaKindFromMime } from '@/lib/media/kind'
+
+function AttachmentThumb({ att }: { att: { thumbUrl: string | null; name: string | null; mimeType: string | null } }) {
+  const kind = mediaKindFromMime(att.mimeType)
+  if (kind === 'video') {
+    return <span className="afu-attach-thumb afu-attach-thumb--placeholder" title={att.name ?? 'Video'} aria-label="Video">▶</span>
+  }
+  if (kind === 'audio') {
+    return <span className="afu-attach-thumb afu-attach-thumb--placeholder" title={att.name ?? 'Voice message'} aria-label="Voice message">🎙</span>
+  }
+  if (att.thumbUrl) {
+    // eslint-disable-next-line @next/next/no-img-element
+    return <img className="afu-attach-thumb" src={att.thumbUrl} alt={att.name ?? ''} />
+  }
+  return <span className="afu-attach-thumb afu-attach-thumb--placeholder" aria-hidden>📷</span>
+}
 
 type Unit = 'minutes' | 'hours' | 'days'
 
-interface RowImage {
+interface RowAttachment {
   id: string
   thumbUrl: string | null
   name: string | null
+  mimeType: string | null
 }
 
 interface RowDraft {
@@ -21,7 +38,7 @@ interface RowDraft {
   unit: Unit
   message: string
   instruction: string
-  images: RowImage[] // 0–3, ordered
+  attachments: RowAttachment[] // 0–3, ordered (image, video or voice)
   actionPageId: string | null
 }
 
@@ -62,7 +79,7 @@ function settingsToState(s: FollowupSettings): FormState {
         unit,
         message: t.message ?? '',
         instruction: t.instruction,
-        images: t.image_media_asset_ids.map((id) => ({ id, thumbUrl: null, name: null })),
+        attachments: t.media_asset_ids.map((id) => ({ id, thumbUrl: null, name: null, mimeType: null })),
         actionPageId: t.action_page_id,
       }
     }),
@@ -78,7 +95,7 @@ function stateToSettings(s: FormState): FollowupSettings {
       offset_ms: draftToMs(r),
       message: r.message,
       instruction: r.instruction,
-      image_media_asset_ids: r.images.map((i) => i.id),
+      media_asset_ids: r.attachments.map((i) => i.id),
       action_page_id: r.actionPageId,
     })),
   }
@@ -148,25 +165,25 @@ export function AutoFollowupForm({
 
   useEffect(() => {
     const unhydrated = Array.from(new Set(
-      state.rows.flatMap((r) => r.images.filter((i) => !i.thumbUrl).map((i) => i.id)),
+      state.rows.flatMap((r) => r.attachments.filter((i) => !i.mimeType).map((i) => i.id)),
     ))
     if (unhydrated.length === 0) return
     let cancelled = false
     const ctrl = new AbortController()
     fetch(`/api/media/assets?ids=${encodeURIComponent(unhydrated.join(','))}`, { signal: ctrl.signal })
       .then(async (r) => (r.ok ? r.json() : Promise.reject(new Error(await r.text()))))
-      .then((j: { assets: Array<{ id: string; name: string; thumbUrl: string | null }> }) => {
+      .then((j: { assets: Array<{ id: string; name: string; thumbUrl: string | null; mime_type: string }> }) => {
         if (cancelled) return
         const map = new Map(j.assets.map((a) => [a.id, a]))
         setState((s) => ({
           ...s,
           rows: s.rows.map((r) => ({
             ...r,
-            images: r.images.map((img) =>
-              img.thumbUrl ? img : (
-                map.has(img.id)
-                  ? { id: img.id, thumbUrl: map.get(img.id)!.thumbUrl, name: map.get(img.id)!.name }
-                  : img
+            attachments: r.attachments.map((att) =>
+              att.mimeType ? att : (
+                map.has(att.id)
+                  ? { id: att.id, thumbUrl: map.get(att.id)!.thumbUrl, name: map.get(att.id)!.name, mimeType: map.get(att.id)!.mime_type }
+                  : att
               ),
             ),
           })),
@@ -351,29 +368,25 @@ export function AutoFollowupForm({
 
               <div className="afu-row-attach">
                 <div className="afu-attach-item">
-                  <span className="afu-attach-label">Images</span>
+                  <span className="afu-attach-label">Media</span>
                   <div className="afu-attach-thumbs">
-                    {row.images.map((img, imgIdx) => (
-                      <div key={img.id} className="afu-attach-thumb-wrap">
-                        {img.thumbUrl ? (
-                          <img className="afu-attach-thumb" src={img.thumbUrl} alt={img.name ?? ''} />
-                        ) : (
-                          <span className="afu-attach-thumb afu-attach-thumb--placeholder" aria-hidden>📷</span>
-                        )}
+                    {row.attachments.map((att, attIdx) => (
+                      <div key={att.id} className="afu-attach-thumb-wrap">
+                        <AttachmentThumb att={att} />
                         <button
                           type="button"
                           className="afu-attach-thumb-x"
-                          aria-label={`Remove image ${imgIdx + 1}`}
+                          aria-label={`Remove attachment ${attIdx + 1}`}
                           disabled={!row.enabled}
                           onClick={() =>
                             setRow(idx, {
-                              images: row.images.filter((_, j) => j !== imgIdx),
+                              attachments: row.attachments.filter((_, j) => j !== attIdx),
                             })
                           }
                         >×</button>
                       </div>
                     ))}
-                    {row.images.length < 3 && (
+                    {row.attachments.length < 3 && (
                       <button
                         type="button"
                         className="afu-attach-add"
@@ -402,7 +415,7 @@ export function AutoFollowupForm({
                   </select>
                 </div>
 
-                {(row.images.length > 0 || row.actionPageId) && (
+                {(row.attachments.length > 0 || row.actionPageId) && (
                   <p className="afu-row-attach-note">
                     Attachments are skipped on nudges that fire after 24 hours.
                   </p>
@@ -418,12 +431,12 @@ export function AutoFollowupForm({
         onClose={() => setPickerRowIdx(null)}
         maxSelect={3}
         initialSelectedIds={
-          pickerRowIdx !== null ? state.rows[pickerRowIdx].images.map((i) => i.id) : []
+          pickerRowIdx !== null ? state.rows[pickerRowIdx].attachments.map((i) => i.id) : []
         }
         onSelect={(picked) => {
           if (pickerRowIdx === null) return
           setRow(pickerRowIdx, {
-            images: picked.map((p) => ({ id: p.id, thumbUrl: p.thumbUrl, name: p.name })),
+            attachments: picked.map((p) => ({ id: p.id, thumbUrl: p.thumbUrl, name: p.name, mimeType: p.mimeType ?? null })),
           })
         }}
       />

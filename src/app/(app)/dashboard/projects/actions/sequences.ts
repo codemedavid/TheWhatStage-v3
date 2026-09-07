@@ -95,6 +95,7 @@ export async function saveStageSequence(raw: unknown): Promise<ActionResult<{ se
         fallback_message: s.fallback_message?.trim() || null,
         channel: s.channel,
         enabled: s.enabled,
+        media_asset_ids: s.media_asset_ids,
       }))
       const { error: insErr } = await supabase
         .from('project_stage_sequence_steps').insert(rows)

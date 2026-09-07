@@ -47,6 +47,7 @@ export const MAX_INSTRUCTION_LEN = 2000
 // Max touches per stage sequence. Single source of truth — also consumed by the
 // step editor so the UI cap and the server cap can never drift.
 export const MAX_SEQUENCE_STEPS = 20
+export const MAX_STEP_MEDIA = 3
 
 export const SequenceStepInput = z.object({
   delay_minutes: z.number().int().min(0).max(525600),
@@ -62,6 +63,8 @@ export const SequenceStepInput = z.object({
   // follow-up touch is never silently dropped. Blank => engine uses a default.
   fallback_message: z.string().max(MAX_INSTRUCTION_LEN, `must be ${MAX_INSTRUCTION_LEN} characters or fewer`).optional().nullable(),
   channel: z.literal('messenger').default('messenger'),
+  // Library media (image, video, voice) sent right after the step text.
+  media_asset_ids: z.array(z.string().uuid()).max(MAX_STEP_MEDIA).default([]),
 })
 export type SequenceStepInput = z.infer<typeof SequenceStepInput>
 

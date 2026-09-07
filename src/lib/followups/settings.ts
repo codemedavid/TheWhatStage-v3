@@ -15,7 +15,7 @@ const MAX_OFFSET_MS = 7 * 24 * 3_600_000           // 7 days
 const TOUCHPOINT_COUNT = 7
 const MAX_INSTRUCTION_LEN = 200
 const MAX_MESSAGE_LEN = 200
-const MAX_IMAGES_PER_TOUCHPOINT = 3
+const MAX_ATTACHMENTS_PER_TOUCHPOINT = 3
 
 const TouchpointSchema = z.object({
   enabled: z.boolean(),
@@ -27,8 +27,9 @@ const TouchpointSchema = z.object({
   // stored before this field existed — a blank/absent message falls back to the
   // curated per-offset pool so a touchpoint is never dropped.
   message: z.string().trim().max(MAX_MESSAGE_LEN).optional(),
-  image_media_asset_ids: z.array(z.string().uuid())
-    .max(MAX_IMAGES_PER_TOUCHPOINT)
+  // Library media (image, video, or voice message) sent after the text.
+  media_asset_ids: z.array(z.string().uuid())
+    .max(MAX_ATTACHMENTS_PER_TOUCHPOINT)
     .default([]),
   action_page_id: z.string().uuid().nullable().default(null),
 })
@@ -71,13 +72,13 @@ export const DEFAULT_FOLLOWUP_SETTINGS: FollowupSettings = {
   enabled: true,
   ai_enabled: false,
   touchpoints: [
-    { enabled: true, offset_ms: 5 * 60_000,     instruction: 'Quick light hello — just ask if still interested po.',          message: 'Hi {name}, interested pa po kayo?',                              image_media_asset_ids: [], action_page_id: null },
-    { enabled: true, offset_ms: 60 * 60_000,    instruction: 'Friendly nudge — offer to answer any questions.',                message: 'Hi {name}, balik lang po ako, anything I can help with?',        image_media_asset_ids: [], action_page_id: null },
-    { enabled: true, offset_ms: 5 * 3_600_000,  instruction: 'Share one concrete benefit or social proof — keep it short.',   message: 'Hi {name}, baka may tanong po kayo, happy to help anytime.',     image_media_asset_ids: [], action_page_id: null },
-    { enabled: true, offset_ms: 8 * 3_600_000,  instruction: "Ask one focused question to surface what's blocking them.",     message: 'Hi {name}, ano po sa tingin niyo so far?',                       image_media_asset_ids: [], action_page_id: null },
-    { enabled: true, offset_ms: 12 * 3_600_000, instruction: 'Light reminder — emphasize convenience and flexibility.',       message: 'Hi {name}, nandito lang po ako kung kailangan niyo ng details.', image_media_asset_ids: [], action_page_id: null },
-    { enabled: true, offset_ms: 18 * 3_600_000, instruction: 'Soft scarcity or a clear call to decide — no pressure.',        message: 'Hi {name}, gusto niyo pa po bang ituloy?',                       image_media_asset_ids: [], action_page_id: null },
-    { enabled: true, offset_ms: 24 * 3_600_000, instruction: 'Last graceful check — invite them to message anytime.',         message: 'Hi {name}, last check po, message lang anytime kayo ready.',     image_media_asset_ids: [], action_page_id: null },
+    { enabled: true, offset_ms: 5 * 60_000,     instruction: 'Quick light hello — just ask if still interested po.',          message: 'Hi {name}, interested pa po kayo?',                              media_asset_ids: [], action_page_id: null },
+    { enabled: true, offset_ms: 60 * 60_000,    instruction: 'Friendly nudge — offer to answer any questions.',                message: 'Hi {name}, balik lang po ako, anything I can help with?',        media_asset_ids: [], action_page_id: null },
+    { enabled: true, offset_ms: 5 * 3_600_000,  instruction: 'Share one concrete benefit or social proof — keep it short.',   message: 'Hi {name}, baka may tanong po kayo, happy to help anytime.',     media_asset_ids: [], action_page_id: null },
+    { enabled: true, offset_ms: 8 * 3_600_000,  instruction: "Ask one focused question to surface what's blocking them.",     message: 'Hi {name}, ano po sa tingin niyo so far?',                       media_asset_ids: [], action_page_id: null },
+    { enabled: true, offset_ms: 12 * 3_600_000, instruction: 'Light reminder — emphasize convenience and flexibility.',       message: 'Hi {name}, nandito lang po ako kung kailangan niyo ng details.', media_asset_ids: [], action_page_id: null },
+    { enabled: true, offset_ms: 18 * 3_600_000, instruction: 'Soft scarcity or a clear call to decide — no pressure.',        message: 'Hi {name}, gusto niyo pa po bang ituloy?',                       media_asset_ids: [], action_page_id: null },
+    { enabled: true, offset_ms: 24 * 3_600_000, instruction: 'Last graceful check — invite them to message anytime.',         message: 'Hi {name}, last check po, message lang anytime kayo ready.',     media_asset_ids: [], action_page_id: null },
   ],
 }
 
@@ -87,7 +88,7 @@ export interface SnapshotEntry {
   instruction: string
   message: string
   ai_enabled: boolean
-  image_media_asset_ids: string[]
+  media_asset_ids: string[]
   action_page_id: string | null
 }
 
@@ -102,7 +103,7 @@ export function resolveEnabledOffsets(settings: FollowupSettings): SnapshotEntry
       instruction: x.t.instruction,
       message: x.t.message ?? '',
       ai_enabled: settings.ai_enabled,
-      image_media_asset_ids: x.t.image_media_asset_ids,
+      media_asset_ids: x.t.media_asset_ids,
       action_page_id: x.t.action_page_id,
     }))
   if (entries.length === 0) return []
@@ -110,11 +111,10 @@ export function resolveEnabledOffsets(settings: FollowupSettings): SnapshotEntry
   return entries
 }
 
-// Back-compat: rows in chatbot_configs.followup_settings written before the
-// multi-image change carry `image_media_asset_id: string|null` instead of
-// `image_media_asset_ids: string[]`. Remove this function (and its call in
-// loadFollowupSettings) once the expand SQL migration has been live long enough
-// that no rows carry only the legacy key.
+// Back-compat: rows in chatbot_configs.followup_settings may carry the older
+// `image_media_asset_ids: string[]` (multi-image era) or the oldest
+// `image_media_asset_id: string|null` instead of `media_asset_ids`. Rows are
+// rewritten on the next save, so this can go once no stored rows use them.
 function normalizeStoredSettings(raw: unknown): unknown {
   if (!raw || typeof raw !== 'object') return raw
   const obj = raw as Record<string, unknown>
@@ -125,9 +125,10 @@ function normalizeStoredSettings(raw: unknown): unknown {
     touchpoints: tps.map((t) => {
       if (!t || typeof t !== 'object') return t
       const tp = t as Record<string, unknown>
-      if (Array.isArray(tp.image_media_asset_ids)) return tp
+      if (Array.isArray(tp.media_asset_ids)) return tp
+      if (Array.isArray(tp.image_media_asset_ids)) return { ...tp, media_asset_ids: tp.image_media_asset_ids }
       const legacy = typeof tp.image_media_asset_id === 'string' ? tp.image_media_asset_id : null
-      return { ...tp, image_media_asset_ids: legacy ? [legacy] : [] }
+      return { ...tp, media_asset_ids: legacy ? [legacy] : [] }
     }),
   }
 }

@@ -309,8 +309,8 @@ describe('project sequence step media attachments', () => {
       project: baseProject,
       steps: [{ position: 0, delay_minutes: 0, instruction: 'x', fallback_message: null, manual_message: 'Hi!', media_asset_ids: ['a1'] }],
     })
-    const out = await handleProjectSequenceSendJob(admin, { id: 'job-1', payload: { run_id: 'run-1' } } as never)
-    expect(out.outcome).toBe('sent')
+    await handleProjectSequenceSendJob(admin, { id: 'job-1', payload: { run_id: 'run-1' } })
+    expect(sendMock).toHaveBeenCalledTimes(1)
     expect(loadAssetsMock).toHaveBeenCalledWith(admin, 'u1', ['a1'])
     expect(sendMediaMock).toHaveBeenCalledWith(expect.objectContaining({ assets: [asset], kind: 'bot', sender: 'bot' }))
     expect(sendMock.mock.invocationCallOrder[0]).toBeLessThan(sendMediaMock.mock.invocationCallOrder[0])
@@ -322,8 +322,8 @@ describe('project sequence step media attachments', () => {
       project: baseProject,
       steps: [{ position: 0, delay_minutes: 0, instruction: 'x', fallback_message: null, manual_message: 'Hi!', media_asset_ids: ['a1'] }],
     })
-    const out = await handleProjectSequenceSendJob(admin, { id: 'job-1', payload: { run_id: 'run-1' } } as never)
-    expect(out.outcome).toBe('sent')
+    await handleProjectSequenceSendJob(admin, { id: 'job-1', payload: { run_id: 'run-1' } })
+    expect(sendMock).toHaveBeenCalledTimes(1)
     expect(sendMediaMock).not.toHaveBeenCalled()
   })
 })
