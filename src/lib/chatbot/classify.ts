@@ -17,6 +17,7 @@ import {
   type VirtualSubmissionMode,
 } from './config'
 import { selectMediaForReply, type SelectedMediaAsset } from '@/lib/media/selector'
+import { isKnowledgeRef } from '@/lib/media/match-reason'
 import { buildMediaContextBlock } from '@/lib/media/prompt'
 import { logChatbotUsage, type AnswerHistory, type AnswerOptions, type AnswerResult } from './answer'
 import { decideForceSend } from '@/lib/action-pages/force-send'
@@ -275,21 +276,32 @@ export async function answerWithClassification(
     ...ctx.buckets.useful,
     ...ctx.buckets.ambiguous,
   ]
-  // Resolve media BEFORE the LLM call so the reply (which is a structured
-  // JSON envelope) can tee up the attached images naturally in its `reply` field.
+  // Resolve media CANDIDATES before the LLM call so the reply (a structured
+  // JSON envelope) can pick the ones that fit and tee them up in `reply`.
+  // Candidates come from three places: @/# refs in the retrieved knowledge,
+  // @/# refs in the operator's instructions/rules, and `auto_send` assets ranked
+  // semantically against the customer's message. The model picks per asset.
+  const instructionText = [config.instructions, config.funnelInstruction, ...config.doRules]
+    .filter((s): s is string => typeof s === 'string' && s.trim().length > 0)
+    .join('\n')
   const media = await selectMediaForReply({
     client: supabase,
     embedder,
     userId,
     customerMessage: message,
     retrievedChunks: refChunks,
+    instructionText,
+    includeSemantic: true,
     rpcName: options.rpcName === 'match_knowledge_hybrid_service' ? 'match_media_assets_service' : 'match_media_assets',
     limit: 4,
   }).catch((err) => {
     console.warn('[classify.media] selection failed', err)
     return [] as SelectedMediaAsset[]
   })
-  const mediaBlock = buildMediaContextBlock(media)
+  const mediaBlock = buildMediaContextBlock(media, 'candidates')
+  // Fallback paths (salvaged / unparsable JSON) never see a per-asset decision,
+  // so they may only trust refs the operator tagged in query-relevant knowledge.
+  const knowledgeRefMedia = media.filter(isKnowledgeRef)
   // System-prompt assembly.
   //
   // cache_friendly (default): build ONE contiguous, byte-identical-per-persona
@@ -372,7 +384,8 @@ export async function answerWithClassification(
   let actionPage: ActionPageChoice | null = null
   let productRecommendation: ProductRecommendationRequest | null = null
   let propertyRecommendation: PropertyRecommendationRequest | null = null
-  let attachImages = false
+  // Media the model picked for this turn (by candidate slug). Empty = none.
+  let pickedMedia: SelectedMediaAsset[] = []
   let pause: PauseDecision | null = null
   let proceedIntent: ProceedIntent | null = null
   let proceedInfo: ProceedInfo | null = null
@@ -387,6 +400,7 @@ export async function answerWithClassification(
       recommend_product?: unknown
       recommend_property?: unknown
       attach_images?: unknown
+      attach_media?: unknown
       pause?: unknown
       proceed_intent?: unknown
       proceed_info?: unknown
@@ -398,7 +412,7 @@ export async function answerWithClassification(
     }
     stageChange = coerceStageChange(r.stage_change, stages, currentStageId)
     actionPage = coerceActionPage(r.action_page, actionPages)
-    attachImages = r.attach_images === true
+    pickedMedia = coerceAttachMedia(r.attach_media, r.attach_images, media)
     // Only honor `pause` when the user actually configured Auto-Pause Rules, so
     // a hallucinated field on an unconfigured bot can never take it offline.
     pause = hasPauseRules ? coercePauseDecision(r.pause) : null
@@ -484,7 +498,7 @@ export async function answerWithClassification(
         proceedIntent = null
         proceedInfo = null
         teasedLink = false
-        attachImages = media.length > 0
+        pickedMedia = knowledgeRefMedia
         console.log('[chatbot.classify.salvage] recovered reply from truncated JSON — skipped fallback call', {
           userId,
           rawLen: raw.length,
@@ -546,9 +560,10 @@ export async function answerWithClassification(
     // its stage / page / cold-inbound guards, so a genuinely unrelated fallback
     // (teasedLink was already false) never attaches a button.
     // The fallback model didn't produce a structured envelope, so it never
-    // reasoned about image attachment. Fall back to the same rule as
-    // `answer()`: trust operator-tagged @asset/#folder refs.
-    attachImages = media.length > 0
+    // reasoned about media attachment. Fall back to the same rule as
+    // `answer()`: trust only operator-tagged @asset/#folder refs found in the
+    // retrieved knowledge — never instruction refs or semantic candidates.
+    pickedMedia = knowledgeRefMedia
   }
 
   // decideForceSend (a cheap classifier call + DB reads) and resolveSourceTitles
@@ -589,11 +604,10 @@ export async function answerWithClassification(
     })(),
     resolveSourceTitles(supabase, userId, built.contextChunkIds),
   ])
-  console.log('[chatbot.classify] media resolved', {
+  console.log('[chatbot.classify] media decision', {
     userId,
-    count: media.length,
-    attachImages,
-    slugs: media.map((m) => m.slug),
+    candidates: media.map((m) => ({ slug: m.slug, reason: m.matchReason })),
+    picked: pickedMedia.map((m) => m.slug),
     refChunkCount: refChunks.length,
   })
   const topChunks = refChunks.map((c) => ({
@@ -605,13 +619,44 @@ export async function answerWithClassification(
     content: c.content,
     rrf_score: ('score' in c ? (c as { score: number }).score : 0),
   }))
-  // Enforce the LLM's attach_images decision. The resolved `media` are only
-  // CANDIDATES — surfaced to the model via mediaBlock above so it can tee them
-  // up — and must be emitted to the caller ONLY when the model opted in.
-  // Without this gate the Messenger worker re-sent the same proof/screenshot
-  // assets on every turn, even when the message was unrelated.
-  const gatedMedia = attachImages ? media : []
-  return { text, sourceTitles, media: gatedMedia, attachImages, stageChange, actionPage, productRecommendation, propertyRecommendation, pause, proceedIntent, proceedInfo, topChunks }
+  // Emit ONLY the media the model picked (or, on fallback paths, the
+  // knowledge-tagged refs). The full `media` list was only ever a candidate set
+  // surfaced via mediaBlock; sending it wholesale is what made the bot dump
+  // every referenced proof/screenshot on every turn.
+  const attachImages = pickedMedia.length > 0
+  return { text, sourceTitles, media: pickedMedia, attachImages, stageChange, actionPage, productRecommendation, propertyRecommendation, pause, proceedIntent, proceedInfo, topChunks }
+}
+
+/**
+ * Coerces the model's media decision into the subset of `candidates` to send.
+ *
+ *  - `attach_media: string[]` (current schema): candidate slugs/ids, matched
+ *    case-insensitively with any leading `@` stripped; unknown values dropped;
+ *    candidate order preserved.
+ *  - `attach_images: true` with no usable array (legacy envelope): the model
+ *    opted in but did not pick, so send only the knowledge-tagged refs — never
+ *    instruction/semantic candidates, which sit in the list on every turn.
+ *  - anything else → nothing.
+ */
+export function coerceAttachMedia(
+  attachMedia: unknown,
+  attachImages: unknown,
+  candidates: SelectedMediaAsset[],
+): SelectedMediaAsset[] {
+  if (candidates.length === 0) return []
+  if (Array.isArray(attachMedia)) {
+    const wanted = new Set(
+      attachMedia
+        .filter((v): v is string => typeof v === 'string')
+        .map((v) => v.trim().replace(/^@/, '').toLowerCase())
+        .filter(Boolean),
+    )
+    return candidates.filter((c) => wanted.has(c.slug.toLowerCase()) || wanted.has(c.id.toLowerCase()))
+  }
+  if (attachMedia === true || (attachMedia === undefined && attachImages === true)) {
+    return candidates.filter(isKnowledgeRef)
+  }
+  return []
 }
 
 /**
@@ -841,7 +886,7 @@ export function stageInstructionParts(
   const schemaParts = [
     '"reply": string',
     '"stage_change": {"to_stage_id": string, "confidence": "low"|"medium"|"high", "reason": string} | null',
-    '"attach_images": boolean',
+    '"attach_media": string[]',
     '"proceed_intent": {"confidence": "low"|"medium"|"high", "quote": string, "reason": string} | null',
   ]
   if (virtualSubmissionsOn) {
@@ -870,18 +915,19 @@ export function stageInstructionParts(
   const schema = `{${schemaParts.join(', ')}}`
 
   const attachImagesBlock =
-    'ATTACH IMAGES / MEDIA — decide whether to send photos, a short video, or a voice message this turn:\n' +
-    '- Default `attach_images` to `false`. The vast majority of replies are text only.\n' +
-    '- Set `attach_images` to `true` ONLY when ONE of these is clearly true:\n' +
-    '    (a) The customer explicitly asked to see something — "show me", "send a photo/pic", "may photos po ba", "pakita", "ipakita mo yung sample", "patingin", "can I see the menu/QR/portfolio", or any equivalent in any language.\n' +
-    '    (b) The customer\'s latest message is about a specific item / product / payment QR / portfolio piece whose photo would DIRECTLY answer the question (e.g. they asked about a specific product variant and the knowledge has its image; they asked how to pay via GCash and the knowledge has the QR).\n' +
-    '    (c) You are also setting `action_page` to a sales or product page AND the hero image is a natural part of the pitch.\n' +
-    '    (d) A listed [voice message] or [video] candidate directly fits this moment — a voice message for a warm first hello, reassurance, or a personal close; a video when the customer asks how something works, wants proof, or asks for a demo/walkthrough.\n' +
-    '- Set `attach_images` to `false` for: greetings, qualifying questions (asking back about the customer\'s business / needs / timeline / budget), generic pricing chit-chat without a specific item picked, objection handling, scheduling, off-topic, anything where adding a photo would feel random or unrelated.\n' +
-    '- Quality test: ask yourself "would a thoughtful human salesperson reach for their phone to send a photo RIGHT NOW based on this message?". If the answer is no or "maybe later", set `false`.\n' +
-    '- When in doubt → `false`. A skipped image is far less damaging than an irrelevant brand/logo/product photo arriving out of context.\n' +
-    '- This flag gates ALL media sends this turn — gallery shots, product covers, payment QRs, brand/logo assets, sales-page hero, videos, voice messages. The system still picks WHICH items go out; you only decide WHETHER any go out at all.\n' +
-    '- If a "# Attached media" section appears in the system prompt, treat those as CANDIDATES only — they are sent only when you set `attach_images: true`. If you set `attach_images: false`, do NOT mention or hint at media in `reply` (no "here are some screenshots", no "sending a voice message", no "see below"). If you set `true`, briefly acknowledge them.'
+    'ATTACH MEDIA — decide, PER ITEM, which library photos / videos / voice messages (if any) go out this turn:\n' +
+    '- `attach_media` is a list of candidate ids taken VERBATIM from the "# Media candidates" section (when present). Default to an empty list `[]`. The vast majority of replies are text only.\n' +
+    '- Add an id ONLY when that specific item clearly fits, judged by its name and description against the customer\'s latest message:\n' +
+    '    (a) The customer explicitly asked to see or hear that kind of thing — "show me", "send a photo/pic", "may photos po ba", "pakita", "patingin", "may reviews/testimonials ba kayo", "can I see the menu/QR/portfolio", "send a sample/demo", or any equivalent in any language.\n' +
+    '    (b) The customer\'s latest message is about the specific item / product / payment QR / portfolio piece that the candidate depicts, and sending it would DIRECTLY answer the question (e.g. they asked about a product variant and a candidate is its photo; they asked how to pay via GCash and a candidate is the QR).\n' +
+    '    (c) You are also setting `action_page` to a sales or product page AND the candidate is the hero image that naturally belongs in the pitch.\n' +
+    '    (d) A [voice message] or [video] candidate directly fits this moment — a voice message for a warm first hello, reassurance, or a personal close; a video when the customer asks how something works, wants proof, or asks for a demo/walkthrough.\n' +
+    '- Leave `attach_media` empty for: greetings, qualifying questions (asking back about the customer\'s business / needs / timeline / budget), generic pricing chit-chat without a specific item picked, objection handling, scheduling, off-topic, anything where the item would feel random or unrelated.\n' +
+    '- Never add an item just because it is listed, and never add ALL of them by reflex. If the customer asks for testimonials, pick the testimonial(s) — not the product photo or the demo video sitting next to them. One well-matched item beats three loosely related ones.\n' +
+    '- Quality test per item: "would a thoughtful human salesperson reach for their phone to send THIS RIGHT NOW based on this message?". If the answer is no or "maybe later", leave it out.\n' +
+    '- When in doubt → leave it out. A skipped item is far less damaging than an irrelevant brand/logo/product photo arriving out of context.\n' +
+    '- Only ids from the candidates section are valid; anything else is ignored. If there is no "# Media candidates" section, `attach_media` must be `[]`.\n' +
+    '- Items you did NOT pick must not be mentioned or hinted at in `reply` (no "here are some screenshots", no "sending a voice message", no "see below"). Items you DID pick get a brief, natural acknowledgement.'
   // Split the action-page block into a stable prose preamble (placed BEFORE
   // the volatile stageList/actionPageList) and a volatile list (placed at the
   // very end). The preamble text is byte-identical across every turn, so

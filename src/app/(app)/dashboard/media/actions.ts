@@ -90,6 +90,7 @@ export async function updateMediaAsset(formData: FormData): Promise<void> {
     slug: formData.get('slug'),
     description: nullable(formData.get('description')),
     isArchived: formData.get('isArchived') === 'on',
+    autoSend: formData.get('autoSend') === 'on',
   })
   const { supabase, userId } = await requireUser()
   const { data: current } = await supabase
@@ -107,6 +108,7 @@ export async function updateMediaAsset(formData: FormData): Promise<void> {
       slug: input.slug,
       description: input.description,
       is_archived: input.isArchived,
+      auto_send: input.autoSend,
       version: nextVersion,
       embedding_status: input.isArchived ? 'pending' : 'stale',
     })

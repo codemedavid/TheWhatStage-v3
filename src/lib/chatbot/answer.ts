@@ -8,6 +8,7 @@ import {
 import { getChatbotConfig, REPLY_MAX_TOKENS, type ChatbotConfig } from './config'
 import { loadPrimaryGoalInstruction } from './primary-goal'
 import { selectMediaForReply, type SelectedMediaAsset } from '@/lib/media/selector'
+import { isKnowledgeRef } from '@/lib/media/match-reason'
 import { buildMediaContextBlock } from '@/lib/media/prompt'
 import { paymentEnumBlock as buildPaymentEnumBlock } from '@/lib/chatbot/payment-enum'
 import { guardReply } from '@/lib/chatbot/reply-guard'
@@ -165,9 +166,12 @@ export async function answer(
     : null
 
   // Resolve media BEFORE the LLM call so the model can tee up the attached
-  // images naturally instead of producing a reply that ignores them.
-  const media = await mediaPromise
-  const mediaBlock = buildMediaContextBlock(media)
+  // items naturally instead of producing a reply that ignores them. This path
+  // has no per-asset decision, so it only ever carries operator-tagged refs
+  // from the retrieved knowledge (the selector was called without instruction
+  // text or semantic candidates); the filter is a belt-and-braces guard.
+  const media = (await mediaPromise).filter(isKnowledgeRef)
+  const mediaBlock = buildMediaContextBlock(media, 'auto')
 
   const system = [built.system, leadNameBlock, options.leadContextBlock?.trim() || null, mediaBlock]
     .filter(Boolean)

@@ -20,6 +20,8 @@ export const UpdateMediaAssetInput = z.object({
   slug: MediaSlugSchema,
   description: z.string().trim().max(4000).nullable().default(null),
   isArchived: z.boolean().default(false),
+  /** Let the chatbot offer this asset on relevance alone (no @slug/#folder ref). */
+  autoSend: z.boolean().default(false),
 })
 
 export type CreateMediaFolderInput = z.infer<typeof CreateMediaFolderInput>

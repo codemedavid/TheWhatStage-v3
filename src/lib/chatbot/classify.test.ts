@@ -629,18 +629,20 @@ describe('stripLinkTeaseSentences removes particle-laden form teases', () => {
   })
 })
 
-describe('stageInstruction attach_images block', () => {
-  it('includes attach_images in the JSON schema', () => {
+describe('stageInstruction attach_media block', () => {
+  it('includes attach_media as a string list in the JSON schema', () => {
     const out = stageInstruction(stages, null, [], null, null)
-    expect(out).toContain('"attach_images": boolean')
+    expect(out).toContain('"attach_media": string[]')
+    expect(out).not.toContain('"attach_images": boolean')
   })
 
-  it('includes the ATTACH IMAGES decision rules', () => {
+  it('includes the per-item ATTACH MEDIA decision rules', () => {
     const out = stageInstruction(stages, null, [], null, null)
-    expect(out).toContain('ATTACH IMAGES')
-    expect(out).toMatch(/default.+`false`/i)
+    expect(out).toContain('ATTACH MEDIA')
+    expect(out).toMatch(/default to an empty list `\[\]`/i)
     expect(out).toMatch(/explicitly asked to see/i)
-    expect(out).toMatch(/when in doubt.*`false`/i)
+    expect(out).toMatch(/when in doubt.*leave it out/i)
+    expect(out).toMatch(/never add ALL of them by reflex/i)
   })
 
   it('lists the per-language visual-intent triggers the LLM should look for', () => {
