@@ -20,7 +20,7 @@ vi.mock('@/lib/messenger/outbound', () => ({
 }))
 
 vi.mock('./attachments', () => ({
-  mintMediaAssetUrl:      mintAssetMock,
+  mintMediaAsset:         mintAssetMock,
   mintActionPageDeeplink: mintDeeplinkMock,
 }))
 vi.mock('@/lib/facebook/crypto', () => ({ decryptToken: (s: string) => `dec:${s}` }))
@@ -133,7 +133,7 @@ beforeEach(() => {
   resolveManualMock.mockReturnValue('Hi Maria, manual nudge po.')
   sendOutboundMock.mockResolvedValue({ sent: true, messageId: 'fbm-1' })
   resolvePolicyMock.mockResolvedValue({ mode: 'RESPONSE' })
-  mintAssetMock.mockResolvedValue('https://signed/img.jpg')
+  mintAssetMock.mockResolvedValue({ url: 'https://signed/img.jpg', mimeType: 'image/jpeg', name: 'Img' })
   mintDeeplinkMock.mockResolvedValue({
     url: 'https://app/a/booking?psid=p&pid=g&exp=1&sig=x',
     ctaLabel: 'Open form',
@@ -328,7 +328,7 @@ describe('handleFollowupSend — attachments', () => {
           slot: 0,
           offset_ms: 5 * 60_000,
           instruction: 'hello',
-          image_media_asset_ids: [],
+          media_asset_ids: [],
           action_page_id: null,
           ...snapshotEntry,
         }],
@@ -343,7 +343,7 @@ describe('handleFollowupSend — attachments', () => {
 
   it('sends text → image → button in order when policy is RESPONSE and both attachments are set', async () => {
     const seed = attachSeed({
-      image_media_asset_ids: ['11111111-1111-4111-9111-111111111111'],
+      media_asset_ids: ['11111111-1111-4111-9111-111111111111'],
       action_page_id:         '22222222-2222-4222-9222-222222222222',
     })
     const { admin } = makeAdmin(seed)
@@ -374,7 +374,7 @@ describe('handleFollowupSend — attachments', () => {
   it('sends text only when policy is HUMAN_AGENT, even with attachments configured', async () => {
     resolvePolicyMock.mockResolvedValue({ mode: 'HUMAN_AGENT' })
     const seed = attachSeed({
-      image_media_asset_ids: ['11111111-1111-4111-9111-111111111111'],
+      media_asset_ids: ['11111111-1111-4111-9111-111111111111'],
       action_page_id:         '22222222-2222-4222-9222-222222222222',
     })
     const { admin } = makeAdmin(seed)
@@ -387,14 +387,14 @@ describe('handleFollowupSend — attachments', () => {
     expect(mintDeeplinkMock).not.toHaveBeenCalled()
     expect(warn).toHaveBeenCalledWith(
       '[followups.fire] attachments skipped — outside 24h window',
-      expect.objectContaining({ dropped_image_count: 1, dropped_action_page: true }),
+      expect.objectContaining({ dropped_media_count: 1, dropped_action_page: true }),
     )
     warn.mockRestore()
   })
 
   it('sends only text + image when action_page_id is null', async () => {
     const seed = attachSeed({
-      image_media_asset_ids: ['11111111-1111-4111-9111-111111111111'],
+      media_asset_ids: ['11111111-1111-4111-9111-111111111111'],
       action_page_id: null,
     })
     const { admin } = makeAdmin(seed)
@@ -403,10 +403,10 @@ describe('handleFollowupSend — attachments', () => {
     expect(kinds).toEqual(['text', 'image'])
   })
 
-  it('skips the image silently when mintMediaAssetUrl returns null', async () => {
+  it('skips the image silently when mintMediaAsset returns null', async () => {
     mintAssetMock.mockResolvedValue(null)
     const seed = attachSeed({
-      image_media_asset_ids: ['11111111-1111-4111-9111-111111111111'],
+      media_asset_ids: ['11111111-1111-4111-9111-111111111111'],
       action_page_id: null,
     })
     const { admin } = makeAdmin(seed)
@@ -417,7 +417,7 @@ describe('handleFollowupSend — attachments', () => {
 
   it('passes a non-empty attachmentHint to the generator inside the window', async () => {
     const seed = attachSeed({
-      image_media_asset_ids: ['11111111-1111-4111-9111-111111111111'],
+      media_asset_ids: ['11111111-1111-4111-9111-111111111111'],
       action_page_id:         '22222222-2222-4222-9222-222222222222',
     })
     const { admin } = makeAdmin(seed)
@@ -430,7 +430,7 @@ describe('handleFollowupSend — attachments', () => {
   it('passes empty attachmentHint when policy is HUMAN_AGENT', async () => {
     resolvePolicyMock.mockResolvedValue({ mode: 'HUMAN_AGENT' })
     const seed = attachSeed({
-      image_media_asset_ids: ['11111111-1111-4111-9111-111111111111'],
+      media_asset_ids: ['11111111-1111-4111-9111-111111111111'],
       action_page_id:         '22222222-2222-4222-9222-222222222222',
     })
     const { admin } = makeAdmin(seed)
@@ -487,7 +487,7 @@ describe('handleFollowupSend — multi-image attachments', () => {
           slot: 0,
           offset_ms: 5 * 60_000,
           instruction: 'hello',
-          image_media_asset_ids: opts.ids,
+          media_asset_ids: opts.ids,
           action_page_id: opts.pageId ?? null,
         }],
       },
@@ -501,7 +501,7 @@ describe('handleFollowupSend — multi-image attachments', () => {
 
   it('sends text → 3 images → button in pick order when policy is RESPONSE', async () => {
     mintAssetMock.mockImplementation(async (_admin: unknown, id: string) =>
-      `https://signed/${id}.jpg`,
+      ({ url: `https://signed/${id}.jpg`, mimeType: 'image/jpeg', name: id }),
     )
     const seed = multiSeed({
       ids: [
@@ -546,7 +546,7 @@ describe('handleFollowupSend — multi-image attachments', () => {
 
   it('skips image #2 silently when mintMediaAssetUrl returns null for it', async () => {
     mintAssetMock.mockImplementation(async (_admin: unknown, id: string) =>
-      id === '22222222-2222-4222-9222-222222222222' ? null : `https://signed/${id}.jpg`,
+      id === '22222222-2222-4222-9222-222222222222' ? null : { url: `https://signed/${id}.jpg`, mimeType: 'image/jpeg', name: id },
     )
     const seed = multiSeed({
       ids: [
@@ -719,13 +719,49 @@ describe('handleFollowupSend — manual vs AI message source', () => {
       manualSeed({
         ai_enabled: false,
         message: 'Hi {name}, manual with pic.',
-        image_media_asset_ids: ['11111111-1111-4111-9111-111111111111'],
+        media_asset_ids: ['11111111-1111-4111-9111-111111111111'],
       }) as never,
     )
 
     await handleFollowupSend(admin as never, { scheduleId: 's1' })
 
     expect(generateMock).not.toHaveBeenCalled()
+    const kinds = sendOutboundMock.mock.calls.map((c: { payload: { kind: string } }[]) => c[0].payload.kind)
+    expect(kinds).toEqual(['text', 'image'])
+  })
+})
+
+describe('handleFollowupSend — voice/video attachments', () => {
+  function seedWith(entry: Record<string, unknown>) {
+    return {
+      schedule: {
+        id: 's1', user_id: 'u1', lead_id: 'l1', thread_id: 't1', page_id: 'p1',
+        started_at: new Date(Date.now() - 5 * 60_000).toISOString(),
+        next_offset_idx: 0,
+        conversation_kind: 'real' as const,
+        status: 'pending',
+        offsets_snapshot: [{ slot: 0, offset_ms: 5 * 60_000, instruction: 'hello', action_page_id: null, ...entry }],
+      },
+      thread:  { id: 't1', psid: 'PSID', last_inbound_at: new Date(Date.now() - 60_000).toISOString(), full_name: 'Maria' },
+      page:    { id: 'p1', page_access_token: 'enc-token' },
+      lead:    { name: 'Maria' },
+      chatbot: { persona: null, instructions: null },
+      history: [],
+    }
+  }
+
+  it('sends an audio payload for a voice-message asset', async () => {
+    mintAssetMock.mockResolvedValue({ url: 'https://signed/hello.mp3', mimeType: 'audio/mpeg', name: 'Hello' })
+    const { admin } = makeAdmin(seedWith({ media_asset_ids: ['11111111-1111-4111-9111-111111111111'] }))
+    await handleFollowupSend(admin as never, { scheduleId: 's1' })
+    const kinds = sendOutboundMock.mock.calls.map((c: { payload: { kind: string } }[]) => c[0].payload.kind)
+    expect(kinds).toEqual(['text', 'audio'])
+    expect(sendOutboundMock.mock.calls[1][0].payload).toEqual({ kind: 'audio', url: 'https://signed/hello.mp3' })
+  })
+
+  it('still fires attachments from a legacy image_media_asset_ids snapshot', async () => {
+    const { admin } = makeAdmin(seedWith({ image_media_asset_ids: ['11111111-1111-4111-9111-111111111111'] }))
+    await handleFollowupSend(admin as never, { scheduleId: 's1' })
     const kinds = sendOutboundMock.mock.calls.map((c: { payload: { kind: string } }[]) => c[0].payload.kind)
     expect(kinds).toEqual(['text', 'image'])
   })

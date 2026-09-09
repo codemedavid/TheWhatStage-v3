@@ -23,6 +23,8 @@ vi.mock('@/lib/sequences/shared', () => ({
   retrieveKnowledge: knowledgeMock,
 }))
 vi.mock('@sentry/nextjs', () => ({ captureException: vi.fn() }))
+const { loadAssetsMock, sendMediaMock } = vi.hoisted(() => ({ loadAssetsMock: vi.fn(), sendMediaMock: vi.fn() }))
+vi.mock('@/lib/media/send', () => ({ loadSendableAssets: loadAssetsMock, sendMediaAssets: sendMediaMock }))
 
 import { handleProjectSequenceSendJob } from './fire'
 
@@ -33,6 +35,7 @@ type Step = {
   fallback_message: string | null
   enabled?: boolean
   manual_message?: string | null
+  media_asset_ids?: string[]
 }
 
 function makeAdmin(seed: {
@@ -291,5 +294,36 @@ describe('handleProjectSequenceRun disabled-step handling', () => {
 
     expect(sendMock).not.toHaveBeenCalled()
     expect(runUpdates.some((u) => u.status === 'done')).toBe(true)
+  })
+})
+
+describe('project sequence step media attachments', () => {
+  const asset = { id: 'a1', name: 'Demo', slug: 'demo', storagePath: 'p', mimeType: 'video/mp4' }
+
+  it('sends step media after the text when the thread is inside the 24h window', async () => {
+    loadMock.mockResolvedValue({ ok: true, ctx: { thread: { id: 't1', psid: 'x', last_inbound_at: new Date().toISOString(), full_name: null, page_id: 'pg' }, pageToken: 'tok', persona: null, instructions: null, doRules: [], dontRules: [], leadName: 'Ana', recentMessages: [] } })
+    loadAssetsMock.mockResolvedValue([asset])
+    sendMediaMock.mockResolvedValue({ sent: [{ assetId: 'a1', messageId: 'm2' }], skipped: [] })
+    const { admin } = makeAdmin({
+      run: baseRun,
+      project: baseProject,
+      steps: [{ position: 0, delay_minutes: 0, instruction: 'x', fallback_message: null, manual_message: 'Hi!', media_asset_ids: ['a1'] }],
+    })
+    await handleProjectSequenceSendJob(admin, { id: 'job-1', payload: { run_id: 'run-1' } })
+    expect(sendMock).toHaveBeenCalledTimes(1)
+    expect(loadAssetsMock).toHaveBeenCalledWith(admin, 'u1', ['a1'])
+    expect(sendMediaMock).toHaveBeenCalledWith(expect.objectContaining({ assets: [asset], kind: 'bot', sender: 'bot' }))
+    expect(sendMock.mock.invocationCallOrder[0]).toBeLessThan(sendMediaMock.mock.invocationCallOrder[0])
+  })
+
+  it('skips step media outside the 24h window (text still sends)', async () => {
+    const { admin } = makeAdmin({
+      run: baseRun,
+      project: baseProject,
+      steps: [{ position: 0, delay_minutes: 0, instruction: 'x', fallback_message: null, manual_message: 'Hi!', media_asset_ids: ['a1'] }],
+    })
+    await handleProjectSequenceSendJob(admin, { id: 'job-1', payload: { run_id: 'run-1' } })
+    expect(sendMock).toHaveBeenCalledTimes(1)
+    expect(sendMediaMock).not.toHaveBeenCalled()
   })
 })

@@ -37,6 +37,8 @@ export interface SendNodeConfig {
   payload:
     | { kind: 'text'; text: string }
     | { kind: 'button'; text: string; url: string; ctaLabel: string }
+    /** A media-library asset (image, video, or voice message) by id. */
+    | { kind: 'media'; media_asset_id: string }
     | {
         kind: 'utility_template'
         /** messenger_message_templates.id */

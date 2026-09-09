@@ -6,7 +6,7 @@ vi.mock('@/lib/action-pages/urls', () => ({
   ),
 }))
 
-import { mintMediaAssetUrl, mintActionPageDeeplink } from './attachments'
+import { mintMediaAsset, mintMediaAssetUrl, mintActionPageDeeplink } from './attachments'
 
 function makeAdmin(opts: {
   asset?: { storage_path: string; is_archived: boolean } | null
@@ -116,5 +116,21 @@ describe('mintActionPageDeeplink', () => {
       pageId: 'pageuuid-456',
     })
     expect(result).toBeNull()
+  })
+})
+
+describe('mintMediaAsset', () => {
+  it('returns the signed url with the mime type and name', async () => {
+    const admin = makeAdmin({ asset: { storage_path: 'u/a.mp3', is_archived: false, mime_type: 'audio/mpeg', name: 'Hello' } as never })
+    await expect(mintMediaAsset(admin as never, 'a1', 'u1')).resolves.toEqual({
+      url: 'https://signed/url',
+      mimeType: 'audio/mpeg',
+      name: 'Hello',
+    })
+  })
+
+  it('returns null for archived assets', async () => {
+    const admin = makeAdmin({ asset: { storage_path: 'u/a.mp3', is_archived: true, mime_type: 'audio/mpeg', name: 'x' } as never })
+    await expect(mintMediaAsset(admin as never, 'a1', 'u1')).resolves.toBeNull()
   })
 })

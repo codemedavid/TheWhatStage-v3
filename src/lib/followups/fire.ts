@@ -16,18 +16,23 @@ import { sendOutbound, resolveSendPolicy } from '@/lib/messenger/outbound'
 import { isInsideWindow } from '@/lib/agent/classifyPolicy'
 import { shouldSeed } from './gates'
 import { generateFollowupMessage, resolveManualMessage } from './generateMessage'
-import { mintMediaAssetUrl, mintActionPageDeeplink } from './attachments'
+import { mintMediaAsset, mintActionPageDeeplink } from './attachments'
+import { buildMediaPayload } from '@/lib/media/send'
+import { mediaKindFromMime, mediaKindLabel } from '@/lib/media/kind'
 import { generateActionPageCta } from './generateCta'
 import { GUIDING_DEFAULT_CAPTION } from '@/lib/messenger/action-page-card'
 import type { SnapshotEntry } from './settings'
 
-// Back-compat: snapshots captured before the multi-image change carry
-// `image_media_asset_id: string|null` instead of `image_media_asset_ids: string[]`.
-// Remove this helper once all in-flight schedules with the legacy shape have
+// Back-compat: in-flight snapshots may still carry the older
+// `image_media_asset_ids: string[]` or `image_media_asset_id: string|null`
+// instead of `media_asset_ids`. Drop the legacy branches once those have
 // drained — max 7 days after this ships.
-function readImageIds(
-  entry: { image_media_asset_ids?: unknown; image_media_asset_id?: unknown },
+function readMediaIds(
+  entry: { media_asset_ids?: unknown; image_media_asset_ids?: unknown; image_media_asset_id?: unknown },
 ): string[] {
+  if (Array.isArray(entry.media_asset_ids)) {
+    return entry.media_asset_ids.filter((v): v is string => typeof v === 'string')
+  }
   if (Array.isArray(entry.image_media_asset_ids)) {
     return entry.image_media_asset_ids.filter((v): v is string => typeof v === 'string')
   }
@@ -89,7 +94,7 @@ export async function handleFollowupSend(
     return
   }
 
-  const imageMediaAssetIds = readImageIds(entry)
+  const mediaAssetIds = readMediaIds(entry)
   const actionPageId      = entry.action_page_id
 
   // Manual mode (default) sends the user-authored message — no LLM call. Legacy
@@ -174,17 +179,19 @@ export async function handleFollowupSend(
   let attachmentHint = ''
   if (canAttach && useAi) {
     const hintParts: string[] = []
-    if (imageMediaAssetIds.length === 1) {
+    if (mediaAssetIds.length === 1) {
       const { data: asset } = await admin
         .from('media_assets')
-        .select('name')
-        .eq('id', imageMediaAssetIds[0])
+        .select('name, mime_type')
+        .eq('id', mediaAssetIds[0])
         .eq('user_id', schedule.user_id)
-        .maybeSingle<{ name: string }>()
-      if (asset?.name) hintParts.push(`a photo (${asset.name})`)
-      else              hintParts.push('a photo')
-    } else if (imageMediaAssetIds.length > 1) {
-      hintParts.push(`${imageMediaAssetIds.length} photos`)
+        .maybeSingle<{ name: string; mime_type?: string }>()
+      const kind = mediaKindFromMime(asset?.mime_type) ?? 'image'
+      const noun = kind === 'image' ? 'photo' : mediaKindLabel(kind)
+      if (asset?.name) hintParts.push(`a ${noun} (${asset.name})`)
+      else             hintParts.push(`a ${noun}`)
+    } else if (mediaAssetIds.length > 1) {
+      hintParts.push(`${mediaAssetIds.length} photos or clips`)
     }
     if (actionPageId) {
       const { data: pageRow } = await admin
@@ -253,20 +260,20 @@ export async function handleFollowupSend(
     })
 
   if (canAttach) {
-    for (const assetId of imageMediaAssetIds) {
-      const imageUrl = await mintMediaAssetUrl(admin, assetId, schedule.user_id)
-      if (!imageUrl) continue
+    for (const assetId of mediaAssetIds) {
+      const minted = await mintMediaAsset(admin, assetId, schedule.user_id)
+      if (!minted) continue
       try {
         await sendOutbound({
           admin,
           thread: { id: thread.id, psid: thread.psid, last_inbound_at: thread.last_inbound_at },
           pageToken,
-          payload: { kind: 'image', imageUrl },
+          payload: buildMediaPayload(minted.mimeType, minted.url),
           kind: 'bot',
         })
       } catch (e) {
         console.warn(
-          '[followups.fire] image send failed',
+          '[followups.fire] media send failed',
           schedule.id,
           assetId,
           e instanceof Error ? e.message : String(e),
@@ -306,11 +313,11 @@ export async function handleFollowupSend(
         }
       }
     }
-  } else if (imageMediaAssetIds.length > 0 || actionPageId) {
+  } else if (mediaAssetIds.length > 0 || actionPageId) {
     console.warn('[followups.fire] attachments skipped — outside 24h window', {
       scheduleId: schedule.id,
       slot: entry.slot,
-      dropped_image_count: imageMediaAssetIds.length,
+      dropped_media_count: mediaAssetIds.length,
       dropped_action_page: !!actionPageId,
     })
   }

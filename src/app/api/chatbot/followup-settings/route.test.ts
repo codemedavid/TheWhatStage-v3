@@ -163,7 +163,7 @@ describe('PUT /api/chatbot/followup-settings', () => {
       enabled: true,
       touchpoints: DEFAULT_FOLLOWUP_SETTINGS.touchpoints.map((t, i) => ({
         ...t,
-        image_media_asset_ids: i === 0 ? ['11111111-1111-4111-9111-111111111111'] : [],
+        media_asset_ids: i === 0 ? ['11111111-1111-4111-9111-111111111111'] : [],
         action_page_id: null,
       })),
     }
@@ -194,7 +194,7 @@ describe('PUT /api/chatbot/followup-settings', () => {
       enabled: true,
       touchpoints: DEFAULT_FOLLOWUP_SETTINGS.touchpoints.map((t, i) => ({
         ...t,
-        image_media_asset_ids: [],
+        media_asset_ids: [],
         action_page_id: i === 0 ? '22222222-2222-4222-9222-222222222222' : null,
       })),
     }
@@ -225,7 +225,7 @@ describe('PUT /api/chatbot/followup-settings', () => {
       enabled: true,
       touchpoints: DEFAULT_FOLLOWUP_SETTINGS.touchpoints.map((t, i) => ({
         ...t,
-        image_media_asset_ids: i === 0 ? ['11111111-1111-4111-9111-111111111111'] : [],
+        media_asset_ids: i === 0 ? ['11111111-1111-4111-9111-111111111111'] : [],
         action_page_id:        i === 0 ? '22222222-2222-4222-9222-222222222222' : null,
       })),
     }
@@ -269,7 +269,7 @@ describe('PUT /api/chatbot/followup-settings', () => {
       enabled: true,
       touchpoints: DEFAULT_FOLLOWUP_SETTINGS.touchpoints.map((t, i) => ({
         ...t,
-        image_media_asset_ids: i === 0 ? [
+        media_asset_ids: i === 0 ? [
           '11111111-1111-4111-9111-111111111111',
           '22222222-2222-4222-9222-222222222222',
           '33333333-3333-4333-9333-333333333333',
@@ -288,7 +288,7 @@ describe('PUT /api/chatbot/followup-settings', () => {
       enabled: true,
       touchpoints: DEFAULT_FOLLOWUP_SETTINGS.touchpoints.map((t, i) => ({
         ...t,
-        image_media_asset_ids: i === 0 ? ['not-a-uuid'] : [],
+        media_asset_ids: i === 0 ? ['not-a-uuid'] : [],
         action_page_id: null,
       })),
     }
@@ -305,7 +305,7 @@ describe('PUT /api/chatbot/followup-settings', () => {
       enabled: true,
       touchpoints: DEFAULT_FOLLOWUP_SETTINGS.touchpoints.map((t, i) => ({
         ...t,
-        image_media_asset_ids:
+        media_asset_ids:
           i === 0 ? [] :
           i === 1 ? [a, b, c] :
           i === 2 ? [a] : [],

@@ -68,7 +68,7 @@ export async function GET(req: Request) {
     async fetchMediaAsset(id: string) {
       const { data, error } = await client
         .from('media_assets')
-        .select('name, slug, description, version, is_archived, media_folders!inner(name, slug, description)')
+        .select('name, slug, description, mime_type, version, is_archived, media_folders!inner(name, slug, description)')
         .eq('id', id)
         .single();
       if (error || !data) throw new Error(`media asset ${id} missing: ${error?.message}`);
@@ -84,6 +84,7 @@ export async function GET(req: Request) {
           assetName: data.name,
           assetSlug: data.slug,
           assetDescription: data.description,
+          mimeType: data.mime_type,
         }),
       };
     },

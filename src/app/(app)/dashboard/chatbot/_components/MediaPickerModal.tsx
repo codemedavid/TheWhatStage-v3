@@ -1,11 +1,14 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { uploadMediaFiles } from '@/lib/media/client-upload'
+import { MEDIA_KINDS, MEDIA_KIND_LIMITS, mediaKindFromMime, type MediaKind } from '@/lib/media/kind'
 
 export interface PickedAsset {
   id: string
   name: string
   thumbUrl: string | null
+  mimeType?: string
 }
 
 interface AssetRow extends PickedAsset {
@@ -19,6 +22,40 @@ interface Props {
   onSelect: (assets: PickedAsset[]) => void
   initialSelectedIds?: string[]
   maxSelect?: number
+  /** Which library kinds to offer. Defaults to every kind. */
+  kinds?: readonly MediaKind[]
+}
+
+function pickerNoun(kinds: readonly MediaKind[], plural: boolean): string {
+  if (kinds.length === 1) {
+    const one = kinds[0] === 'audio' ? 'voice message' : kinds[0]
+    return plural ? `${one}s` : one
+  }
+  return plural ? 'media' : 'media'
+}
+
+function TilePreview({ asset }: { asset: AssetRow }) {
+  const kind = mediaKindFromMime(asset.mime_type)
+  if (kind === 'video') {
+    return (
+      <div className="mpm-tile-placeholder mpm-tile-av" aria-label="Video">
+        {asset.thumbUrl ? <video src={asset.thumbUrl} muted preload="metadata" /> : null}
+        <span className="mpm-tile-kind">▶ Video</span>
+      </div>
+    )
+  }
+  if (kind === 'audio') {
+    return (
+      <div className="mpm-tile-placeholder mpm-tile-av" aria-label="Voice message">
+        <span className="mpm-tile-kind">🎙 Voice</span>
+      </div>
+    )
+  }
+  return asset.thumbUrl ? (
+    <img src={asset.thumbUrl} alt={asset.name} loading="lazy" />
+  ) : (
+    <div className="mpm-tile-placeholder">{asset.name.slice(0, 2).toUpperCase()}</div>
+  )
 }
 
 export function MediaPickerModal({
@@ -27,7 +64,11 @@ export function MediaPickerModal({
   onSelect,
   initialSelectedIds = [],
   maxSelect = 1,
+  kinds = MEDIA_KINDS,
 }: Props) {
+  const accept = kinds.map((k) => MEDIA_KIND_LIMITS[k].accept).join(',')
+  const nounOne = pickerNoun(kinds, false)
+  const nounMany = pickerNoun(kinds, true)
   const [assets, setAssets] = useState<AssetRow[]>([])
   const [loading, setLoading] = useState(false)
   const [query, setQuery] = useState('')
@@ -50,7 +91,7 @@ export function MediaPickerModal({
     fetch('/api/media/assets')
       .then(async (r) => (r.ok ? r.json() : Promise.reject(new Error(await r.text()))))
       .then((j: { assets: AssetRow[] }) => {
-        setAssets(j.assets)
+        setAssets(j.assets.filter((a) => kinds.includes(mediaKindFromMime(a.mime_type) ?? 'image')))
         if (initialSelectedIds.length > 0) {
           const next = new Map<string, AssetRow>()
           // Preserve the order from initialSelectedIds so the ordinal badges match.
@@ -111,18 +152,13 @@ export function MediaPickerModal({
       if (!folderRes.ok) throw new Error(await folderRes.text())
       const { folderId } = (await folderRes.json()) as { folderId: string }
 
-      const form = new FormData()
-      form.append('folderId', folderId)
-      form.append('files', file)
-      const upRes = await fetch('/dashboard/media/upload', { method: 'POST', body: form })
-      if (!upRes.ok) throw new Error(await upRes.text())
-      const { assets: created } = (await upRes.json()) as { assets: Array<{ id: string; name: string; storage_path: string }> }
+      const created = await uploadMediaFiles({ folderId, files: [file] })
       const first = created[0]
       if (!first) throw new Error('Upload returned no asset')
 
       const listRes = await fetch('/api/media/assets')
       const listJson = (await listRes.json()) as { assets: AssetRow[] }
-      setAssets(listJson.assets)
+      setAssets(listJson.assets.filter((a) => kinds.includes(mediaKindFromMime(a.mime_type) ?? 'image')))
       const fresh = listJson.assets.find((a) => a.id === first.id)
       if (fresh) {
         setSelected((prev) => {
@@ -145,7 +181,7 @@ export function MediaPickerModal({
   }
 
   function commit() {
-    onSelect(Array.from(selected.values()).map((a) => ({ id: a.id, name: a.name, thumbUrl: a.thumbUrl })))
+    onSelect(Array.from(selected.values()).map((a) => ({ id: a.id, name: a.name, thumbUrl: a.thumbUrl, mimeType: a.mime_type })))
     onClose()
   }
 
@@ -153,7 +189,7 @@ export function MediaPickerModal({
     <div className="mpm-backdrop" role="dialog" aria-modal="true" onClick={onClose}>
       <div className="mpm-panel" onClick={(e) => e.stopPropagation()}>
         <header className="mpm-head">
-          <h3>{maxSelect > 1 ? `Pick up to ${maxSelect} images` : 'Pick an image'}</h3>
+          <h3>{maxSelect > 1 ? `Pick up to ${maxSelect} ${nounMany}` : `Pick ${nounOne === 'media' ? 'media' : `a ${nounOne}`}`}</h3>
           <button type="button" onClick={onClose} aria-label="Close">×</button>
         </header>
 
@@ -176,7 +212,7 @@ export function MediaPickerModal({
           <input
             ref={fileInputRef}
             type="file"
-            accept="image/jpeg,image/png,image/webp,image/gif"
+            accept={accept}
             style={{ display: 'none' }}
             onChange={(e) => {
               const f = e.target.files?.[0]
@@ -187,10 +223,10 @@ export function MediaPickerModal({
         </div>
 
         {error && <p className="mpm-error" role="alert">{error}</p>}
-        {overCap && <p className="mpm-cap-hint" role="status">Up to {maxSelect} images.</p>}
+        {overCap && <p className="mpm-cap-hint" role="status">Up to {maxSelect} {nounMany}.</p>}
         {loading && <p className="mpm-empty">Loading…</p>}
         {!loading && filtered.length === 0 && !error && (
-          <p className="mpm-empty">No images. Upload one to get started.</p>
+          <p className="mpm-empty">No {nounMany} yet. Upload one to get started.</p>
         )}
 
         <ul className="mpm-grid">
@@ -205,11 +241,7 @@ export function MediaPickerModal({
                   onClick={() => toggle(a)}
                   aria-pressed={sel}
                 >
-                  {a.thumbUrl ? (
-                    <img src={a.thumbUrl} alt={a.name} loading="lazy" />
-                  ) : (
-                    <div className="mpm-tile-placeholder">{a.name.slice(0, 2).toUpperCase()}</div>
-                  )}
+                  <TilePreview asset={a} />
                   {sel && <span className="mpm-tile-badge" aria-hidden>{ordinal}</span>}
                   <span className="mpm-tile-name" title={a.name}>{a.name}</span>
                 </button>

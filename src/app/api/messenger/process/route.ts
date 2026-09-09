@@ -5,7 +5,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { decryptToken } from '@/lib/facebook/crypto'
 import {
   fetchMessengerProfile,
-  sendMessengerImage,
+  sendMessengerAttachment,
   sendMessengerSenderAction,
 } from '@/lib/facebook/messenger'
 import { sendOutbound, sendProductRecommendation } from '@/lib/messenger/outbound'
@@ -58,6 +58,9 @@ import { ensureNonEmptyReply } from '@/lib/chatbot/reply-guard'
 import { computePauseUntil } from '@/lib/chatbot/pause'
 import { resolveSourceImages } from '@/lib/chatbot/source-images'
 import { firstMentionGate, filterAttachableMedia, mediaAttachKey } from '@/lib/chatbot/attach-gate'
+import { mediaKindFromMime, messengerAttachmentTypeFor } from '@/lib/media/kind'
+import { mediaMessageBody } from '@/lib/media/send'
+import { capMediaPerTurn } from '@/lib/media/turn-cap'
 import { coalesceInbound, MAX_COALESCED_MESSAGES, type CoalesceRow } from '@/lib/chatbot/coalesce'
 
 export const runtime = 'nodejs'
@@ -2358,13 +2361,18 @@ async function sendSelectedMedia(
   // already shown on this thread is NOT re-sent on a later turn UNLESS the
   // customer explicitly asks to see images again (visual intent). The
   // within-job `outbound_media` set stays as the retry-idempotency guard.
-  const eligible = filterAttachableMedia({
-    candidates: args.selectedMedia,
-    sentAssetIds: [...sentIds],
-    attachedItemKeys: attachedKeys,
-    customerText: args.customerMessage,
-    maxPerTurn: MEDIA_ATTACH_CAP,
-  })
+  // One voice/video per turn on top of the total cap — a text reply followed
+  // by two videos never feels like a person typing.
+  const eligible = capMediaPerTurn(
+    filterAttachableMedia({
+      candidates: args.selectedMedia,
+      sentAssetIds: [...sentIds],
+      attachedItemKeys: attachedKeys,
+      customerText: args.customerMessage,
+      maxPerTurn: MEDIA_ATTACH_CAP,
+    }),
+    { maxTotal: MEDIA_ATTACH_CAP },
+  )
 
   if (eligible.length === 0) {
     console.log('[messenger.worker] media none eligible', {
@@ -2401,10 +2409,11 @@ async function sendSelectedMedia(
       continue
     }
     try {
-      const fb = await sendMessengerImage({
+      const fb = await sendMessengerAttachment({
         pageAccessToken: args.pageToken,
         recipientPsid: args.thread.psid,
-        imageUrl: url,
+        attachmentType: messengerAttachmentTypeFor(asset.mimeType),
+        url,
       })
       sent.push({ media_asset_id: asset.id, fb_message_id: fb.message_id })
       sentIds.add(asset.id)
@@ -2421,8 +2430,8 @@ async function sendSelectedMedia(
         sender: 'bot',
         fb_message_id: fb.message_id,
         media_asset_id: asset.id,
-        body: `[image] ${asset.name}`,
-        attachments: [{ type: 'image', media_asset_id: asset.id, storage_path: asset.storagePath }],
+        body: mediaMessageBody(asset),
+        attachments: [{ type: mediaKindFromMime(asset.mimeType) ?? 'image', media_asset_id: asset.id, storage_path: asset.storagePath }],
       })
       const key = mediaAttachKey(asset.id)
       if (!attachedSet.has(key)) {

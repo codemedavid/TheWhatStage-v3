@@ -16,7 +16,8 @@ import {
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { DELAY_PRESETS, humanizeDelay } from '../_lib/sequence-format'
-import { MAX_SEQUENCE_STEPS } from '../_lib/schemas'
+import { MAX_SEQUENCE_STEPS, MAX_STEP_MEDIA } from '../_lib/schemas'
+import { MediaAttachPicker } from '@/app/(app)/_components/MediaAttachPicker'
 
 // crypto.randomUUID is secure-context only (undefined on plain-HTTP LAN/dev
 // origins). Mirror the guarded pattern used elsewhere in the app so the editor
@@ -38,6 +39,7 @@ export type EditorStep = {
   manual_message: string
   fallback_message: string
   enabled: boolean
+  media_asset_ids: string[]
 }
 
 // Sourced from the schema so the UI cap and the server cap can never drift.
@@ -57,6 +59,7 @@ export function newEditorStep(): EditorStep {
     manual_message: '',
     fallback_message: '',
     enabled: true,
+    media_asset_ids: [],
   }
 }
 
@@ -274,6 +277,11 @@ function SortableStep({
         placeholder="Fallback message — sent as-is if the AI can't draft this step (optional)"
         className="mt-1.5 w-full rounded-md border px-2.5 py-1.5 text-[13px]"
         style={inputBase}
+      />
+      <MediaAttachPicker
+        value={step.media_asset_ids}
+        max={MAX_STEP_MEDIA}
+        onChange={(ids) => onUpdate(step.uid, { media_asset_ids: ids })}
       />
     </div>
   )

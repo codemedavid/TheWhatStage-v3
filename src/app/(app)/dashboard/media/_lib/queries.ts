@@ -21,6 +21,8 @@ export interface MediaAssetRow {
   mime_type: string
   byte_size: number
   is_archived: boolean
+  /** Chatbot may offer this asset on semantic relevance alone. */
+  auto_send: boolean
   embedding_status: 'pending' | 'indexed' | 'stale'
   updated_at: string
   signed_url: string | null
@@ -53,7 +55,7 @@ export async function fetchMediaAssets(
 ): Promise<MediaAssetRow[]> {
   let query = supabase
     .from('media_assets')
-    .select('id, folder_id, name, slug, description, storage_path, mime_type, byte_size, is_archived, embedding_status, updated_at')
+    .select('id, folder_id, name, slug, description, storage_path, mime_type, byte_size, is_archived, auto_send, embedding_status, updated_at')
     .eq('user_id', userId)
     .eq('is_archived', false)
     .order('position', { ascending: true })

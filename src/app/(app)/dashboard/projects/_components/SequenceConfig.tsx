@@ -58,6 +58,7 @@ export function SequenceConfig({ stageId, stageName }: { stageId: string; stageN
           manual_message: s.manual_message ?? '',
           fallback_message: s.fallback_message ?? '',
           enabled: s.enabled,
+          media_asset_ids: s.media_asset_ids ?? [],
         })))
         setStageInstructions(seq.stage_instructions ?? '')
         setDoRules(seq.do_rules.join('\n'))
@@ -93,6 +94,7 @@ export function SequenceConfig({ stageId, stageName }: { stageId: string; stageN
       fallback_message: s.fallback_message.trim() || null,
       channel: 'messenger' as const,
       enabled: s.enabled,
+      media_asset_ids: s.media_asset_ids,
     }
   }
 

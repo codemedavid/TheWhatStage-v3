@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { decryptToken } from '@/lib/facebook/crypto'
 import { sendOutbound } from '@/lib/messenger/outbound'
+import { loadSendableAssets, sendMediaAssets } from '@/lib/media/send'
 import { applyStageChange, answerWithClassification, type StageBrief } from '@/lib/chatbot/classify'
 import { renderTemplateVariables, type LeadForRender } from '@/lib/messenger-templates/render'
 import { loadFollowupContext } from './followup-context'
@@ -208,6 +209,10 @@ async function handleSend(
   let outboundPayload: SendNodeConfig['payload'] = config.payload
   let outboundKind: SendNodeConfig['kind'] = config.kind ?? 'workflow_human_agent'
 
+  if (config.payload.kind === 'media') {
+    return handleMediaSend(admin, ctx, config.payload.media_asset_id, outboundKind ?? 'workflow_human_agent')
+  }
+
   if (config.payload.kind === 'utility_template') {
     const rewritten = await rewriteUtilityTemplatePayload(admin, ctx, config.payload)
     if (rewritten.skip) {
@@ -243,6 +248,43 @@ async function handleSend(
       payload: { messageId: result.messageId },
       error: null,
     }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return { edge: 'error', payload: {}, error: msg }
+  }
+}
+
+// Library media goes through the shared media send path (signed URL, kind
+// dispatch, inbox row). A blocked send maps to policy_blocked like text does.
+async function handleMediaSend(
+  admin: AdminClient,
+  ctx: RunContext,
+  mediaAssetId: string,
+  kind: NonNullable<SendNodeConfig['kind']>,
+): Promise<{ edge: string | null; payload: Record<string, unknown>; error: string | null }> {
+  const thread = ctx.thread
+  if (!thread || !ctx.pageToken) {
+    return { edge: 'error', payload: { reason: 'missing_thread_or_token' }, error: 'thread or page token not available' }
+  }
+  try {
+    const assets = await loadSendableAssets(admin, thread.user_id, [mediaAssetId])
+    if (assets.length === 0) {
+      return { edge: 'error', payload: { reason: 'media_asset_missing' }, error: `media asset ${mediaAssetId} not found or archived` }
+    }
+    const result = await sendMediaAssets({
+      admin,
+      thread: { id: thread.id, psid: thread.psid, last_inbound_at: thread.last_inbound_at, user_id: thread.user_id },
+      pageToken: ctx.pageToken,
+      assets,
+      kind,
+      sender: 'bot',
+      logTag: 'workflow.executor',
+    })
+    const sent = result.sent[0]
+    if (sent) return { edge: 'success', payload: { messageId: sent.messageId }, error: null }
+    const reason = result.skipped[0]?.reason ?? 'unknown'
+    if (reason.startsWith('send_blocked:')) return { edge: 'policy_blocked', payload: { reason }, error: null }
+    return { edge: 'error', payload: { reason }, error: `media send failed: ${reason}` }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     return { edge: 'error', payload: {}, error: msg }

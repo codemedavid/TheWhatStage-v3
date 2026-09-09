@@ -4,6 +4,50 @@ import { useRef, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { createMediaFolder, updateMediaAsset, updateMediaFolder } from '../actions'
 import type { MediaAssetRow, MediaFolderRow } from '../_lib/queries'
+import { uploadMediaFiles } from '@/lib/media/client-upload'
+import { MEDIA_KINDS, MEDIA_KIND_LIMITS, isAllowedMediaMime, mediaKindFromMime, mediaKindLabel } from '@/lib/media/kind'
+import { needsDescription } from '@/lib/media/upload'
+
+const UPLOAD_ACCEPT = MEDIA_KINDS.map((k) => MEDIA_KIND_LIMITS[k].accept).join(',')
+
+function KindBadge({ mime }: { mime: string }) {
+  const kind = mediaKindFromMime(mime)
+  if (!kind || kind === 'image') return null
+  return (
+    <span className="rounded-full bg-gray-900/80 px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-wide text-white">
+      {kind === 'audio' ? 'Voice' : 'Video'}
+    </span>
+  )
+}
+
+function AssetPreview({ asset }: { asset: MediaAssetRow }) {
+  const kind = mediaKindFromMime(asset.mime_type)
+  if (!asset.signed_url) {
+    return (
+      <div className="flex h-full items-center justify-center">
+        <ImagePlaceholderIcon className="h-10 w-10 text-gray-200" />
+      </div>
+    )
+  }
+  if (kind === 'video') {
+    return <video src={asset.signed_url} controls preload="metadata" className="h-full w-full bg-black object-contain" />
+  }
+  if (kind === 'audio') {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3 bg-emerald-50/60 px-4">
+        <span className="text-[12px] font-semibold text-emerald-800">Voice message</span>
+        <audio src={asset.signed_url} controls preload="metadata" className="w-full" />
+      </div>
+    )
+  }
+  return (
+    <img
+      src={asset.signed_url}
+      alt={asset.name}
+      className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
+    />
+  )
+}
 
 function FolderIcon({ className }: { className?: string }) {
   return (
@@ -88,13 +132,7 @@ export function MediaManager({
     setUploading(true)
     setUploadError(null)
     try {
-      const fd = new FormData()
-      fd.append('folderId', selectedFolder.id)
-      if (description) fd.append('sharedDescription', description)
-      for (const f of files) fd.append('files', f)
-      const res = await fetch('/dashboard/media/upload', { method: 'POST', body: fd })
-      const body = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error(body.error ?? 'Upload failed')
+      await uploadMediaFiles({ folderId: selectedFolder.id, files, description })
       if (fileInputRef.current) fileInputRef.current.value = ''
       router.refresh()
     } catch (e) {
@@ -116,7 +154,7 @@ export function MediaManager({
   async function handleDrop(e: React.DragEvent) {
     e.preventDefault()
     setIsDragging(false)
-    const files = Array.from(e.dataTransfer.files).filter((f) => f.type.startsWith('image/'))
+    const files = Array.from(e.dataTransfer.files).filter((f) => isAllowedMediaMime(f.type))
     await uploadFiles(files)
   }
 
@@ -316,10 +354,10 @@ export function MediaManager({
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className={`text-[13px] font-semibold ${isDragging ? 'text-emerald-700' : 'text-gray-700'}`}>
-                      {isDragging ? 'Drop to upload' : 'Upload images'}
+                      {isDragging ? 'Drop to upload' : 'Upload images, videos or voice messages'}
                     </p>
                     <p className="text-[11.5px] text-gray-400">
-                      Drag & drop or browse · JPEG, PNG, WebP, GIF · Max 10 MB each
+                      Drag & drop or browse · JPEG/PNG/WebP/GIF up to 10 MB · MP4/MOV video and MP3/M4A/WAV voice up to 25 MB
                     </p>
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
@@ -328,7 +366,7 @@ export function MediaManager({
                       id="media-file-input"
                       type="file"
                       multiple
-                      accept="image/*"
+                      accept={UPLOAD_ACCEPT}
                       className="sr-only"
                       onChange={handleFileChange}
                     />
@@ -367,9 +405,9 @@ export function MediaManager({
                   <div className="mb-4 rounded-2xl bg-gray-50 p-8">
                     <ImagePlaceholderIcon className="mx-auto h-12 w-12 text-gray-200" />
                   </div>
-                  <p className="text-[14px] font-semibold text-gray-500">No images yet</p>
+                  <p className="text-[14px] font-semibold text-gray-500">No media yet</p>
                   <p className="mt-1 text-[12.5px] text-gray-400">
-                    Upload images above to start building your media library
+                    Upload images, videos or voice messages above to start building your media library
                   </p>
                 </div>
               ) : (
@@ -381,39 +419,56 @@ export function MediaManager({
                     >
                       {/* Thumbnail */}
                       <div className="relative aspect-[4/3] overflow-hidden bg-gray-50">
-                        {asset.signed_url ? (
-                          <img
-                            src={asset.signed_url}
-                            alt={asset.name}
-                            className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
-                          />
-                        ) : (
-                          <div className="flex h-full items-center justify-center">
-                            <ImagePlaceholderIcon className="h-10 w-10 text-gray-200" />
-                          </div>
-                        )}
+                        <AssetPreview asset={asset} />
 
-                        {/* Status badge */}
-                        <div className="absolute left-2 top-2">
+                        {/* Status badges */}
+                        <div className="pointer-events-none absolute left-2 top-2 flex items-center gap-1.5">
                           <EmbedBadge status={asset.embedding_status} />
+                          <KindBadge mime={asset.mime_type} />
+                          {asset.auto_send && (
+                            <span
+                              title="The bot may send this on its own when a customer asks for something matching its name or description"
+                              className="rounded-full bg-emerald-600/90 px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-wide text-white"
+                            >
+                              Auto-send
+                            </span>
+                          )}
                         </div>
 
-                        {/* Hover overlay */}
-                        <button
-                          type="button"
-                          onClick={() => setEditingAssetId(editingAssetId === asset.id ? null : asset.id)}
-                          className="absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 transition-all duration-150 group-hover:bg-black/25 group-hover:opacity-100"
-                        >
-                          <span className="rounded-full bg-white/95 px-3.5 py-1.5 text-[12px] font-semibold text-gray-800 shadow-md">
-                            {editingAssetId === asset.id ? 'Close' : 'Edit'}
-                          </span>
-                        </button>
+                        {/* Hover overlay (images only — video/audio need their controls) */}
+                        {mediaKindFromMime(asset.mime_type) === 'image' && (
+                          <button
+                            type="button"
+                            onClick={() => setEditingAssetId(editingAssetId === asset.id ? null : asset.id)}
+                            className="absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 transition-all duration-150 group-hover:bg-black/25 group-hover:opacity-100"
+                          >
+                            <span className="rounded-full bg-white/95 px-3.5 py-1.5 text-[12px] font-semibold text-gray-800 shadow-md">
+                              {editingAssetId === asset.id ? 'Close' : 'Edit'}
+                            </span>
+                          </button>
+                        )}
                       </div>
 
                       {/* Name row (always visible) */}
-                      <div className="border-t border-gray-100 px-3 py-2.5">
-                        <p className="truncate text-[12.5px] font-semibold text-gray-800">{asset.name}</p>
-                        <p className="mt-0.5 truncate font-mono text-[11px] text-emerald-700">@{asset.slug}</p>
+                      <div className="flex items-start justify-between gap-2 border-t border-gray-100 px-3 py-2.5">
+                        <div className="min-w-0">
+                          <p className="truncate text-[12.5px] font-semibold text-gray-800">{asset.name}</p>
+                          <p className="mt-0.5 truncate font-mono text-[11px] text-emerald-700">@{asset.slug}</p>
+                          {needsDescription(asset.mime_type, asset.description) && (
+                            <p className="mt-1 text-[11px] font-medium text-amber-600">
+                              Add a description so the bot knows when to send this {mediaKindLabel(mediaKindFromMime(asset.mime_type) ?? 'image')}.
+                            </p>
+                          )}
+                        </div>
+                        {mediaKindFromMime(asset.mime_type) !== 'image' && (
+                          <button
+                            type="button"
+                            onClick={() => setEditingAssetId(editingAssetId === asset.id ? null : asset.id)}
+                            className="shrink-0 rounded-lg border border-gray-200 bg-white px-2.5 py-1 text-[11.5px] font-medium text-gray-600 hover:bg-gray-50"
+                          >
+                            {editingAssetId === asset.id ? 'Close' : 'Edit'}
+                          </button>
+                        )}
                       </div>
 
                       {/* Inline edit form */}
@@ -446,6 +501,20 @@ export function MediaManager({
                             placeholder="Description for AI retrieval…"
                             className="w-full resize-none rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-[12px] placeholder:text-gray-400 focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-100"
                           />
+                          <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-emerald-100 bg-emerald-50/60 px-2.5 py-2 text-[12px] text-gray-700">
+                            <input
+                              type="checkbox"
+                              name="autoSend"
+                              defaultChecked={asset.auto_send}
+                              className="mt-0.5 h-3.5 w-3.5 rounded accent-emerald-600"
+                            />
+                            <span>
+                              <span className="font-semibold text-emerald-800">Let the bot send this when relevant</span>
+                              <span className="mt-0.5 block text-[11px] leading-snug text-gray-500">
+                                No <span className="font-mono">@{asset.slug}</span> reference needed. The bot matches the customer&apos;s ask against the name and description above and only attaches it when it fits (e.g. a testimonial when they ask for reviews).
+                              </span>
+                            </span>
+                          </label>
                           <div className="flex items-center gap-2">
                             <button
                               disabled={isPending}
