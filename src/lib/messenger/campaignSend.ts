@@ -251,8 +251,8 @@ export async function handleCampaignSend(
     insideWindow,
   })
 
-  // Check if campaign is complete.
-  await maybeMarkCampaignComplete(admin, msg.campaign_id)
+  // Campaign completion is flipped by the agent_campaign_bump RPC once
+  // sent+failed+skipped reaches total — no separate check needed here.
   await markJobDone(admin, job.id, 'done')
 }
 
@@ -321,42 +321,44 @@ async function bumpCounter(
   campaignId: string,
   counter: 'sent' | 'failed' | 'skipped',
 ): Promise<void> {
-  // Postgres doesn't support atomic increment via supabase-js directly,
-  // so we use a raw increment expression via rpc or re-read + write.
-  // The slight race here is acceptable — counters are display-only.
-  const { data } = await admin
-    .from('agent_campaigns')
-    .select(counter)
-    .eq('id', campaignId)
-    .single<Record<string, number>>()
-
-  if (data) {
-    await admin
-      .from('agent_campaigns')
-      .update({ [counter]: (data[counter] ?? 0) + 1 })
-      .eq('id', campaignId)
+  // Atomic SQL increment (see migration 20260907000000). A read-then-write
+  // here lost increments under the parallel worker and left campaigns stuck
+  // in 'sending' forever. The RPC also flips the campaign to 'completed'
+  // once sent+failed+skipped reaches total.
+  const { error } = await admin.rpc('agent_campaign_bump', {
+    p_campaign_id: campaignId,
+    p_counter: counter,
+  })
+  if (error) {
+    console.error('[campaignSend] counter bump failed', { campaignId, counter, error: error.message })
   }
 }
 
-async function maybeMarkCampaignComplete(
+/**
+ * Terminal failure path used by the worker once a campaign job has exhausted
+ * its retries (e.g. Meta #551 "person isn't available"). Without this the
+ * message row stayed 'pending' and the campaign could never complete.
+ */
+export async function failCampaignMessage(
   admin: SupabaseClient,
-  campaignId: string,
+  job: CampaignJob,
+  errorMessage: string,
 ): Promise<void> {
-  const { data } = await admin
-    .from('agent_campaigns')
-    .select('total, sent, failed, skipped')
-    .eq('id', campaignId)
-    .single<{ total: number; sent: number; failed: number; skipped: number }>()
+  const campaignMessageId = job.payload?.campaign_message_id
+  if (!campaignMessageId) return
 
-  if (!data) return
+  const { data: msg } = await admin
+    .from('agent_campaign_messages')
+    .select('id, campaign_id, status')
+    .eq('id', campaignMessageId)
+    .maybeSingle<{ id: string; campaign_id: string; status: string }>()
+  if (!msg || msg.status !== 'pending') return
 
-  const processed = data.sent + data.failed + data.skipped
-  if (processed >= data.total) {
-    await admin
-      .from('agent_campaigns')
-      .update({ status: 'completed', completed_at: new Date().toISOString() })
-      .eq('id', campaignId)
-  }
+  await updateMessage(admin, campaignMessageId, {
+    status: 'failed',
+    error: errorMessage.slice(0, 1000),
+  })
+  await bumpCounter(admin, msg.campaign_id, 'failed')
 }
 
 async function markJobDone(

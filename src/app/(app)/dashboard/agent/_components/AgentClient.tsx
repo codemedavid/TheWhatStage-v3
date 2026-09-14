@@ -140,6 +140,43 @@ function fmtDate(iso: string) {
 }
 
 /* ── main component ── */
+type AudienceChoice = 'auto' | 'all' | `stage:${string}`
+
+const ALL_LEADS_LABEL = 'All leads — every stage'
+
+// Body fields the preview API reads for audience scoping.
+function audienceBody(choice: AudienceChoice): { allStages?: true; stageName?: string } {
+  if (choice === 'all') return { allStages: true }
+  if (choice.startsWith('stage:')) return { stageName: choice.slice('stage:'.length) }
+  return {}
+}
+
+function AudienceSelect({
+  value,
+  onChange,
+  stages,
+  allowAuto,
+}: {
+  value: AudienceChoice
+  onChange: (v: AudienceChoice) => void
+  stages: Stage[]
+  allowAuto: boolean
+}) {
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value as AudienceChoice)}
+      style={{ padding:'8px 10px', borderRadius:6, border:`1px solid ${S.border}`, fontSize:13, background:S.surface, color:S.ink }}
+    >
+      {allowAuto && <option value="auto">Auto — infer stage from command</option>}
+      <option value="all">{ALL_LEADS_LABEL}</option>
+      {stages.map((s) => (
+        <option key={s.id} value={`stage:${s.name}`}>{s.name}</option>
+      ))}
+    </select>
+  )
+}
+
 export function AgentClient({ stages, templates, actionPages, categories, pendingApprovalCount = 0, initialTemplateId = null, initialMode = null }: AgentClientProps) {
   const router = useRouter()
   const [tab, setTab] = useState<'new' | 'history'>('new')
@@ -163,7 +200,12 @@ export function AgentClient({ stages, templates, actionPages, categories, pendin
     }
   }, [router])
   const [variableRules, setVariableRules] = useState<VariableMap>({})
-  const [stageName, setStageName] = useState<string>('')
+  // Audience picker. 'auto' = let the AI infer the stage from the command
+  // (per-lead AI mode only); 'all' = every lead regardless of stage;
+  // 'stage:<name>' = one pipeline stage.
+  const [audience, setAudience] = useState<AudienceChoice>(
+    (initialMode ?? 'shared_template') === 'per_lead_ai' ? 'auto' : 'all',
+  )
   const [lastActiveDays, setLastActiveDays] = useState<string>('')
   const [actionPageId, setActionPageId] = useState<string>('')
   const [mediaAssetIds, setMediaAssetIds] = useState<string[]>([])
@@ -276,7 +318,7 @@ export function AgentClient({ stages, templates, actionPages, categories, pendin
             templateVariables: variableRules,
             attachedActionPageId: actionPageId || null,
             mediaAssetIds,
-            stageName: stageName.trim() || null,
+            ...audienceBody(audience),
             lastActiveWithinDays: lastActiveDays ? Number(lastActiveDays) : null,
             // command_text is still persisted on the campaign row for history;
             // synthesize a human-readable label from the chosen template.
@@ -284,7 +326,7 @@ export function AgentClient({ stages, templates, actionPages, categories, pendin
               ? `[Template] ${selectedTemplate.display_name}`
               : '[Template]',
           }
-        : { command, mediaAssetIds }
+        : { command, mediaAssetIds, ...audienceBody(audience) }
 
     fetch('/api/agent/preview', {
       method: 'POST',
@@ -379,7 +421,7 @@ export function AgentClient({ stages, templates, actionPages, categories, pendin
     templateId,
     variableRules,
     actionPageId,
-    stageName,
+    audience,
     lastActiveDays,
     selectedTemplate,
   ])
@@ -517,7 +559,12 @@ export function AgentClient({ stages, templates, actionPages, categories, pendin
           ] as const).map(([m, label]) => (
             <button
               key={m}
-              onClick={() => setSendMode(m)}
+              onClick={() => {
+                setSendMode(m)
+                // "Auto" only exists for AI mode; template mode has no
+                // command to infer a stage from, so fall back to everyone.
+                if (m === 'shared_template' && audience === 'auto') setAudience('all')
+              }}
               style={{
                 padding:'6px 14px', borderRadius:7, border:'none', fontSize:13,
                 fontWeight: sendMode === m ? 500 : 400,
@@ -682,17 +729,8 @@ export function AgentClient({ stages, templates, actionPages, categories, pendin
 
                 <div style={{ display:'flex', gap:10 }}>
                   <label style={{ display:'flex', flexDirection:'column', gap:6, flex:1 }}>
-                    <span style={{ fontSize:12, fontWeight:500, color:S.ink2 }}>Audience: stage</span>
-                    <select
-                      value={stageName}
-                      onChange={(e) => setStageName(e.target.value)}
-                      style={{ padding:'8px 10px', borderRadius:6, border:`1px solid ${S.border}`, fontSize:13, background:S.surface, color:S.ink }}
-                    >
-                      <option value="">— any stage —</option>
-                      {stages.map((s) => (
-                        <option key={s.id} value={s.name}>{s.name}</option>
-                      ))}
-                    </select>
+                    <span style={{ fontSize:12, fontWeight:500, color:S.ink2 }}>Audience</span>
+                    <AudienceSelect value={audience} onChange={setAudience} stages={stages} allowAuto={false} />
                   </label>
                   <label style={{ display:'flex', flexDirection:'column', gap:6, flex:1 }}>
                     <span style={{ fontSize:12, fontWeight:500, color:S.ink2 }}>Active within (days)</span>
@@ -728,6 +766,25 @@ export function AgentClient({ stages, templates, actionPages, categories, pendin
 
         {/* ── Command Bar ── */}
         <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+          {sendMode === 'per_lead_ai' && (
+            <div style={{ display:'flex', gap:10 }}>
+              <label style={{ display:'flex', flexDirection:'column', gap:6, flex:1 }}>
+                <span style={{ fontSize:12, fontWeight:500, color:S.ink2 }}>Audience</span>
+                <AudienceSelect value={audience} onChange={setAudience} stages={stages} allowAuto />
+              </label>
+              <label style={{ display:'flex', flexDirection:'column', gap:6, flex:1 }}>
+                <span style={{ fontSize:12, fontWeight:500, color:S.ink2 }}>Active within (days)</span>
+                <input
+                  type="number"
+                  min={1}
+                  value={lastActiveDays}
+                  onChange={(e) => setLastActiveDays(e.target.value)}
+                  placeholder="any"
+                  style={{ padding:'8px 10px', borderRadius:6, border:`1px solid ${S.border}`, fontSize:13, background:S.surface, color:S.ink }}
+                />
+              </label>
+            </div>
+          )}
           {sendMode === 'per_lead_ai' && (
             <MessageComposer
               value={command}

@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { fetchAllPages } from '@/lib/agent/batch'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -36,9 +37,13 @@ export async function GET(
     return Response.json({ error: 'campaign not found' }, { status: 404 })
   }
 
-  const { data, error } = await admin
-    .from('agent_campaign_messages')
-    .select(`
+  // Paginate: a campaign can hold thousands of rows, well past max_rows.
+  let messages: unknown[]
+  try {
+    messages = await fetchAllPages(async (from, to) => {
+      const { data, error } = await admin
+        .from('agent_campaign_messages')
+        .select(`
       id,
       lead_id,
       draft_text,
@@ -53,12 +58,16 @@ export async function GET(
       created_at,
       leads ( name )
     `)
-    .eq('campaign_id', campaignId)
-    .order('created_at', { ascending: true })
-
-  if (error) {
-    return Response.json({ error: error.message }, { status: 500 })
+        .eq('campaign_id', campaignId)
+        .order('created_at', { ascending: true })
+        .order('id', { ascending: true })
+        .range(from, to)
+      if (error) throw new Error(error.message)
+      return data ?? []
+    })
+  } catch (err) {
+    return Response.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 })
   }
 
-  return Response.json({ messages: data ?? [] })
+  return Response.json({ messages })
 }

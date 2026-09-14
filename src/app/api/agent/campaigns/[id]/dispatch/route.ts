@@ -1,10 +1,15 @@
 import { NextRequest } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { chunk } from '@/lib/agent/batch'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
-export const maxDuration = 30
+export const maxDuration = 60
+
+// Rows per INSERT. Keeps each request body small and, because we read the
+// inserted ids back via `.select()`, each response under PostgREST max_rows.
+const INSERT_CHUNK_SIZE = 500
 
 interface DraftMessage {
   lead_id: string
@@ -93,11 +98,20 @@ export async function POST(
     return Response.json({ error: 'campaign is already being dispatched' }, { status: 409 })
   }
 
-  // Upsert agent_campaign_messages for all included rows.
+  const failCampaign = async (message: string, status = 500) => {
+    await admin.from('agent_campaigns').update({ status: 'failed' }).eq('id', campaignId)
+    return Response.json({ error: message }, { status })
+  }
+
   const includedMessages = messages.filter((m) => m.user_included !== false)
 
-  if (includedMessages.length > 0) {
-    const messageRows = includedMessages.map((m) => ({
+  // Insert campaign messages in chunks, reading the generated ids straight
+  // back from each INSERT. (Re-querying `status = 'pending'` afterwards
+  // silently capped the result at max_rows, so campaigns over 1000 leads
+  // only ever enqueued the first 1000.)
+  const inserted: Array<{ id: string; thread_id: string }> = []
+  for (const batch of chunk(includedMessages, INSERT_CHUNK_SIZE)) {
+    const rows = batch.map((m) => ({
       campaign_id: campaignId,
       lead_id: m.lead_id,
       thread_id: m.thread_id,
@@ -107,54 +121,39 @@ export async function POST(
       user_edited: m.user_edited ?? false,
       status: 'pending',
     }))
-
-    const { error: insertErr } = await admin
+    const { data, error } = await admin
       .from('agent_campaign_messages')
-      .insert(messageRows)
-
-    if (insertErr) {
-      await admin
-        .from('agent_campaigns')
-        .update({ status: 'failed' })
-        .eq('id', campaignId)
-      return Response.json({ error: `failed to insert messages: ${insertErr.message}` }, { status: 500 })
-    }
+      .insert(rows)
+      .select('id, thread_id')
+    if (error) return failCampaign(`failed to insert messages: ${error.message}`)
+    inserted.push(...((data ?? []) as Array<{ id: string; thread_id: string }>))
   }
 
-  // Fetch the inserted message IDs for job creation.
-  const { data: insertedMsgs } = await admin
-    .from('agent_campaign_messages')
-    .select('id, thread_id')
-    .eq('campaign_id', campaignId)
-    .eq('status', 'pending')
-
-  // Bulk insert messenger_jobs with kind='agent_campaign_send'.
-  if (insertedMsgs && insertedMsgs.length > 0) {
-    const jobs = insertedMsgs.map((msg) => ({
-      thread_id: msg.thread_id as string,
+  // Enqueue one messenger_jobs row (kind='agent_campaign_send') per message.
+  const scheduledAt = new Date().toISOString()
+  for (const batch of chunk(inserted, INSERT_CHUNK_SIZE)) {
+    const jobs = batch.map((msg) => ({
+      thread_id: msg.thread_id,
       user_id: userId,
       kind: 'agent_campaign_send',
-      payload: { campaign_message_id: msg.id as string },
+      payload: { campaign_message_id: msg.id },
       status: 'queued',
-      scheduled_at: new Date().toISOString(),
+      scheduled_at: scheduledAt,
     }))
-
-    const { error: jobErr } = await admin.from('messenger_jobs').insert(jobs)
-    if (jobErr) {
-      await admin
-        .from('agent_campaigns')
-        .update({ status: 'failed' })
-        .eq('id', campaignId)
-      return Response.json({ error: `failed to enqueue jobs: ${jobErr.message}` }, { status: 500 })
-    }
+    const { error } = await admin.from('messenger_jobs').insert(jobs)
+    if (error) return failCampaign(`failed to enqueue jobs: ${error.message}`)
   }
 
-  // Mark sending.
+  // Mark sending. `total` is what the worker's completion check counts up to.
+  // Nothing enqueued means nothing will ever bump the counters, so complete
+  // immediately instead of leaving the campaign in 'sending'.
+  const nothingToSend = inserted.length === 0
   await admin
     .from('agent_campaigns')
     .update({
-      status: 'sending',
-      total: includedMessages.length,
+      status: nothingToSend ? 'completed' : 'sending',
+      total: inserted.length,
+      ...(nothingToSend ? { completed_at: new Date().toISOString() } : {}),
     })
     .eq('id', campaignId)
 
@@ -172,5 +171,5 @@ export async function POST(
     )
   }
 
-  return Response.json({ ok: true, campaign_id: campaignId, enqueued: includedMessages.length })
+  return Response.json({ ok: true, campaign_id: campaignId, enqueued: inserted.length })
 }
