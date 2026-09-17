@@ -1,37 +1,37 @@
 import { describe, it, expect, vi } from 'vitest'
 import { costMicros, isModelPriced } from './pricing'
 
-const MODEL = 'deepseek/deepseek-v4-flash'
+const MODEL = 'deepseek/deepseek-v4.1-flash'
 
 describe('costMicros', () => {
   it('bills fresh input + output at the model rate', () => {
-    // 1M fresh input @ $0.13 + 1M output @ $0.13 = $0.26 = 260_000 micros
+    // 1M fresh input @ $0.15 + 1M output @ $0.60 = $0.75 = 750_000 micros
     const got = costMicros(MODEL, {
       promptTokens: 1_000_000,
       cachedPromptTokens: 0,
       completionTokens: 1_000_000,
     })
-    expect(got).toBe(260_000)
+    expect(got).toBe(750_000)
   })
 
   it('discounts cached prompt tokens (split from fresh input)', () => {
-    // 1M prompt of which 1M cached @ $0.013, 0 fresh, 0 output = $0.013 = 13_000 micros
+    // 1M prompt of which 1M cached @ $0.015, 0 fresh, 0 output = $0.015 = 15_000 micros
     const got = costMicros(MODEL, {
       promptTokens: 1_000_000,
       cachedPromptTokens: 1_000_000,
       completionTokens: 0,
     })
-    expect(got).toBe(13_000)
+    expect(got).toBe(15_000)
   })
 
   it('treats cached as a subset of prompt (fresh = prompt - cached)', () => {
-    // 1M prompt, 600k cached → 400k fresh @0.13 = 52_000, 600k cached @0.013 = 7_800
+    // 1M prompt, 600k cached → 400k fresh @0.15 = 60_000, 600k cached @0.015 = 9_000
     const got = costMicros(MODEL, {
       promptTokens: 1_000_000,
       cachedPromptTokens: 600_000,
       completionTokens: 0,
     })
-    expect(got).toBe(52_000 + 7_800)
+    expect(got).toBe(60_000 + 9_000)
   })
 
   it('never goes negative when cached exceeds prompt (defensive)', () => {

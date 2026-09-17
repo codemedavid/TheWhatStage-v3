@@ -12,9 +12,9 @@ export const ragConfig = {
   // typically lands on a GPU provider when one is connected to your HF account.
   embedModel: process.env.RAG_EMBED_MODEL ?? 'BAAI/bge-m3',
   rerankModel: process.env.RAG_RERANK_MODEL ?? 'BAAI/bge-reranker-v2-m3',
-  llmModel: process.env.RAG_LLM_MODEL ?? 'meta-llama/Llama-3.3-70B-Instruct:groq',
+  llmModel: process.env.RAG_LLM_MODEL ?? 'deepseek/deepseek-v4.1-flash',
   classifierModel:
-    process.env.RAG_CLASSIFIER_MODEL ?? 'meta-llama/Llama-3.1-8B-Instruct:groq',
+    process.env.RAG_CLASSIFIER_MODEL ?? 'deepseek/deepseek-v4.1-flash',
   hfRouterBaseUrl: process.env.RAG_HF_ROUTER_URL ?? 'https://router.huggingface.co/v1',
   // LLM client (chat + classifier) is OpenAI-compatible. Defaults to the HF
   // router for backward compatibility; override to point at OpenRouter etc.

@@ -9,7 +9,7 @@ vi.mock('@sentry/nextjs', () => ({ captureMessage: (...a: unknown[]) => captureM
 import { recordUsage, recordUsageDeferred } from './recordUsage'
 import { costMicros } from './pricing'
 
-const DEEPSEEK = 'deepseek/deepseek-v4-flash'
+const DEEPSEEK = 'deepseek/deepseek-v4.1-flash'
 
 function makeSupabase() {
   const upsert = vi.fn().mockResolvedValue({ error: null })

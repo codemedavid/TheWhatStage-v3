@@ -8,10 +8,10 @@
  * (i.e. the value of RAG_LLM_MODEL / OPENROUTER_EMBED_MODEL), not a friendly
  * alias.
  *
- * ⚠️  RATES BELOW ARE ESTIMATES derived from the project's own cost analysis
- * (DEEPSEEK_COST_RECHECK.md: blended ~$0.13/M, ~96% input; cache reads modeled
- * at ~0.1× the input rate). VERIFY against the live OpenRouter dashboard and
- * replace with the provider's exact per-tier rates before invoicing anyone.
+ * ⚠️  RATES BELOW ARE ESTIMATES from OpenRouter listed prices (not first-party
+ * DeepSeek rates). VERIFY against the live OpenRouter dashboard and replace
+ * with the provider's exact per-tier rates before invoicing anyone. Prefer
+ * `usage.cost` from the provider when present.
  */
 
 interface ModelPrice {
@@ -25,6 +25,13 @@ interface ModelPrice {
 
 const PRICES: Record<string, ModelPrice> = {
   // Chat + classifier (RAG_LLM_MODEL / RAG_CLASSIFIER_MODEL).
+  // OpenRouter listed: $0.15 in / $0.60 out / $0.015 cache-read (0.1× input).
+  'deepseek/deepseek-v4.1-flash': {
+    inputPerM: 0.15,
+    cachedInputPerM: 0.015,
+    outputPerM: 0.60,
+  },
+  // Kept so leftover ledger rows / tests for the previous chat model still price.
   'deepseek/deepseek-v4-flash': {
     inputPerM: 0.13,
     cachedInputPerM: 0.013, // ~0.1× input (audit model for prefix-cache reads)

@@ -22,7 +22,7 @@ vi.mock('@/lib/rag', async (orig) => {
           text: await (llmMocks.complete as (...a: unknown[]) => Promise<string>)(...args),
           usage: null,
           finishReason: null,
-          model: 'deepseek/deepseek-v4-flash',
+          model: 'deepseek/deepseek-v4.1-flash',
         }),
       }
     }),
