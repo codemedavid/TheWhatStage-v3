@@ -1,7 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { BulkContext } from './types'
 import { STAGE_EMBED } from '@/lib/projects/stage-embed'
-import { fetchByIdChunks } from './batch'
+import { fetchAllPages, fetchByIdChunks } from './batch'
 
 const COOLDOWN_HOURS = 48
 const DEFAULT_DAILY_CAP = 5000
@@ -36,7 +36,7 @@ export async function loadContext(
   // Every `.in(thread_id, …)` lookup is chunked (see batch.ts): thousands of
   // UUIDs in one GET would blow the URL limit, and a single response can't
   // carry more than max_rows anyway.
-  const [lastInboundRows, optinRows, otnRows, cooldownRows, capRes, threadRows] =
+  const [lastInboundRows, optinRows, otnRows, cooldownRows, capRows, threadRows] =
     await Promise.all([
       // Newest inbound message body per thread, via DISTINCT ON in SQL so a
       // chatty thread can't crowd the others out of the page.
@@ -91,7 +91,18 @@ export async function loadContext(
       }),
 
       // Daily cap: fetch user's campaign IDs first, then count sent messages.
-      admin.from('agent_campaigns').select('id').eq('user_id', userId),
+      // Paged, because a user who runs campaigns regularly will pass max_rows
+      // and a truncated list silently undercounts the cap.
+      fetchAllPages<{ id: string }>(async (from, to) => {
+        const { data, error } = await admin
+          .from('agent_campaigns')
+          .select('id')
+          .eq('user_id', userId)
+          .order('id', { ascending: true })
+          .range(from, to)
+        if (error) throw new Error(`loadContext: campaign list failed — ${error.message}`)
+        return (data ?? []) as Array<{ id: string }>
+      }),
 
       // Thread -> lead mapping, so we can align drafts to each customer's project.
       fetchByIdChunks<{ id: string; lead_id: string | null }>(threadIds, async (ids) => {
@@ -127,18 +138,24 @@ export async function loadContext(
 
   const cooldownThreadIds = new Set<string>(cooldownRows.map((r) => r.thread_id))
 
-  // Second pass: count sent campaign messages in last 24h for this user's campaigns.
-  const userCampaignIds = (capRes.data ?? []).map((r) => (r as { id: string }).id)
-  let dailyCapUsed = 0
-  if (userCampaignIds.length > 0) {
-    const { count } = await admin
+  // Second pass: count sent campaign messages in last 24h for this user's
+  // campaigns. Chunked like every other `.in()` here, and it throws rather
+  // than defaulting to 0 — a swallowed error used to report an empty budget
+  // and wave a campaign straight past the daily cap.
+  const userCampaignIds = capRows.map((r) => r.id)
+  const countsPerChunk = await fetchByIdChunks<number>(userCampaignIds, async (ids) => {
+    const { count, error } = await admin
       .from('agent_campaign_messages')
       .select('id', { count: 'exact', head: true })
-      .in('campaign_id', userCampaignIds)
+      .in('campaign_id', ids)
       .eq('status', 'sent')
       .gte('sent_at', dailyCutoff)
-    dailyCapUsed = count ?? 0
-  }
+    if (error) {
+      throw new Error(`loadContext: daily cap count failed — ${error.message}`)
+    }
+    return [count ?? 0]
+  })
+  const dailyCapUsed = countsPerChunk.reduce((sum, n) => sum + n, 0)
 
   const leadIds = [
     ...new Set(threadRows.map((r) => r.lead_id).filter((id): id is string => !!id)),

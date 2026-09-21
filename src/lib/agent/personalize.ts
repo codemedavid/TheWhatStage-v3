@@ -11,6 +11,8 @@
 
 export interface PersonalizeLead {
   name: string | null
+  // Carried so callers can pass a lead row straight through. Custom fields are
+  // deliberately NOT substitutable here — see the note on TAG_RE below.
   custom_fields?: Record<string, unknown> | null
 }
 
@@ -31,8 +33,12 @@ export const PERSONALIZATION_TAGS = [
 ] as const
 
 // Any bracketed run of letters, digits, underscores, spaces or hyphens.
-// Deliberately narrow so real prose in brackets — "[see pricing]" is fine,
-// but "[call me @ 9]" is not a tag — is left alone.
+//
+// Only the three documented name tags are ever substituted. Bracketed prose an
+// operator writes — "ask about [budget]", "see the [notes] tab" — is left
+// verbatim, deliberately: resolving arbitrary keys would let a stray bracket
+// turn into internal CRM data and send different text to each customer with no
+// warning. Template mode already has an explicit `lead_field` rule for that.
 const TAG_RE = /\[\s*([a-z0-9_ -]+?)\s*\]/gi
 
 const FULL_NAME_KEYS = new Set(['name', 'full_name', 'fullname'])
@@ -63,18 +69,6 @@ export function lastNameOf(name: string | null | undefined): string {
   return parts.slice(1).join(' ')
 }
 
-function customFieldValue(
-  lead: PersonalizeLead,
-  key: string,
-  rawKey: string,
-): string | null {
-  const fields = lead.custom_fields
-  if (!fields) return null
-  // Match the normalized key first, then the spelling the user actually typed.
-  const value = fields[key] ?? fields[rawKey.trim()]
-  return typeof value === 'string' && value.trim() !== '' ? value : null
-}
-
 /**
  * Replace every known merge tag in `text` with this lead's values.
  * Unknown bracket text is preserved verbatim.
@@ -96,7 +90,7 @@ export function personalize(
     if (FIRST_NAME_KEYS.has(key)) return firstNameOf(lead.name) || fallback
     if (LAST_NAME_KEYS.has(key)) return lastNameOf(lead.name) || fallback
 
-    return customFieldValue(lead, key, rawKey) ?? match
+    return match
   })
 }
 

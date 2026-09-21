@@ -335,8 +335,11 @@ export async function POST(req: NextRequest) {
 
                 let draft = ''
                 if (policy.policy !== 'paused') {
-                  draft = await generateDraft(lead, intent, ctx)
+                  // Claim the cap slot BEFORE awaiting. Decrementing after the
+                  // LLM call let the whole first concurrency window read the
+                  // same pre-decrement value and overshoot the daily cap.
                   capRemaining = Math.max(0, capRemaining - 1)
+                  draft = await generateDraft(lead, intent, ctx)
                 }
 
                 send('draft', {

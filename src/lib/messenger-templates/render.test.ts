@@ -122,13 +122,15 @@ describe('renderTemplateVariables — personalization tags in static text', () =
     expect(out).toEqual(['Hi there'])
   })
 
-  it('substitutes a custom field tag inside static text', () => {
+  it('leaves bracketed prose alone — only name tags are substituted', () => {
+    // A custom field still has its own explicit `lead_field` rule; brackets in
+    // static text must never silently become CRM data.
     const out = renderTemplateVariables(
       { '1': { kind: 'static', text: 'from [city]' } },
       1,
       baseLead,
     )
-    expect(out).toEqual(['from Manila'])
+    expect(out).toEqual(['from [city]'])
   })
 
   it('leaves static text without tags untouched', () => {

@@ -145,6 +145,10 @@ type AudienceChoice = 'auto' | 'all' | `stage:${string}`
 
 const ALL_LEADS_LABEL = 'All leads — every stage'
 
+// Serverless request bodies are capped around 4.5MB. Stop well short so the
+// user gets a readable message rather than a rejected request.
+const MAX_DISPATCH_BODY_BYTES = 3_500_000
+
 // Merge-tag chips for every composer on this page. Each recipient gets their
 // own value substituted at send time.
 const TAG_CHIPS = PERSONALIZATION_TAGS.map((t) => ({
@@ -458,10 +462,45 @@ export function AgentClient({ stages, templates, actionPages, categories, pendin
     setPhase('sending')
     setError(null)
 
+    // Send only what the server reads, and only the rows it will keep. At a
+    // few thousand recipients the excluded rows and display-only `name` were
+    // pure weight on a request body that has a hard platform ceiling.
+    const payload = drafts
+      .filter((d) => d.user_included !== false)
+      .map((d) => ({
+        lead_id: d.lead_id,
+        thread_id: d.thread_id,
+        draft: d.draft,
+        policy: d.policy,
+        user_included: true,
+        user_edited: d.user_edited ?? false,
+      }))
+
+    if (payload.length === 0) {
+      setError('Nothing to send — every recipient is excluded.')
+      setPhase('preview')
+      dispatchingRef.current = false
+      return
+    }
+
+    const body = JSON.stringify({ messages: payload })
+
+    // A rejected oversized body surfaces as an opaque network error, so say
+    // plainly what happened instead of "unknown error".
+    if (body.length > MAX_DISPATCH_BODY_BYTES) {
+      setError(
+        `This campaign is too large to send in one request (${payload.length} recipients). `
+        + 'Narrow the audience — for example by stage, or by "active within" days — and send in batches.',
+      )
+      setPhase('preview')
+      dispatchingRef.current = false
+      return
+    }
+
     const res = await fetch(`/api/agent/campaigns/${campaignId}/dispatch`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ messages: drafts }),
+      body,
     }).catch((err) => { setError((err as Error).message); return null })
 
     if (!res || !res.ok) {

@@ -108,22 +108,27 @@ describe('personalize — leads with no usable name', () => {
   })
 })
 
-describe('personalize — custom field tags', () => {
-  it('substitutes an arbitrary custom field by name', () => {
+describe('personalize — brackets that are not name tags', () => {
+  // Only the three documented name tags are substituted. Everything else in
+  // brackets is the operator's own prose and must survive untouched: a
+  // campaign that rewrote "[budget]" into a CRM value would send different,
+  // possibly internal, text to each customer with no warning.
+  it('leaves bracketed prose alone even when a custom field shares the name', () => {
     const lead = { name: 'Ana', custom_fields: { company: 'Acme Signs' } }
-    expect(personalize('Hi [first_name] from [company]', lead)).toBe(
-      'Hi Ana from Acme Signs',
+    expect(personalize('Ask [company] about the quote', lead)).toBe(
+      'Ask [company] about the quote',
     )
   })
 
-  it('leaves the bracket text alone when the custom field is absent', () => {
-    const lead = { name: 'Ana', custom_fields: {} }
-    expect(personalize('Hi [company]', lead)).toBe('Hi [company]')
+  it('leaves bracketed prose alone when there are no custom fields', () => {
+    expect(personalize('See the [notes] tab', { name: 'Ana' })).toBe('See the [notes] tab')
   })
 
-  it('ignores non-string custom field values', () => {
-    const lead = { name: 'Ana', custom_fields: { company: { nested: true } } }
-    expect(personalize('Hi [company]', lead)).toBe('Hi [company]')
+  it('still substitutes name tags in the same message', () => {
+    const lead = { name: 'Ana Reyes', custom_fields: { budget: '50k' } }
+    expect(personalize('Hi [first_name], what is your [budget]?', lead)).toBe(
+      'Hi Ana, what is your [budget]?',
+    )
   })
 })
 
