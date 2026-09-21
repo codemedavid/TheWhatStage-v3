@@ -91,3 +91,52 @@ describe('renderTemplateVariables — property_field', () => {
     expect(out).toEqual([''])
   })
 })
+
+describe('renderTemplateVariables — personalization tags in static text', () => {
+  it('substitutes [first_name] inside a static variable', () => {
+    // Arrange
+    const variables = { '1': { kind: 'static' as const, text: 'Hi [first_name]!' } }
+
+    // Act
+    const out = renderTemplateVariables(variables, 1, baseLead)
+
+    // Assert
+    expect(out).toEqual(['Hi Sarah!'])
+  })
+
+  it('substitutes [name] inside a static variable', () => {
+    const out = renderTemplateVariables(
+      { '1': { kind: 'static', text: 'Hi [name]' } },
+      1,
+      baseLead,
+    )
+    expect(out).toEqual(['Hi Sarah Cruz'])
+  })
+
+  it('falls back to a readable greeting for a nameless lead', () => {
+    const out = renderTemplateVariables(
+      { '1': { kind: 'static', text: 'Hi [first_name]' } },
+      1,
+      { name: null, custom_fields: null },
+    )
+    expect(out).toEqual(['Hi there'])
+  })
+
+  it('substitutes a custom field tag inside static text', () => {
+    const out = renderTemplateVariables(
+      { '1': { kind: 'static', text: 'from [city]' } },
+      1,
+      baseLead,
+    )
+    expect(out).toEqual(['from Manila'])
+  })
+
+  it('leaves static text without tags untouched', () => {
+    const out = renderTemplateVariables(
+      { '1': { kind: 'static', text: 'Limited offer' } },
+      1,
+      baseLead,
+    )
+    expect(out).toEqual(['Limited offer'])
+  })
+})

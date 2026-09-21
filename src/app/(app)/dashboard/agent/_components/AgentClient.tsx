@@ -6,6 +6,7 @@ import type { TemplateButton, TemplateCategory } from '@/lib/messenger-templates
 import { renderTemplate } from '@/lib/messenger-templates/types'
 import type { VariableMap, VariableRule } from '@/lib/messenger-templates/render'
 import { MessageComposer } from '@/app/(app)/_components/MessageComposer'
+import { PERSONALIZATION_TAGS } from '@/lib/agent/personalize'
 import { MediaAttachPicker } from '@/app/(app)/_components/MediaAttachPicker'
 
 /* ── design tokens (matches the rest of the dashboard) ── */
@@ -144,6 +145,14 @@ type AudienceChoice = 'auto' | 'all' | `stage:${string}`
 
 const ALL_LEADS_LABEL = 'All leads — every stage'
 
+// Merge-tag chips for every composer on this page. Each recipient gets their
+// own value substituted at send time.
+const TAG_CHIPS = PERSONALIZATION_TAGS.map((t) => ({
+  label: t.tag,
+  text: t.tag,
+  title: `${t.label} — e.g. ${t.example}`,
+}))
+
 // Body fields the preview API reads for audience scoping.
 function audienceBody(choice: AudienceChoice): { allStages?: true; stageName?: string } {
   if (choice === 'all') return { allStages: true }
@@ -203,12 +212,25 @@ export function AgentClient({ stages, templates, actionPages, categories, pendin
   // Audience picker. 'auto' = let the AI infer the stage from the command
   // (per-lead AI mode only); 'all' = every lead regardless of stage;
   // 'stage:<name>' = one pipeline stage.
-  const [audience, setAudience] = useState<AudienceChoice>(
-    (initialMode ?? 'shared_template') === 'per_lead_ai' ? 'auto' : 'all',
-  )
+  // Defaults to 'all' because the page opens in verbatim mode, which has no
+  // model to infer a stage from prose — 'auto' would have nothing to read.
+  const [audience, setAudience] = useState<AudienceChoice>('all')
   const [lastActiveDays, setLastActiveDays] = useState<string>('')
   const [actionPageId, setActionPageId] = useState<string>('')
   const [mediaAssetIds, setMediaAssetIds] = useState<string[]>([])
+  // Verbatim send: deliver exactly what's typed (merge tags resolved per
+  // lead) instead of having the model write a different message for each one.
+  const [literalText, setLiteralText] = useState(true)
+
+  // Replaces the old hard-coded "Up to 200 leads" note, which stopped being
+  // true once the audience query started paginating past PostgREST's page size.
+  const audienceHint = useMemo(() => {
+    if (audience === 'all') return 'Every lead with a Messenger thread'
+    if (audience.startsWith('stage:')) {
+      return `Everyone in ${audience.slice('stage:'.length)}`
+    }
+    return 'Stage inferred from your message'
+  }, [audience])
 
   const [filterCategoryIds, setFilterCategoryIds] = useState<string[]>([])
   const filteredTemplates = useMemo(() => {
@@ -326,7 +348,7 @@ export function AgentClient({ stages, templates, actionPages, categories, pendin
               ? `[Template] ${selectedTemplate.display_name}`
               : '[Template]',
           }
-        : { command, mediaAssetIds, ...audienceBody(audience) }
+        : { command, mediaAssetIds, literalText, ...audienceBody(audience) }
 
     fetch('/api/agent/preview', {
       method: 'POST',
@@ -424,6 +446,8 @@ export function AgentClient({ stages, templates, actionPages, categories, pendin
     audience,
     lastActiveDays,
     selectedTemplate,
+    literalText,
+    mediaAssetIds,
   ])
 
   /* ── send campaign ── */
@@ -674,6 +698,7 @@ export function AgentClient({ stages, templates, actionPages, categories, pendin
                                   ...variableRules,
                                   [idx]: { kind: 'static', text },
                                 })}
+                                insertChips={TAG_CHIPS}
                                 placeholder={`Value for {{${idx}}}`}
                                 ariaLabel={`Value for variable ${idx}`}
                                 minHeight={36}
@@ -770,7 +795,7 @@ export function AgentClient({ stages, templates, actionPages, categories, pendin
             <div style={{ display:'flex', gap:10 }}>
               <label style={{ display:'flex', flexDirection:'column', gap:6, flex:1 }}>
                 <span style={{ fontSize:12, fontWeight:500, color:S.ink2 }}>Audience</span>
-                <AudienceSelect value={audience} onChange={setAudience} stages={stages} allowAuto />
+                <AudienceSelect value={audience} onChange={setAudience} stages={stages} allowAuto={!literalText} />
               </label>
               <label style={{ display:'flex', flexDirection:'column', gap:6, flex:1 }}>
                 <span style={{ fontSize:12, fontWeight:500, color:S.ink2 }}>Active within (days)</span>
@@ -786,17 +811,51 @@ export function AgentClient({ stages, templates, actionPages, categories, pendin
             </div>
           )}
           {sendMode === 'per_lead_ai' && (
-            <MessageComposer
-              value={command}
-              onChange={setCommand}
-              onSubmit={startPreview}
-              toolbar={false}
-              placeholder='e.g. "Follow up with all my Interested leads — remind them about our limited-time offer"'
-              ariaLabel="What should the agent say?"
-              minHeight={78}
-              disabled={phase === 'sending'}
-              textareaStyle={{ padding:'12px 14px', borderRadius:12, fontSize:14 }}
-            />
+            <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+              <div style={{ display:'flex', gap:6, background:S.surface2, padding:3, borderRadius:8, width:'fit-content' }}>
+                {([
+                  [true, 'Write it myself'],
+                  [false, 'Let AI write each one'],
+                ] as const).map(([literal, label]) => (
+                  <button
+                    key={label}
+                    onClick={() => {
+                      setLiteralText(literal)
+                      // "Auto" needs the model to read the prose for a stage;
+                      // verbatim mode never calls it, so pick an audience.
+                      if (literal && audience === 'auto') setAudience('all')
+                    }}
+                    style={{
+                      padding:'5px 12px', borderRadius:6, border:'none', fontSize:12,
+                      fontWeight: literalText === literal ? 500 : 400,
+                      background: literalText === literal ? S.surface : 'transparent',
+                      color: literalText === literal ? S.ink : S.ink3,
+                      cursor:'pointer',
+                      boxShadow: literalText === literal ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
+                    }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <MessageComposer
+                value={command}
+                onChange={setCommand}
+                onSubmit={startPreview}
+                toolbar={literalText}
+                insertChips={TAG_CHIPS}
+                placeholder={literalText
+                  ? 'Hi [first_name]! Just checking in — our promo runs until Friday. Interested?'
+                  : 'e.g. "Follow up with all my Interested leads — remind them about our limited-time offer"'}
+                ariaLabel={literalText ? 'Message to send' : 'What should the agent say?'}
+                minHeight={78}
+                disabled={phase === 'sending'}
+                hint={literalText
+                  ? 'Sent word for word. Tags above are replaced with each recipient\u2019s own details.'
+                  : 'An instruction, not the message. The AI writes a different message per lead and fills in any tags.'}
+                textareaStyle={{ padding:'12px 14px', borderRadius:12, fontSize:14 }}
+              />
+            </div>
           )}
           <div style={{ color:S.ink3, fontSize:12 }}>
             <MediaAttachPicker
@@ -813,7 +872,8 @@ export function AgentClient({ stages, templates, actionPages, categories, pendin
           </div>
           <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:12, flexWrap:'wrap' }}>
             <span style={{ fontSize:12, color:S.ink4 }}>
-              {sendMode === 'per_lead_ai' ? 'Cmd+Enter to preview · ' : ''}Up to 200 leads
+              {sendMode === 'per_lead_ai' ? 'Cmd+Enter to preview · ' : ''}
+              {audienceHint}
             </span>
             <div style={{ display:'flex', gap:8 }}>
               {phase !== 'idle' && phase !== 'done' && (

@@ -5,6 +5,7 @@ import type { CSSProperties, KeyboardEvent } from 'react'
 import {
   continueList,
   formatPreviewHtml,
+  insertAtSelection,
   toggleList,
   toggleWrap,
   type ListMarker,
@@ -67,6 +68,12 @@ export interface MessageComposerProps {
   ariaLabel?: string
   /** Hint shown under the box (e.g. "Cmd+Enter to preview"). */
   hint?: string
+  /**
+   * Snippets the user can drop in at the caret — used for personalization
+   * merge tags like `[first_name]`. Rendered as a chip row above the box,
+   * whether or not the formatting toolbar is shown.
+   */
+  insertChips?: ReadonlyArray<{ label: string; text: string; title?: string }>
 }
 
 /**
@@ -89,6 +96,7 @@ export function MessageComposer({
   textareaStyle,
   ariaLabel,
   hint,
+  insertChips,
 }: MessageComposerProps) {
   const ref = useRef<HTMLTextAreaElement | null>(null)
   const [showPreview, setShowPreview] = useState(false)
@@ -184,6 +192,33 @@ export function MessageComposer({
             disabled={disabled}
             onClick={() => setShowPreview((p) => !p)}
           />
+        </div>
+      )}
+
+      {insertChips && insertChips.length > 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 11, color: S.ink4 }}>Insert:</span>
+          {insertChips.map((chip) => (
+            <button
+              key={chip.text}
+              type="button"
+              title={chip.title ?? `Insert ${chip.text}`}
+              disabled={disabled}
+              onClick={() => applyToSelection((sel) => insertAtSelection(sel, chip.text))}
+              style={{
+                padding: '2px 8px',
+                borderRadius: 999,
+                border: `1px solid ${S.border}`,
+                background: S.accentSoft,
+                color: S.accent,
+                fontFamily: S.mono,
+                fontSize: 11,
+                cursor: disabled ? 'default' : 'pointer',
+              }}
+            >
+              {chip.label}
+            </button>
+          ))}
         </div>
       )}
 

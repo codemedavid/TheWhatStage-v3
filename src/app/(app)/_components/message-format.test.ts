@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { BULLET, continueList, formatPreviewHtml, toggleList, toggleWrap } from './message-format'
+import { BULLET, continueList, formatPreviewHtml, insertAtSelection, toggleList, toggleWrap } from './message-format'
 
 describe('toggleWrap', () => {
   test('wraps the selected range in the marker', () => {
@@ -107,5 +107,37 @@ describe('formatPreviewHtml', () => {
 
   test('turns newlines into line breaks', () => {
     expect(formatPreviewHtml('a\nb')).toBe('a<br />b')
+  })
+})
+
+describe('insertAtSelection', () => {
+  test('inserts at the caret and leaves the caret after the insertion', () => {
+    // Arrange
+    const sel = { value: 'Hi , kumusta?', start: 3, end: 3 }
+
+    // Act
+    const next = insertAtSelection(sel, '[first_name]')
+
+    // Assert
+    expect(next.value).toBe('Hi [first_name], kumusta?')
+    expect(next.start).toBe(15)
+    expect(next.end).toBe(15)
+  })
+
+  test('replaces the selected text', () => {
+    const next = insertAtSelection({ value: 'Hi NAME!', start: 3, end: 7 }, '[name]')
+    expect(next.value).toBe('Hi [name]!')
+    expect(next.start).toBe(9)
+  })
+
+  test('appends when the caret sits at the end', () => {
+    const next = insertAtSelection({ value: 'Hi ', start: 3, end: 3 }, '[name]')
+    expect(next.value).toBe('Hi [name]')
+  })
+
+  test('inserts into an empty box', () => {
+    const next = insertAtSelection({ value: '', start: 0, end: 0 }, '[name]')
+    expect(next.value).toBe('[name]')
+    expect(next.start).toBe(6)
   })
 })

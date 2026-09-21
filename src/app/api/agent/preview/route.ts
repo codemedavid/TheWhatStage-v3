@@ -11,6 +11,7 @@ import {
   templatePolicyLabel,
 } from '@/lib/agent/classifyPolicy'
 import { generateDraft } from '@/lib/agent/generateDraft'
+import { personalize } from '@/lib/agent/personalize'
 import {
   renderTemplateVariables,
   type VariableMap,
@@ -82,6 +83,9 @@ export async function POST(req: NextRequest) {
   let stageNameInput: string | null = null
   // Explicit "send to everyone" — overrides whatever stage the LLM inferred.
   let allStages = false
+  // Send the operator's exact words (merge tags resolved per lead) instead of
+  // asking the model to write each message. No LLM call per lead.
+  let literalText = false
   let lastActiveWithinDays: number | null = null
   try {
     const body = await req.json() as Record<string, unknown>
@@ -102,6 +106,7 @@ export async function POST(req: NextRequest) {
     }
     if (typeof body.stageName === 'string') stageNameInput = body.stageName.trim() || null
     if (body.allStages === true) allStages = true
+    if (body.literalText === true) literalText = true
     if (typeof body.lastActiveWithinDays === 'number') {
       lastActiveWithinDays = body.lastActiveWithinDays
     }
@@ -171,6 +176,17 @@ export async function POST(req: NextRequest) {
               last_active_within_days: lastActiveWithinDays,
             },
             instruction: '',
+            tone: 'professional',
+            ambiguities: [],
+          }
+        } else if (literalText && (allStages || stageNameInput)) {
+          // Verbatim mode with an explicit audience needs no LLM at all.
+          intent = {
+            audience: {
+              stage_name: allStages ? null : stageNameInput,
+              last_active_within_days: lastActiveWithinDays,
+            },
+            instruction: command,
             tone: 'professional',
             ambiguities: [],
           }
@@ -289,6 +305,23 @@ export async function POST(req: NextRequest) {
               name: lead.name,
               draft: rendered,
               policy: label,
+              user_included: included,
+            })
+          }
+        } else if (literalText) {
+          // Verbatim mode: every recipient gets the same message with their
+          // own merge tags filled in. Cheap and predictable — no model call,
+          // so audience size is bounded only by the daily cap.
+          for (const lead of audience) {
+            const policy = classifyPolicy(lead, ctx, capRemaining)
+            const included = policy.policy !== 'paused'
+            if (included) capRemaining = Math.max(0, capRemaining - 1)
+            send('draft', {
+              lead_id: lead.id,
+              thread_id: lead.thread_id,
+              name: lead.name,
+              draft: included ? personalize(command, lead) : '',
+              policy: policyLabel(policy),
               user_included: included,
             })
           }

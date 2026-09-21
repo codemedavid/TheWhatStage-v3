@@ -2,12 +2,15 @@ import { describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/lib/facebook/crypto', () => ({ decryptToken: (s: string) => `dec:${s}` }))
 
-import { resolveAudience, pickStageId, StageNotFoundError } from './resolveAudience'
+import { resolveAudience, pickStageIds, StageNotFoundError } from './resolveAudience'
 import type { ParsedIntent } from './types'
 
 const STAGES = [
   { id: 's-interested', name: 'Interested' },
   { id: 's-engaged', name: 'Engaged' },
+  // Real data has users whose boards repeat a column name (two "Won" stages).
+  { id: 's-won-a', name: 'Won' },
+  { id: 's-won-b', name: 'won' },
 ]
 
 function leadRow(i: number) {
@@ -38,6 +41,7 @@ function makeAdmin(allLeads: ReturnType<typeof leadRow>[]) {
       const chain = {
         select: () => chain,
         eq: (col: string, val: unknown) => { filters[col] = val; return chain },
+        in: (col: string, val: unknown) => { filters[`${col} in`] = val; return chain },
         gte: (col: string, val: unknown) => { filters[`${col}>=`] = val; return chain },
         order: () => chain,
         range: (from: number, to: number) => { range = [from, to]; return chain },
@@ -92,7 +96,19 @@ describe('resolveAudience', () => {
   it('filters by the matched stage id when a stage is named', async () => {
     const { admin, leadFilters } = makeAdmin([leadRow(1)])
     await resolveAudience(admin, 'u1', intent('interested'))
-    expect(leadFilters[0]).toEqual({ user_id: 'u1', stage_id: 's-interested' })
+    expect(leadFilters[0]).toEqual({ user_id: 'u1', 'stage_id in': ['s-interested'] })
+  })
+
+  it('covers EVERY stage sharing the named stage name (duplicate stage names)', async () => {
+    // Arrange: this user has two boards that both have a "Won" column. A
+    // campaign aimed at "Won" must reach the leads sitting in both of them.
+    const { admin, leadFilters } = makeAdmin([leadRow(1)])
+
+    // Act
+    await resolveAudience(admin, 'u1', intent('Won'))
+
+    // Assert
+    expect(leadFilters[0]['stage_id in']).toEqual(['s-won-a', 's-won-b'])
   })
 
   it('throws instead of widening to everyone when the stage does not exist', async () => {
@@ -110,12 +126,32 @@ describe('resolveAudience', () => {
   })
 })
 
-describe('pickStageId', () => {
+describe('pickStageIds', () => {
   it('prefers exact, then prefix, then substring matches', () => {
-    expect(pickStageId(STAGES, 'ENGAGED')).toBe('s-engaged')
-    expect(pickStageId(STAGES, 'inter')).toBe('s-interested')
-    expect(pickStageId(STAGES, 'gag')).toBe('s-engaged')
-    expect(pickStageId(STAGES, 'zzz')).toBeNull()
-    expect(pickStageId(STAGES, '   ')).toBeNull()
+    expect(pickStageIds(STAGES, 'ENGAGED')).toEqual(['s-engaged'])
+    expect(pickStageIds(STAGES, 'inter')).toEqual(['s-interested'])
+    expect(pickStageIds(STAGES, 'gag')).toEqual(['s-engaged'])
+    expect(pickStageIds(STAGES, 'zzz')).toEqual([])
+    expect(pickStageIds(STAGES, '   ')).toEqual([])
+  })
+
+  it('returns every stage that matches the name, case-insensitively', () => {
+    expect(pickStageIds(STAGES, 'Won')).toEqual(['s-won-a', 's-won-b'])
+  })
+
+  it('does not mix tiers: an exact match suppresses looser matches', () => {
+    const stages = [
+      { id: 'exact', name: 'Won' },
+      { id: 'loose', name: 'Won Back' },
+    ]
+    expect(pickStageIds(stages, 'Won')).toEqual(['exact'])
+  })
+
+  it('returns all loose matches when no stage matches exactly', () => {
+    const stages = [
+      { id: 'a', name: 'Won Back' },
+      { id: 'b', name: 'Won Deal' },
+    ]
+    expect(pickStageIds(stages, 'Won')).toEqual(['a', 'b'])
   })
 })

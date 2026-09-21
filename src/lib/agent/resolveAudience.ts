@@ -30,10 +30,14 @@ export async function resolveAudience(
 
   // A stage the user named but we can't find must NOT silently widen to
   // "everyone" — that would message thousands of unintended leads.
-  let matchedStageId: string | null = null
+  // Conversely, a name can legitimately match SEVERAL stages: users run more
+  // than one board and boards repeat column names ("Won" on two boards). The
+  // audience is the union of all of them, or the campaign quietly misses
+  // everyone parked in the duplicate.
+  let matchedStageIds: string[] = []
   if (stageName) {
-    matchedStageId = pickStageId(stages, stageName)
-    if (!matchedStageId) {
+    matchedStageIds = pickStageIds(stages, stageName)
+    if (matchedStageIds.length === 0) {
       throw new StageNotFoundError(stageName, stages.map((s) => s.name))
     }
   }
@@ -57,7 +61,7 @@ export async function resolveAudience(
       .order('id', { ascending: true })
       .range(from, to)
 
-    if (matchedStageId) query = query.eq('stage_id', matchedStageId)
+    if (matchedStageIds.length > 0) query = query.in('stage_id', matchedStageIds)
     if (cutoff) query = query.gte('messenger_threads.last_inbound_at', cutoff)
 
     const { data, error } = await query
@@ -92,20 +96,34 @@ function toAudienceLeads(lead: AudienceRow): AudienceLead[] {
     })
 }
 
-// Prefer exact match (case-insensitive), then startsWith, then includes.
-export function pickStageId(
+/**
+ * Every stage id the named stage refers to, best match tier first.
+ *
+ * Tiers are tried in order — exact, then prefix, then substring — and the
+ * FIRST tier with any hit wins entirely. Within that tier every match is
+ * returned, so two stages both named "Won" both get messaged. Mixing tiers
+ * would let a loose "Won Back" ride along with an exact "Won"; that is a
+ * different audience than the user asked for.
+ */
+export function pickStageIds(
   stages: Array<{ id: string; name: string }>,
   target: string,
-): string | null {
+): string[] {
   const norm = (s: string) => s.trim().toLowerCase()
   const t = norm(target)
-  if (!t) return null
-  const exact = stages.find((s) => norm(s.name) === t)
-  if (exact) return exact.id
-  const starts = stages.find((s) => norm(s.name).startsWith(t) || t.startsWith(norm(s.name)))
-  if (starts) return starts.id
-  const contains = stages.find((s) => norm(s.name).includes(t) || t.includes(norm(s.name)))
-  return contains?.id ?? null
+  if (!t) return []
+
+  const tiers: Array<(name: string) => boolean> = [
+    (name) => name === t,
+    (name) => name.startsWith(t) || t.startsWith(name),
+    (name) => name.includes(t) || t.includes(name),
+  ]
+
+  for (const matches of tiers) {
+    const hits = stages.filter((s) => matches(norm(s.name))).map((s) => s.id)
+    if (hits.length > 0) return hits
+  }
+  return []
 }
 
 interface AudienceRow {
