@@ -15,7 +15,7 @@ import {
   buildRealestateCarouselElements,
 } from '@/lib/messenger/property-outbound'
 import { recommendProperty } from '@/lib/chatbot/recommend-property'
-import { handleCampaignSend } from '@/lib/messenger/campaignSend'
+import { handleCampaignSend, failCampaignMessage } from '@/lib/messenger/campaignSend'
 import { resolveCardCaption, resolveCardLabel } from '@/lib/messenger/action-page-card'
 import { handleReminderFire } from '@/lib/reminders/fire'
 import { maybeScheduleFollowup } from '@/lib/followups/seed'
@@ -382,7 +382,16 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
       const failed = attempts >= MAX_ATTEMPTS
       const msg = err instanceof Error ? err.message : String(err)
       console.error('[messenger.worker] campaign job error', job.id, msg)
-      if (failed) captureJobFailure(err, job)
+      if (failed) {
+        captureJobFailure(err, job)
+        // Settle the campaign row so the campaign can still reach 'completed'.
+        await failCampaignMessage(admin, {
+          id: job.id,
+          thread_id: job.thread_id,
+          user_id: job.user_id,
+          payload: job.payload as { campaign_message_id: string } | null,
+        }, msg).catch((e) => console.error('[messenger.worker] failCampaignMessage error', e))
+      }
       await admin
         .from('messenger_jobs')
         .update({

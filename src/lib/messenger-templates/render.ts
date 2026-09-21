@@ -2,11 +2,13 @@
 // body parameters expected by the Messenger Send API for a single lead.
 //
 // Supported rule kinds:
-//   { kind: 'static', text }           — same literal value for every recipient
+//   { kind: 'static', text }           — literal value, with [first_name]-style
+//                                        merge tags resolved per recipient
 //   { kind: 'lead_field', field }      — pulls from the lead row
 //   { kind: 'booking_field', field }   — pulls from booking context
 //   { kind: 'property_field', field }  — pulls from property context
 
+import { personalize } from '@/lib/agent/personalize'
 import type { TemplateButton } from './types'
 
 export type VariableRule =
@@ -52,7 +54,9 @@ export function renderTemplateVariables(
 
 function resolveRule(rule: VariableRule | undefined, lead: LeadForRender): string {
   if (!rule) return ''
-  if (rule.kind === 'static') return rule.text ?? ''
+  // Static text is "the same for everyone" only up to its merge tags:
+  // "Hi [first_name]!" is one rule that renders per recipient.
+  if (rule.kind === 'static') return personalize(rule.text ?? '', lead)
   if (rule.kind === 'lead_field') {
     if (rule.field === 'name') return (lead.name ?? '').trim()
     const v = lead.custom_fields?.[rule.field]

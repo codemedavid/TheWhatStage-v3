@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { sendCampaignMedia } from './campaignMedia'
 import { sendOutbound, type OutboundPayload } from './outbound'
 import { isInsideWindow } from '@/lib/agent/classifyPolicy'
+import { personalize, type PersonalizeLead } from '@/lib/agent/personalize'
 import {
   renderTemplateVariables,
   findFirstUrlButtonIndex,
@@ -169,13 +170,25 @@ export async function handleCampaignSend(
   const { decryptToken } = await import('@/lib/facebook/crypto')
   const pageToken = decryptToken(page.page_access_token)
 
+  // The recipient's own fields, for merge tags. Loaded once here and reused by
+  // the template path so the same row isn't fetched twice per send.
+  const { data: leadRow } = await admin
+    .from('leads')
+    .select('name, custom_fields')
+    .eq('id', msg.lead_id)
+    .maybeSingle<{ name: string | null; custom_fields: Record<string, unknown> | null }>()
+  const lead: PersonalizeLead = {
+    name: leadRow?.name ?? null,
+    custom_fields: leadRow?.custom_fields ?? null,
+  }
+
   // Build the outbound payload. Shared-template campaigns dispatch via the
   // utility-template send path so they can reach leads outside the 24h
   // window without an opt-in. Per-lead-AI campaigns send free-form text.
   let payload: OutboundPayload
   let bodyForLog = msg.draft_text
   if (campaign.send_mode === 'shared_template' && campaign.template_id) {
-    const built = await buildUtilityTemplatePayload(admin, campaign, {
+    const built = await buildUtilityTemplatePayload(admin, campaign, lead, {
       lead_id: msg.lead_id,
       thread_psid: thread.psid,
       page_id: thread.page_id,
@@ -192,7 +205,13 @@ export async function handleCampaignSend(
     payload = built.payload
     bodyForLog = built.renderedBody
   } else {
-    payload = { kind: 'text', text: msg.draft_text }
+    // Resolve merge tags again at send time. The preview already rendered
+    // them, but an operator can edit a draft in the review table and type a
+    // fresh "[first_name]" — personalize() is idempotent, so a draft with no
+    // tags left passes through untouched.
+    const text = personalize(msg.draft_text, lead)
+    bodyForLog = text
+    payload = { kind: 'text', text }
   }
 
   const result = await sendOutbound({
@@ -251,8 +270,8 @@ export async function handleCampaignSend(
     insideWindow,
   })
 
-  // Check if campaign is complete.
-  await maybeMarkCampaignComplete(admin, msg.campaign_id)
+  // Campaign completion is flipped by the agent_campaign_bump RPC once
+  // sent+failed+skipped reaches total — no separate check needed here.
   await markJobDone(admin, job.id, 'done')
 }
 
@@ -321,42 +340,44 @@ async function bumpCounter(
   campaignId: string,
   counter: 'sent' | 'failed' | 'skipped',
 ): Promise<void> {
-  // Postgres doesn't support atomic increment via supabase-js directly,
-  // so we use a raw increment expression via rpc or re-read + write.
-  // The slight race here is acceptable — counters are display-only.
-  const { data } = await admin
-    .from('agent_campaigns')
-    .select(counter)
-    .eq('id', campaignId)
-    .single<Record<string, number>>()
-
-  if (data) {
-    await admin
-      .from('agent_campaigns')
-      .update({ [counter]: (data[counter] ?? 0) + 1 })
-      .eq('id', campaignId)
+  // Atomic SQL increment (see migration 20260907000000). A read-then-write
+  // here lost increments under the parallel worker and left campaigns stuck
+  // in 'sending' forever. The RPC also flips the campaign to 'completed'
+  // once sent+failed+skipped reaches total.
+  const { error } = await admin.rpc('agent_campaign_bump', {
+    p_campaign_id: campaignId,
+    p_counter: counter,
+  })
+  if (error) {
+    console.error('[campaignSend] counter bump failed', { campaignId, counter, error: error.message })
   }
 }
 
-async function maybeMarkCampaignComplete(
+/**
+ * Terminal failure path used by the worker once a campaign job has exhausted
+ * its retries (e.g. Meta #551 "person isn't available"). Without this the
+ * message row stayed 'pending' and the campaign could never complete.
+ */
+export async function failCampaignMessage(
   admin: SupabaseClient,
-  campaignId: string,
+  job: CampaignJob,
+  errorMessage: string,
 ): Promise<void> {
-  const { data } = await admin
-    .from('agent_campaigns')
-    .select('total, sent, failed, skipped')
-    .eq('id', campaignId)
-    .single<{ total: number; sent: number; failed: number; skipped: number }>()
+  const campaignMessageId = job.payload?.campaign_message_id
+  if (!campaignMessageId) return
 
-  if (!data) return
+  const { data: msg } = await admin
+    .from('agent_campaign_messages')
+    .select('id, campaign_id, status')
+    .eq('id', campaignMessageId)
+    .maybeSingle<{ id: string; campaign_id: string; status: string }>()
+  if (!msg || msg.status !== 'pending') return
 
-  const processed = data.sent + data.failed + data.skipped
-  if (processed >= data.total) {
-    await admin
-      .from('agent_campaigns')
-      .update({ status: 'completed', completed_at: new Date().toISOString() })
-      .eq('id', campaignId)
-  }
+  await updateMessage(admin, campaignMessageId, {
+    status: 'failed',
+    error: errorMessage.slice(0, 1000),
+  })
+  await bumpCounter(admin, msg.campaign_id, 'failed')
 }
 
 async function markJobDone(
@@ -380,6 +401,7 @@ async function markJobDone(
 async function buildUtilityTemplatePayload(
   admin: SupabaseClient,
   campaign: CampaignRow,
+  lead: PersonalizeLead,
   recipient: { lead_id: string; thread_psid: string; page_id: string },
 ): Promise<{ payload: OutboundPayload; renderedBody: string } | null> {
   const { data: tpl } = await admin
@@ -397,17 +419,12 @@ async function buildUtilityTemplatePayload(
     }>()
   if (!tpl || tpl.meta_status !== 'approved') return null
 
-  const { data: lead } = await admin
-    .from('leads')
-    .select('name, custom_fields')
-    .eq('id', recipient.lead_id)
-    .maybeSingle<{ name: string | null; custom_fields: Record<string, unknown> | null }>()
-
   const variables = campaign.template_variables ?? {}
+  // renderTemplateVariables resolves merge tags inside static values.
   const bodyParameters = renderTemplateVariables(
     variables,
     tpl.variable_count,
-    { name: lead?.name ?? null, custom_fields: lead?.custom_fields ?? null },
+    { name: lead.name, custom_fields: lead.custom_fields ?? null },
   )
   const renderedBody = renderTemplate(tpl.body_text, bodyParameters)
 

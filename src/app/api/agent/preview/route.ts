@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { parseIntent } from '@/lib/agent/parseIntent'
-import { resolveAudience } from '@/lib/agent/resolveAudience'
+import { resolveAudience, StageNotFoundError } from '@/lib/agent/resolveAudience'
 import { loadContext, DAILY_CAP } from '@/lib/agent/loadContext'
 import {
   classifyPolicy,
@@ -11,6 +11,7 @@ import {
   templatePolicyLabel,
 } from '@/lib/agent/classifyPolicy'
 import { generateDraft } from '@/lib/agent/generateDraft'
+import { personalize } from '@/lib/agent/personalize'
 import {
   renderTemplateVariables,
   type VariableMap,
@@ -20,9 +21,11 @@ import type { ParsedIntent } from '@/lib/agent/types'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
-export const maxDuration = 120
+// Per-lead AI drafts are the slow path: ~2-3s per LLM call, run
+// DRAFT_CONCURRENCY at a time. 300s at 16-wide covers ~2,000 leads.
+export const maxDuration = 300
 
-const DRAFT_CONCURRENCY = parseInt(process.env.AGENT_DRAFT_CONCURRENCY ?? '8', 10)
+const DRAFT_CONCURRENCY = parseInt(process.env.AGENT_DRAFT_CONCURRENCY ?? '16', 10)
 
 // Simple bounded concurrency limiter (avoids p-limit dependency).
 function createLimiter(concurrency: number) {
@@ -78,6 +81,11 @@ export async function POST(req: NextRequest) {
   let attachedActionPageId: string | null = null
   let attachedButtonIndex = 0
   let stageNameInput: string | null = null
+  // Explicit "send to everyone" — overrides whatever stage the LLM inferred.
+  let allStages = false
+  // Send the operator's exact words (merge tags resolved per lead) instead of
+  // asking the model to write each message. No LLM call per lead.
+  let literalText = false
   let lastActiveWithinDays: number | null = null
   try {
     const body = await req.json() as Record<string, unknown>
@@ -96,7 +104,9 @@ export async function POST(req: NextRequest) {
     if (typeof body.attachedButtonIndex === 'number') {
       attachedButtonIndex = body.attachedButtonIndex
     }
-    if (typeof body.stageName === 'string') stageNameInput = body.stageName
+    if (typeof body.stageName === 'string') stageNameInput = body.stageName.trim() || null
+    if (body.allStages === true) allStages = true
+    if (body.literalText === true) literalText = true
     if (typeof body.lastActiveWithinDays === 'number') {
       lastActiveWithinDays = body.lastActiveWithinDays
     }
@@ -169,8 +179,30 @@ export async function POST(req: NextRequest) {
             tone: 'professional',
             ambiguities: [],
           }
+        } else if (literalText && (allStages || stageNameInput)) {
+          // Verbatim mode with an explicit audience needs no LLM at all.
+          intent = {
+            audience: {
+              stage_name: allStages ? null : stageNameInput,
+              last_active_within_days: lastActiveWithinDays,
+            },
+            instruction: command,
+            tone: 'professional',
+            ambiguities: [],
+          }
         } else {
           intent = await parseIntent(command, stages)
+          // The audience picker in the UI beats the LLM's guess: a user who
+          // chose "All leads" or a specific stage must get exactly that.
+          if (allStages || stageNameInput) {
+            intent = {
+              ...intent,
+              audience: {
+                ...intent.audience,
+                stage_name: allStages ? null : stageNameInput,
+              },
+            }
+          }
         }
         send('intent', intent)
 
@@ -276,6 +308,23 @@ export async function POST(req: NextRequest) {
               user_included: included,
             })
           }
+        } else if (literalText) {
+          // Verbatim mode: every recipient gets the same message with their
+          // own merge tags filled in. Cheap and predictable — no model call,
+          // so audience size is bounded only by the daily cap.
+          for (const lead of audience) {
+            const policy = classifyPolicy(lead, ctx, capRemaining)
+            const included = policy.policy !== 'paused'
+            if (included) capRemaining = Math.max(0, capRemaining - 1)
+            send('draft', {
+              lead_id: lead.id,
+              thread_id: lead.thread_id,
+              name: lead.name,
+              draft: included ? personalize(command, lead) : '',
+              policy: policyLabel(policy),
+              user_included: included,
+            })
+          }
         } else {
           const limit = createLimiter(DRAFT_CONCURRENCY)
           await Promise.all(
@@ -286,8 +335,11 @@ export async function POST(req: NextRequest) {
 
                 let draft = ''
                 if (policy.policy !== 'paused') {
-                  draft = await generateDraft(lead, intent, ctx)
+                  // Claim the cap slot BEFORE awaiting. Decrementing after the
+                  // LLM call let the whole first concurrency window read the
+                  // same pre-decrement value and overshoot the daily cap.
                   capRemaining = Math.max(0, capRemaining - 1)
+                  draft = await generateDraft(lead, intent, ctx)
                 }
 
                 send('draft', {
@@ -306,6 +358,10 @@ export async function POST(req: NextRequest) {
         send('done', { campaign_id: campaign.id, daily_cap_used: ctx.dailyCapUsed })
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
+        if (err instanceof StageNotFoundError) {
+          send('error', { message: msg })
+          return
+        }
         console.error('[agent.preview] stream error', msg)
         send('error', { message: msg })
       } finally {

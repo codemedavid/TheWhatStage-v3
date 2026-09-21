@@ -1,6 +1,7 @@
 import { HfRouterLlm } from '@/lib/rag/llm'
 import { ragConfig } from '@/lib/rag/config'
 import { manilaNowBlock } from '@/lib/time/manilaNow'
+import { personalize } from './personalize'
 import type { AudienceLead, BulkContext, ParsedIntent } from './types'
 
 const DRAFT_TIMEOUT_MS = 8_000
@@ -35,7 +36,9 @@ Tone: ${toneDesc}.
 Keep it under 3 sentences. Do NOT use emojis excessively. Sound human, not robotic.
 Output ONLY the message text — no quotes, no preamble, no explanation.`
 
-  const user = `Instruction: ${intent.instruction}
+  // Merge tags are resolved BEFORE the model reads the instruction, so it
+  // works from the real name instead of copying "[first_name]" into the draft.
+  const user = `Instruction: ${personalize(intent.instruction, lead)}
 
 Lead name: ${lead.name ?? 'unknown'}
 Context: ${contextBlock}`
@@ -71,7 +74,9 @@ export async function generateDraft(
       { temperature: 0.6, maxTokens: 200 },
     )
     clearTimeout(timeout)
-    return draft.trim() || FALLBACK_TEMPLATE(lead.name)
+    // Backstop: a model that echoed a tag anyway must not leak it to a
+    // customer. personalize() is idempotent, so this is a no-op otherwise.
+    return personalize(draft.trim(), lead) || FALLBACK_TEMPLATE(lead.name)
   } catch (err) {
     clearTimeout(timeout)
     // On timeout or provider error, return a safe fallback so one failure

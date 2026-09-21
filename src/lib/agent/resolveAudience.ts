@@ -1,93 +1,129 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { decryptToken } from '@/lib/facebook/crypto'
+import { fetchAllPages, PAGE_SIZE } from './batch'
 import type { AudienceLead, ParsedIntent } from './types'
 
-const MAX_AUDIENCE = 200
+export class StageNotFoundError extends Error {
+  constructor(stageName: string, available: string[]) {
+    const list = available.length > 0 ? available.join(', ') : '(none)'
+    super(`No pipeline stage matches "${stageName}". Available stages: ${list}`)
+    this.name = 'StageNotFoundError'
+  }
+}
 
+// Resolve every lead (with a Messenger thread) the campaign should reach.
+// A null `stage_name` means "every stage". Results are paginated through
+// PostgREST so audiences larger than max_rows (1000) come back complete.
 export async function resolveAudience(
   admin: SupabaseClient,
   userId: string,
   intent: ParsedIntent,
 ): Promise<AudienceLead[]> {
-  const stageName = intent.audience.stage_name?.trim().toLowerCase() ?? null
+  const stageName = intent.audience.stage_name?.trim() ?? ''
   const withinDays = intent.audience.last_active_within_days
 
-  // Build the leads query with joins.
-  // Supabase JS doesn't support pg_trgm fuzzy match directly,
-  // so we fetch all stages for the user and match by lowercase equality first,
-  // then fall through to a contains match for flexibility.
   const stagesRes = await admin
     .from('pipeline_stages')
     .select('id, name')
     .eq('user_id', userId)
-  const stages = stagesRes.data ?? []
+  const stages = (stagesRes.data ?? []) as Array<{ id: string; name: string }>
 
-  const matchedStageId = stageName ? pickStageId(stages, stageName) : null
-
-  let query = admin
-    .from('leads')
-    .select(
-      `id, name, custom_fields, user_id,
-       messenger_threads!inner(
-         id, psid, last_inbound_at, page_id,
-         facebook_pages!inner(id, page_access_token)
-       )`,
-    )
-    .eq('user_id', userId)
-    .limit(MAX_AUDIENCE)
-
-  if (matchedStageId) {
-    query = query.eq('stage_id', matchedStageId)
+  // A stage the user named but we can't find must NOT silently widen to
+  // "everyone" — that would message thousands of unintended leads.
+  // Conversely, a name can legitimately match SEVERAL stages: users run more
+  // than one board and boards repeat column names ("Won" on two boards). The
+  // audience is the union of all of them, or the campaign quietly misses
+  // everyone parked in the duplicate.
+  let matchedStageIds: string[] = []
+  if (stageName) {
+    matchedStageIds = pickStageIds(stages, stageName)
+    if (matchedStageIds.length === 0) {
+      throw new StageNotFoundError(stageName, stages.map((s) => s.name))
+    }
   }
 
-  if (withinDays != null && withinDays > 0) {
-    const cutoff = new Date(Date.now() - withinDays * 86400_000).toISOString()
-    query = query.gte('messenger_threads.last_inbound_at', cutoff)
-  }
+  const cutoff =
+    withinDays != null && withinDays > 0
+      ? new Date(Date.now() - withinDays * 86400_000).toISOString()
+      : null
 
-  const { data, error } = await query
+  const rows = await fetchAllPages<AudienceRow>(async (from, to) => {
+    let query = admin
+      .from('leads')
+      .select(
+        `id, name, custom_fields, user_id,
+         messenger_threads!inner(
+           id, psid, last_inbound_at, page_id,
+           facebook_pages!inner(id, page_access_token)
+         )`,
+      )
+      .eq('user_id', userId)
+      .order('id', { ascending: true })
+      .range(from, to)
 
-  if (error) {
-    throw new Error(`resolveAudience: query failed — ${error.message}`)
-  }
+    if (matchedStageIds.length > 0) query = query.in('stage_id', matchedStageIds)
+    if (cutoff) query = query.gte('messenger_threads.last_inbound_at', cutoff)
 
-  const rows = (data ?? []) as AudienceRow[]
-  return rows.flatMap((lead) => {
-    const threads = Array.isArray(lead.messenger_threads)
-      ? lead.messenger_threads
-      : [lead.messenger_threads]
-    return threads
-      .filter((t) => t && t.facebook_pages)
-      .map((t) => {
-        const page = Array.isArray(t.facebook_pages) ? t.facebook_pages[0] : t.facebook_pages
-        return {
-          id: lead.id,
-          name: lead.name,
-          custom_fields: (lead.custom_fields as Record<string, unknown>) ?? {},
-          user_id: lead.user_id,
-          thread_id: t.id,
-          psid: t.psid,
-          last_inbound_at: t.last_inbound_at,
-          page_id: page.id,
-          page_access_token: decryptToken(page.page_access_token),
-        } satisfies AudienceLead
-      })
-  })
+    const { data, error } = await query
+    if (error) {
+      throw new Error(`resolveAudience: query failed — ${error.message}`)
+    }
+    return (data ?? []) as AudienceRow[]
+  }, PAGE_SIZE)
+
+  return rows.flatMap(toAudienceLeads)
 }
 
-// Prefer exact match (case-insensitive), then startsWith, then includes.
-function pickStageId(
+function toAudienceLeads(lead: AudienceRow): AudienceLead[] {
+  const threads = Array.isArray(lead.messenger_threads)
+    ? lead.messenger_threads
+    : [lead.messenger_threads]
+  return threads
+    .filter((t) => t && t.facebook_pages)
+    .map((t) => {
+      const page = Array.isArray(t.facebook_pages) ? t.facebook_pages[0] : t.facebook_pages
+      return {
+        id: lead.id,
+        name: lead.name,
+        custom_fields: (lead.custom_fields as Record<string, unknown>) ?? {},
+        user_id: lead.user_id,
+        thread_id: t.id,
+        psid: t.psid,
+        last_inbound_at: t.last_inbound_at,
+        page_id: page.id,
+        page_access_token: decryptToken(page.page_access_token),
+      } satisfies AudienceLead
+    })
+}
+
+/**
+ * Every stage id the named stage refers to, best match tier first.
+ *
+ * Tiers are tried in order — exact, then prefix, then substring — and the
+ * FIRST tier with any hit wins entirely. Within that tier every match is
+ * returned, so two stages both named "Won" both get messaged. Mixing tiers
+ * would let a loose "Won Back" ride along with an exact "Won"; that is a
+ * different audience than the user asked for.
+ */
+export function pickStageIds(
   stages: Array<{ id: string; name: string }>,
   target: string,
-): string | null {
+): string[] {
   const norm = (s: string) => s.trim().toLowerCase()
   const t = norm(target)
-  const exact = stages.find((s) => norm(s.name) === t)
-  if (exact) return exact.id
-  const starts = stages.find((s) => norm(s.name).startsWith(t) || t.startsWith(norm(s.name)))
-  if (starts) return starts.id
-  const contains = stages.find((s) => norm(s.name).includes(t) || t.includes(norm(s.name)))
-  return contains?.id ?? null
+  if (!t) return []
+
+  const tiers: Array<(name: string) => boolean> = [
+    (name) => name === t,
+    (name) => name.startsWith(t) || t.startsWith(name),
+    (name) => name.includes(t) || t.includes(name),
+  ]
+
+  for (const matches of tiers) {
+    const hits = stages.filter((s) => matches(norm(s.name))).map((s) => s.id)
+    if (hits.length > 0) return hits
+  }
+  return []
 }
 
 interface AudienceRow {

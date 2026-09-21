@@ -167,3 +167,14 @@ export function formatPreviewHtml(text: string): string {
     .replace(/~([^~\n]+)~/g, '<s>$1</s>')
     .replace(/\n/g, '<br />')
 }
+
+/**
+ * Drop `text` in at the caret, replacing any selected range.
+ * The caret lands after the inserted text, ready for more typing.
+ */
+export function insertAtSelection(sel: Selection, text: string): Selection {
+  const before = sel.value.slice(0, sel.start)
+  const after = sel.value.slice(sel.end)
+  const caret = sel.start + text.length
+  return { value: `${before}${text}${after}`, start: caret, end: caret }
+}

@@ -6,6 +6,7 @@ import type { TemplateButton, TemplateCategory } from '@/lib/messenger-templates
 import { renderTemplate } from '@/lib/messenger-templates/types'
 import type { VariableMap, VariableRule } from '@/lib/messenger-templates/render'
 import { MessageComposer } from '@/app/(app)/_components/MessageComposer'
+import { PERSONALIZATION_TAGS } from '@/lib/agent/personalize'
 import { MediaAttachPicker } from '@/app/(app)/_components/MediaAttachPicker'
 
 /* ── design tokens (matches the rest of the dashboard) ── */
@@ -140,6 +141,55 @@ function fmtDate(iso: string) {
 }
 
 /* ── main component ── */
+type AudienceChoice = 'auto' | 'all' | `stage:${string}`
+
+const ALL_LEADS_LABEL = 'All leads — every stage'
+
+// Serverless request bodies are capped around 4.5MB. Stop well short so the
+// user gets a readable message rather than a rejected request.
+const MAX_DISPATCH_BODY_BYTES = 3_500_000
+
+// Merge-tag chips for every composer on this page. Each recipient gets their
+// own value substituted at send time.
+const TAG_CHIPS = PERSONALIZATION_TAGS.map((t) => ({
+  label: t.tag,
+  text: t.tag,
+  title: `${t.label} — e.g. ${t.example}`,
+}))
+
+// Body fields the preview API reads for audience scoping.
+function audienceBody(choice: AudienceChoice): { allStages?: true; stageName?: string } {
+  if (choice === 'all') return { allStages: true }
+  if (choice.startsWith('stage:')) return { stageName: choice.slice('stage:'.length) }
+  return {}
+}
+
+function AudienceSelect({
+  value,
+  onChange,
+  stages,
+  allowAuto,
+}: {
+  value: AudienceChoice
+  onChange: (v: AudienceChoice) => void
+  stages: Stage[]
+  allowAuto: boolean
+}) {
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value as AudienceChoice)}
+      style={{ padding:'8px 10px', borderRadius:6, border:`1px solid ${S.border}`, fontSize:13, background:S.surface, color:S.ink }}
+    >
+      {allowAuto && <option value="auto">Auto — infer stage from command</option>}
+      <option value="all">{ALL_LEADS_LABEL}</option>
+      {stages.map((s) => (
+        <option key={s.id} value={`stage:${s.name}`}>{s.name}</option>
+      ))}
+    </select>
+  )
+}
+
 export function AgentClient({ stages, templates, actionPages, categories, pendingApprovalCount = 0, initialTemplateId = null, initialMode = null }: AgentClientProps) {
   const router = useRouter()
   const [tab, setTab] = useState<'new' | 'history'>('new')
@@ -163,10 +213,28 @@ export function AgentClient({ stages, templates, actionPages, categories, pendin
     }
   }, [router])
   const [variableRules, setVariableRules] = useState<VariableMap>({})
-  const [stageName, setStageName] = useState<string>('')
+  // Audience picker. 'auto' = let the AI infer the stage from the command
+  // (per-lead AI mode only); 'all' = every lead regardless of stage;
+  // 'stage:<name>' = one pipeline stage.
+  // Defaults to 'all' because the page opens in verbatim mode, which has no
+  // model to infer a stage from prose — 'auto' would have nothing to read.
+  const [audience, setAudience] = useState<AudienceChoice>('all')
   const [lastActiveDays, setLastActiveDays] = useState<string>('')
   const [actionPageId, setActionPageId] = useState<string>('')
   const [mediaAssetIds, setMediaAssetIds] = useState<string[]>([])
+  // Verbatim send: deliver exactly what's typed (merge tags resolved per
+  // lead) instead of having the model write a different message for each one.
+  const [literalText, setLiteralText] = useState(true)
+
+  // Replaces the old hard-coded "Up to 200 leads" note, which stopped being
+  // true once the audience query started paginating past PostgREST's page size.
+  const audienceHint = useMemo(() => {
+    if (audience === 'all') return 'Every lead with a Messenger thread'
+    if (audience.startsWith('stage:')) {
+      return `Everyone in ${audience.slice('stage:'.length)}`
+    }
+    return 'Stage inferred from your message'
+  }, [audience])
 
   const [filterCategoryIds, setFilterCategoryIds] = useState<string[]>([])
   const filteredTemplates = useMemo(() => {
@@ -276,7 +344,7 @@ export function AgentClient({ stages, templates, actionPages, categories, pendin
             templateVariables: variableRules,
             attachedActionPageId: actionPageId || null,
             mediaAssetIds,
-            stageName: stageName.trim() || null,
+            ...audienceBody(audience),
             lastActiveWithinDays: lastActiveDays ? Number(lastActiveDays) : null,
             // command_text is still persisted on the campaign row for history;
             // synthesize a human-readable label from the chosen template.
@@ -284,7 +352,7 @@ export function AgentClient({ stages, templates, actionPages, categories, pendin
               ? `[Template] ${selectedTemplate.display_name}`
               : '[Template]',
           }
-        : { command, mediaAssetIds }
+        : { command, mediaAssetIds, literalText, ...audienceBody(audience) }
 
     fetch('/api/agent/preview', {
       method: 'POST',
@@ -379,9 +447,11 @@ export function AgentClient({ stages, templates, actionPages, categories, pendin
     templateId,
     variableRules,
     actionPageId,
-    stageName,
+    audience,
     lastActiveDays,
     selectedTemplate,
+    literalText,
+    mediaAssetIds,
   ])
 
   /* ── send campaign ── */
@@ -392,10 +462,45 @@ export function AgentClient({ stages, templates, actionPages, categories, pendin
     setPhase('sending')
     setError(null)
 
+    // Send only what the server reads, and only the rows it will keep. At a
+    // few thousand recipients the excluded rows and display-only `name` were
+    // pure weight on a request body that has a hard platform ceiling.
+    const payload = drafts
+      .filter((d) => d.user_included !== false)
+      .map((d) => ({
+        lead_id: d.lead_id,
+        thread_id: d.thread_id,
+        draft: d.draft,
+        policy: d.policy,
+        user_included: true,
+        user_edited: d.user_edited ?? false,
+      }))
+
+    if (payload.length === 0) {
+      setError('Nothing to send — every recipient is excluded.')
+      setPhase('preview')
+      dispatchingRef.current = false
+      return
+    }
+
+    const body = JSON.stringify({ messages: payload })
+
+    // A rejected oversized body surfaces as an opaque network error, so say
+    // plainly what happened instead of "unknown error".
+    if (body.length > MAX_DISPATCH_BODY_BYTES) {
+      setError(
+        `This campaign is too large to send in one request (${payload.length} recipients). `
+        + 'Narrow the audience — for example by stage, or by "active within" days — and send in batches.',
+      )
+      setPhase('preview')
+      dispatchingRef.current = false
+      return
+    }
+
     const res = await fetch(`/api/agent/campaigns/${campaignId}/dispatch`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ messages: drafts }),
+      body,
     }).catch((err) => { setError((err as Error).message); return null })
 
     if (!res || !res.ok) {
@@ -517,7 +622,12 @@ export function AgentClient({ stages, templates, actionPages, categories, pendin
           ] as const).map(([m, label]) => (
             <button
               key={m}
-              onClick={() => setSendMode(m)}
+              onClick={() => {
+                setSendMode(m)
+                // "Auto" only exists for AI mode; template mode has no
+                // command to infer a stage from, so fall back to everyone.
+                if (m === 'shared_template' && audience === 'auto') setAudience('all')
+              }}
               style={{
                 padding:'6px 14px', borderRadius:7, border:'none', fontSize:13,
                 fontWeight: sendMode === m ? 500 : 400,
@@ -627,6 +737,7 @@ export function AgentClient({ stages, templates, actionPages, categories, pendin
                                   ...variableRules,
                                   [idx]: { kind: 'static', text },
                                 })}
+                                insertChips={TAG_CHIPS}
                                 placeholder={`Value for {{${idx}}}`}
                                 ariaLabel={`Value for variable ${idx}`}
                                 minHeight={36}
@@ -682,17 +793,8 @@ export function AgentClient({ stages, templates, actionPages, categories, pendin
 
                 <div style={{ display:'flex', gap:10 }}>
                   <label style={{ display:'flex', flexDirection:'column', gap:6, flex:1 }}>
-                    <span style={{ fontSize:12, fontWeight:500, color:S.ink2 }}>Audience: stage</span>
-                    <select
-                      value={stageName}
-                      onChange={(e) => setStageName(e.target.value)}
-                      style={{ padding:'8px 10px', borderRadius:6, border:`1px solid ${S.border}`, fontSize:13, background:S.surface, color:S.ink }}
-                    >
-                      <option value="">— any stage —</option>
-                      {stages.map((s) => (
-                        <option key={s.id} value={s.name}>{s.name}</option>
-                      ))}
-                    </select>
+                    <span style={{ fontSize:12, fontWeight:500, color:S.ink2 }}>Audience</span>
+                    <AudienceSelect value={audience} onChange={setAudience} stages={stages} allowAuto={false} />
                   </label>
                   <label style={{ display:'flex', flexDirection:'column', gap:6, flex:1 }}>
                     <span style={{ fontSize:12, fontWeight:500, color:S.ink2 }}>Active within (days)</span>
@@ -729,17 +831,70 @@ export function AgentClient({ stages, templates, actionPages, categories, pendin
         {/* ── Command Bar ── */}
         <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
           {sendMode === 'per_lead_ai' && (
-            <MessageComposer
-              value={command}
-              onChange={setCommand}
-              onSubmit={startPreview}
-              toolbar={false}
-              placeholder='e.g. "Follow up with all my Interested leads — remind them about our limited-time offer"'
-              ariaLabel="What should the agent say?"
-              minHeight={78}
-              disabled={phase === 'sending'}
-              textareaStyle={{ padding:'12px 14px', borderRadius:12, fontSize:14 }}
-            />
+            <div style={{ display:'flex', gap:10 }}>
+              <label style={{ display:'flex', flexDirection:'column', gap:6, flex:1 }}>
+                <span style={{ fontSize:12, fontWeight:500, color:S.ink2 }}>Audience</span>
+                <AudienceSelect value={audience} onChange={setAudience} stages={stages} allowAuto={!literalText} />
+              </label>
+              <label style={{ display:'flex', flexDirection:'column', gap:6, flex:1 }}>
+                <span style={{ fontSize:12, fontWeight:500, color:S.ink2 }}>Active within (days)</span>
+                <input
+                  type="number"
+                  min={1}
+                  value={lastActiveDays}
+                  onChange={(e) => setLastActiveDays(e.target.value)}
+                  placeholder="any"
+                  style={{ padding:'8px 10px', borderRadius:6, border:`1px solid ${S.border}`, fontSize:13, background:S.surface, color:S.ink }}
+                />
+              </label>
+            </div>
+          )}
+          {sendMode === 'per_lead_ai' && (
+            <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+              <div style={{ display:'flex', gap:6, background:S.surface2, padding:3, borderRadius:8, width:'fit-content' }}>
+                {([
+                  [true, 'Write it myself'],
+                  [false, 'Let AI write each one'],
+                ] as const).map(([literal, label]) => (
+                  <button
+                    key={label}
+                    onClick={() => {
+                      setLiteralText(literal)
+                      // "Auto" needs the model to read the prose for a stage;
+                      // verbatim mode never calls it, so pick an audience.
+                      if (literal && audience === 'auto') setAudience('all')
+                    }}
+                    style={{
+                      padding:'5px 12px', borderRadius:6, border:'none', fontSize:12,
+                      fontWeight: literalText === literal ? 500 : 400,
+                      background: literalText === literal ? S.surface : 'transparent',
+                      color: literalText === literal ? S.ink : S.ink3,
+                      cursor:'pointer',
+                      boxShadow: literalText === literal ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
+                    }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <MessageComposer
+                value={command}
+                onChange={setCommand}
+                onSubmit={startPreview}
+                toolbar={literalText}
+                insertChips={TAG_CHIPS}
+                placeholder={literalText
+                  ? 'Hi [first_name]! Just checking in — our promo runs until Friday. Interested?'
+                  : 'e.g. "Follow up with all my Interested leads — remind them about our limited-time offer"'}
+                ariaLabel={literalText ? 'Message to send' : 'What should the agent say?'}
+                minHeight={78}
+                disabled={phase === 'sending'}
+                hint={literalText
+                  ? 'Sent word for word. Tags above are replaced with each recipient\u2019s own details.'
+                  : 'An instruction, not the message. The AI writes a different message per lead and fills in any tags.'}
+                textareaStyle={{ padding:'12px 14px', borderRadius:12, fontSize:14 }}
+              />
+            </div>
           )}
           <div style={{ color:S.ink3, fontSize:12 }}>
             <MediaAttachPicker
@@ -756,7 +911,8 @@ export function AgentClient({ stages, templates, actionPages, categories, pendin
           </div>
           <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:12, flexWrap:'wrap' }}>
             <span style={{ fontSize:12, color:S.ink4 }}>
-              {sendMode === 'per_lead_ai' ? 'Cmd+Enter to preview · ' : ''}Up to 200 leads
+              {sendMode === 'per_lead_ai' ? 'Cmd+Enter to preview · ' : ''}
+              {audienceHint}
             </span>
             <div style={{ display:'flex', gap:8 }}>
               {phase !== 'idle' && phase !== 'done' && (
