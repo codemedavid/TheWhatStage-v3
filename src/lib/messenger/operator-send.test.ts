@@ -69,6 +69,47 @@ describe('replyAsOperatorFor', () => {
     expect(audit?.values).toMatchObject({ error: 'policy_blocked:window', fb_message_id: null })
   })
 
+  it('folds every thread stamp into ONE update so the send stays interactive', async () => {
+    vi.mocked(sendOutbound).mockResolvedValue({ sent: true, messageId: 'mid' })
+    const { supabase, recorded } = makeSupabase(THREAD)
+
+    await replyAsOperatorFor(supabase, 'u1', 'lead1', 'hello')
+
+    // sendOutbound must not write last_outbound_at itself — we own that column.
+    expect(sendOutbound).toHaveBeenCalledWith(expect.objectContaining({ skipThreadStamp: true }))
+
+    const updates = recorded.filter((r) => r.table === 'messenger_threads' && r.op === 'update')
+    expect(updates).toHaveLength(1)
+    expect(updates[0].values).toMatchObject({
+      last_message_preview: 'hello',
+      bot_paused_until: expect.any(String),
+      last_outbound_at: expect.any(String),
+      last_message_at: expect.any(String),
+    })
+  })
+
+  it('pauses the bot but leaves the thread preview alone when the send is blocked', async () => {
+    vi.mocked(sendOutbound).mockResolvedValue({ sent: false, reason: 'window' })
+    const { supabase, recorded } = makeSupabase(THREAD)
+
+    await replyAsOperatorFor(supabase, 'u1', 'lead1', 'hi')
+
+    const updates = recorded.filter((r) => r.table === 'messenger_threads' && r.op === 'update')
+    expect(updates).toHaveLength(1)
+    expect(updates[0].values).toMatchObject({ bot_paused_until: expect.any(String) })
+    expect(updates[0].values).not.toHaveProperty('last_message_preview')
+    expect(updates[0].values).not.toHaveProperty('last_outbound_at')
+  })
+
+  it('skips the thread write entirely when takeover is off and the send is blocked', async () => {
+    vi.mocked(sendOutbound).mockResolvedValue({ sent: false, reason: 'window' })
+    const { supabase, recorded } = makeSupabase(THREAD, 0)
+
+    await replyAsOperatorFor(supabase, 'u1', 'lead1', 'hi')
+
+    expect(recorded.filter((r) => r.table === 'messenger_threads' && r.op === 'update')).toHaveLength(0)
+  })
+
   it('throws when the lead has no thread and skips empty text', async () => {
     const { supabase } = makeSupabase(null)
     await expect(replyAsOperatorFor(supabase, 'u1', 'lead1', 'hi')).rejects.toThrow('no Messenger thread')

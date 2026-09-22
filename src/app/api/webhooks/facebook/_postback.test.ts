@@ -132,6 +132,46 @@ describe('handlePostback', () => {
     expect(r).toBeNull()
   })
 
+  it('records a btn_say button as the customer speaking, and enqueues a reply', async () => {
+    const admin = makeAdmin(baseState)
+    const r = await handlePostback(
+      admin as unknown as Parameters<typeof handlePostback>[0],
+      FB_PAGE_ID,
+      {
+        sender: { id: PSID },
+        postback: { payload: "btn_say:I'm interested, send me the price list" },
+        timestamp: 1700000000,
+      } as never,
+    )
+    expect(r).toBe('job-1')
+    const insert = admin.calls.find((c) => c.table === 'messenger_messages' && c.op === 'insert')
+    expect((insert!.payload as { body: string }).body).toBe("I'm interested, send me the price list")
+    expect((insert!.payload as { attachments: { kind: string } }).attachments.kind).toBe('button_reply')
+    expect((insert!.payload as { direction: string }).direction).toBe('inbound')
+  })
+
+  it('previews a btn_say message with its own text', async () => {
+    const admin = makeAdmin(baseState)
+    await handlePostback(
+      admin as unknown as Parameters<typeof handlePostback>[0],
+      FB_PAGE_ID,
+      { sender: { id: PSID }, postback: { payload: 'btn_say:Book me in' }, timestamp: 1700000000 } as never,
+    )
+    const update = admin.calls.find((c) => c.table === 'messenger_threads' && c.op === 'update')
+    expect((update!.payload as { last_message_preview: string }).last_message_preview).toBe('Book me in')
+  })
+
+  it('returns null for a btn_say payload with no text', async () => {
+    const admin = makeAdmin(baseState)
+    const r = await handlePostback(
+      admin as unknown as Parameters<typeof handlePostback>[0],
+      FB_PAGE_ID,
+      { sender: { id: PSID }, postback: { payload: 'btn_say:   ' }, timestamp: 1700000000 } as never,
+    )
+    expect(r).toBeNull()
+    expect(admin.calls.find((c) => c.op === 'insert')).toBeUndefined()
+  })
+
   it('returns null and writes nothing when the page owner is paused', async () => {
     const admin = makeAdmin({ ...baseState, ownerStatus: 'paused' })
     const r = await handlePostback(

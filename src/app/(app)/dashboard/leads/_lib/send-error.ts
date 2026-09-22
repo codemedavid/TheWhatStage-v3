@@ -3,10 +3,12 @@
 // raw code recoverable in the fallback so unmapped reasons still say something.
 
 const FRIENDLY: Record<string, string> = {
+  // Legacy: kept for message rows written before sends fell back to an
+  // untagged retry. The live code now reports the window itself instead.
   'policy_blocked:human_agent_unapproved':
     "Can't send: this Facebook Page isn't approved for the Human Agent messaging window. Reply from the Page inbox, or request Human Agent access from Meta.",
   'policy_blocked:window':
-    "Can't send: outside Messenger's 24-hour reply window and no valid message tag applies.",
+    "Can't send: Meta closed this conversation's 24-hour reply window. Wait for the customer to message again, or reply from the Page inbox.",
   'policy_blocked:optin':
     "Can't send: this customer hasn't opted in to marketing messages.",
   'policy_blocked:otn':

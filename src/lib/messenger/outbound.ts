@@ -2,13 +2,16 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import {
   sendMessengerAttachment,
   sendMessengerButton,
+  sendMessengerButtonTemplate,
   sendMessengerGenericTemplate,
   sendMessengerImage,
   sendMessengerText,
   sendMessengerTextSequence,
   sendMessengerUtilityTemplate,
   isHumanAgentUnapprovedError,
+  isOutsideWindowError,
   type MessengerAttachmentType,
+  type MessengerButtonSpec,
   type MessengerGenericElement,
   type SentTextPart,
 } from '@/lib/facebook/messenger'
@@ -27,6 +30,10 @@ export type OutboundPayload =
   // always the full reply, used for previews/logging and the single-send path.
   | { kind: 'text'; text: string; segments?: string[] }
   | { kind: 'button'; text: string; url: string; ctaLabel: string }
+  // Button template with 1-3 buttons of mixed action (URL, phone, postback).
+  // The single-URL-button case above stays for the many callers that only
+  // ever send one action-page CTA.
+  | { kind: 'buttons'; text: string; buttons: MessengerButtonSpec[] }
   | { kind: 'image'; imageUrl: string }
   // Media attachment by URL — video/audio (voice notes)/file (documents).
   // Images use the dedicated 'image' kind above. The URL must be reachable by
@@ -66,6 +73,13 @@ export type SendPolicy =
   | { mode: 'UTILITY_MESSAGE' }
   | { mode: 'OTN'; token: string }
   | { mode: 'paused'; reason: 'window' | 'optin' | 'otn' }
+
+// One completed Graph delivery. `textParts` is present only on the text path,
+// where the worker persists one row per delivered bubble.
+interface DeliveredSend {
+  messageId: string
+  textParts?: SentTextPart[]
+}
 
 const WINDOW_MS = 24 * 60 * 60 * 1000
 
@@ -140,8 +154,14 @@ export async function sendOutbound(args: {
   pageToken: string
   payload: OutboundPayload
   kind: SendKind
+  /**
+   * Skip the `last_outbound_at` stamp. Set by callers that already write the
+   * thread row afterwards and fold the stamp into that single update, so an
+   * interactive send doesn't pay two round trips for one column.
+   */
+  skipThreadStamp?: boolean
 }): Promise<OutboundResult> {
-  const { admin, thread, pageToken, payload, kind } = args
+  const { admin, thread, pageToken, payload, kind, skipThreadStamp } = args
 
   // Utility templates short-circuit policy resolution: an approved template is
   // its own permission to reach the user out-of-window. It's sent with
@@ -216,15 +236,15 @@ export async function sendOutbound(args: {
   // Determine the messaging_type to use. HUMAN_AGENT requires MESSAGE_TAG + tag field.
   const useHumanAgent = policy.mode === 'HUMAN_AGENT'
 
-  let messageId: string
-  // Populated only on the text path so the worker can persist one row per bubble.
-  let textParts: SentTextPart[] | undefined
+  // One delivery attempt at a given tagging level. Factored out so the
+  // HUMAN_AGENT path can be retried untagged without duplicating every payload
+  // branch — see the catch below.
+  const deliver = async (tagHumanAgent: boolean): Promise<DeliveredSend> => {
+    const humanAgent = tagHumanAgent
+      ? ({ messagingType: 'MESSAGE_TAG', tag: 'HUMAN_AGENT' } as const)
+      : {}
 
-  try {
     if (payload.kind === 'text') {
-      const humanAgent = useHumanAgent
-        ? ({ messagingType: 'MESSAGE_TAG', tag: 'HUMAN_AGENT' } as const)
-        : {}
       // 2+ segments → paced human-like bubbles; otherwise a single send.
       if (payload.segments && payload.segments.length > 1) {
         const seq = await sendMessengerTextSequence({
@@ -233,56 +253,83 @@ export async function sendOutbound(args: {
           segments: payload.segments,
           ...humanAgent,
         })
-        textParts = seq.parts
-        messageId = seq.parts[0]?.message_id ?? ''
-      } else {
-        const result = await sendMessengerText({
-          pageAccessToken: pageToken,
-          recipientPsid: thread.psid,
-          text: payload.text,
-          ...humanAgent,
-        })
-        messageId = result.message_id
-        textParts = [{ message_id: result.message_id, text: payload.text }]
+        return { messageId: seq.parts[0]?.message_id ?? '', textParts: seq.parts }
       }
-    } else if (payload.kind === 'button') {
+      const result = await sendMessengerText({
+        pageAccessToken: pageToken,
+        recipientPsid: thread.psid,
+        text: payload.text,
+        ...humanAgent,
+      })
+      return {
+        messageId: result.message_id,
+        textParts: [{ message_id: result.message_id, text: payload.text }],
+      }
+    }
+
+    if (payload.kind === 'button') {
       const result = await sendMessengerButton({
         pageAccessToken: pageToken,
         recipientPsid: thread.psid,
         text: payload.text,
         url: payload.url,
         ctaLabel: payload.ctaLabel,
-        ...(useHumanAgent ? { messagingType: 'MESSAGE_TAG', tag: 'HUMAN_AGENT' } : {}),
+        ...humanAgent,
       })
-      messageId = result.message_id
-    } else if (payload.kind === 'generic_template') {
+      return { messageId: result.message_id }
+    }
+
+    if (payload.kind === 'buttons') {
+      const result = await sendMessengerButtonTemplate({
+        pageAccessToken: pageToken,
+        recipientPsid: thread.psid,
+        text: payload.text,
+        buttons: payload.buttons,
+        ...humanAgent,
+      })
+      return { messageId: result.message_id }
+    }
+
+    if (payload.kind === 'generic_template') {
       const result = await sendMessengerGenericTemplate({
         pageAccessToken: pageToken,
         recipientPsid: thread.psid,
         elements: payload.elements,
-        ...(useHumanAgent ? { messagingType: 'MESSAGE_TAG', tag: 'HUMAN_AGENT' } : {}),
+        ...humanAgent,
       })
-      messageId = result.message_id
-    } else if (payload.kind === 'image') {
+      return { messageId: result.message_id }
+    }
+
+    if (payload.kind === 'image') {
       const result = await sendMessengerImage({
         pageAccessToken: pageToken,
         recipientPsid: thread.psid,
         imageUrl: payload.imageUrl,
-        ...(useHumanAgent ? { messagingType: 'MESSAGE_TAG', tag: 'HUMAN_AGENT' } : {}),
+        ...humanAgent,
       })
-      messageId = result.message_id
-    } else {
-      // video | audio | file — generic media attachment by URL.
-      const attachmentType: MessengerAttachmentType = payload.kind
-      const result = await sendMessengerAttachment({
-        pageAccessToken: pageToken,
-        recipientPsid: thread.psid,
-        attachmentType,
-        url: payload.url,
-        ...(useHumanAgent ? { messagingType: 'MESSAGE_TAG', tag: 'HUMAN_AGENT' } : {}),
-      })
-      messageId = result.message_id
+      return { messageId: result.message_id }
     }
+
+    // video | audio | file — generic media attachment by URL.
+    const attachmentType: MessengerAttachmentType = payload.kind
+    const result = await sendMessengerAttachment({
+      pageAccessToken: pageToken,
+      recipientPsid: thread.psid,
+      attachmentType,
+      url: payload.url,
+      ...humanAgent,
+    })
+    return { messageId: result.message_id }
+  }
+
+  let messageId: string
+  // Populated only on the text path so the worker can persist one row per bubble.
+  let textParts: SentTextPart[] | undefined
+
+  try {
+    const delivered = await deliver(useHumanAgent)
+    messageId = delivered.messageId
+    textParts = delivered.textParts
   } catch (e) {
     // Send failed — release the OTN claim so the retry can reuse the token.
     if (policy.mode === 'OTN') {
@@ -294,26 +341,59 @@ export async function sendOutbound(args: {
       if (relErr) console.error('[outbound] OTN token release failed', relErr.message)
     }
     // Meta hasn't approved the Human Agent feature for this page, so the
-    // HUMAN_AGENT tag is rejected (Graph code 100, subcode 2018276). This is a
-    // PERMANENT policy block — retrying never helps — so degrade it to a clean
-    // `sent: false` like the other out-of-window blocks instead of throwing.
-    // Otherwise it surfaces as a noisy "handler threw" + Sentry alert on every
-    // sequence tick and leaves the run re-firing forever.
+    // HUMAN_AGENT tag is rejected (Graph code 100, subcode 2018276). Retrying
+    // WITH the tag never helps — but the tag was only ever an escalation on top
+    // of standard messaging, so retry once UNTAGGED and let Meta arbitrate the
+    // window itself.
+    //
+    // This matters because our `last_inbound_at` is a local mirror that can lag
+    // a genuinely fresh inbound (the webhook stamps it, but a redelivery or a
+    // failed counter bump can still leave it behind). When the customer really
+    // did just write, the untagged send goes straight through instead of
+    // failing an operator's reply on stale bookkeeping. When the window truly
+    // is closed, Graph says so (subcode 2018278) and we report *that* — the
+    // honest reason — rather than blaming Human Agent approval.
     if (policy.mode === 'HUMAN_AGENT' && isHumanAgentUnapprovedError(e)) {
-      console.warn('[outbound] HUMAN_AGENT tag not approved by Meta — send blocked', {
-        threadId: thread.id,
-        kind,
-      })
-      return { sent: false, reason: 'human_agent_unapproved' }
+      try {
+        const delivered = await deliver(false)
+        console.warn('[outbound] HUMAN_AGENT unapproved — delivered untagged instead', {
+          threadId: thread.id,
+          kind,
+        })
+        messageId = delivered.messageId
+        textParts = delivered.textParts
+        return stampAndReturn(admin, thread.id, skipThreadStamp, messageId, textParts)
+      } catch (retryErr) {
+        if (isOutsideWindowError(retryErr)) {
+          console.warn('[outbound] outside the 24h window and no usable tag — send blocked', {
+            threadId: thread.id,
+            kind,
+          })
+          return { sent: false, reason: 'window' }
+        }
+        throw retryErr
+      }
     }
     throw e
   }
 
-  await admin
-    .from('messenger_threads')
-    .update({ last_outbound_at: new Date().toISOString() })
-    .eq('id', thread.id)
+  return stampAndReturn(admin, thread.id, skipThreadStamp, messageId, textParts)
+}
 
+/** Post-delivery bookkeeping, shared by the tagged and untagged send paths. */
+async function stampAndReturn(
+  admin: AdminClient,
+  threadId: string,
+  skipThreadStamp: boolean | undefined,
+  messageId: string,
+  textParts: SentTextPart[] | undefined,
+): Promise<OutboundResult> {
+  if (!skipThreadStamp) {
+    await admin
+      .from('messenger_threads')
+      .update({ last_outbound_at: new Date().toISOString() })
+      .eq('id', threadId)
+  }
   return { sent: true, messageId, ...(textParts ? { parts: textParts } : {}) }
 }
 

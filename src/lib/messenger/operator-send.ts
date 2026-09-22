@@ -4,6 +4,7 @@ import { decryptToken } from '@/lib/facebook/crypto'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { sendOutbound, type OutboundPayload } from '@/lib/messenger/outbound'
 import { deeplinkActionPageUrl } from '@/lib/action-pages/urls'
+import { afterResponse } from '@/lib/server/after'
 import type { MessengerAttachmentType } from '@/lib/facebook/messenger'
 
 // Operator-initiated sends shared by the dashboard (cookie session) and the
@@ -18,12 +19,21 @@ import type { MessengerAttachmentType } from '@/lib/facebook/messenger'
  * action-page sends, where there is nothing to re-sign.
  */
 export interface OperatorAttachment {
-  type: MessengerAttachmentType | 'action_page'
+  type: MessengerAttachmentType | 'action_page' | 'buttons' | 'card'
   storage_path?: string
   media_asset_id?: string
   action_page_id?: string
   url?: string
   name?: string
+  /** 'buttons': the labels (and links) the recipient sees under the text. */
+  buttons?: Array<{ label: string; url?: string }>
+  /** 'card': the generic-template cards, in the order they were sent. */
+  cards?: Array<{
+    title: string
+    subtitle?: string
+    image_url?: string
+    buttons?: Array<{ label: string; url?: string }>
+  }>
 }
 
 export interface OperatorThread {
@@ -54,6 +64,12 @@ const WORKFLOW_RESUME_MS = 24 * 60 * 60 * 1000
  * Fetches the thread + page token, sends via the unified outbound pipeline
  * (HUMAN_AGENT policy), persists an audit row, stamps the bot-pause window, and
  * releases any workflow run lock — identical side effects regardless of payload.
+ *
+ * Latency shape: an operator send is interactive, so only the work the caller
+ * genuinely has to wait for stays on the critical path — the thread/config
+ * reads (issued together), the Graph send, and the audit row insert. Every
+ * thread-row write is folded into ONE update and, along with the workflow-run
+ * release, runs after the response is flushed. See `afterResponse`.
  */
 export async function dispatchOperatorSendFor(args: {
   supabase: SupabaseClient
@@ -64,12 +80,20 @@ export async function dispatchOperatorSendFor(args: {
 }): Promise<SendResult> {
   const { supabase, userId, context, leadId, build } = args
 
-  const { data: thread, error: threadErr } = await supabase
-    .from('messenger_threads')
-    .select('id, psid, page_id, last_inbound_at, controlled_by_run_id, facebook_pages(page_access_token)')
-    .eq('lead_id', leadId)
-    .eq('user_id', userId)
-    .maybeSingle()
+  // Independent reads — one round trip instead of two.
+  const [{ data: thread, error: threadErr }, { data: cfg }] = await Promise.all([
+    supabase
+      .from('messenger_threads')
+      .select('id, psid, page_id, last_inbound_at, controlled_by_run_id, facebook_pages(page_access_token)')
+      .eq('lead_id', leadId)
+      .eq('user_id', userId)
+      .maybeSingle(),
+    supabase
+      .from('chatbot_configs')
+      .select('human_takeover_minutes')
+      .eq('user_id', userId)
+      .maybeSingle(),
+  ])
   if (threadErr) throw new Error(`${context}: ${threadErr.message}`)
   if (!thread) throw new Error(`${context}: no Messenger thread for lead`)
 
@@ -103,6 +127,8 @@ export async function dispatchOperatorSendFor(args: {
       pageToken,
       payload,
       kind: 'operator',
+      // Folded into the single deferred thread update below.
+      skipThreadStamp: true,
     })
     if (result.sent) {
       sentId = result.messageId
@@ -124,62 +150,65 @@ export async function dispatchOperatorSendFor(args: {
     error: sendError,
   })
 
+  // Everything below is bookkeeping the operator never waits on. Collect it
+  // into one thread update and run it after the response is flushed.
+  const now = new Date()
+  const threadUpdate: Record<string, unknown> = {}
+
   // Stamp bot_paused_until regardless of send success/failure — the operator's
   // intent to take over is what matters, not whether the FB API accepted the message.
-  const { data: cfg } = await supabase
-    .from('chatbot_configs')
-    .select('human_takeover_minutes')
-    .eq('user_id', userId)
-    .maybeSingle()
   const pauseMinutes = cfg?.human_takeover_minutes ?? 0
   if (pauseMinutes > 0) {
-    await supabase
-      .from('messenger_threads')
-      .update({ bot_paused_until: new Date(Date.now() + pauseMinutes * 60_000).toISOString() })
-      .eq('id', thread.id)
-  }
-
-  if (sendError) return { ok: false, error: sendError }
-
-  const threadUpdate: Record<string, unknown> = {
-    last_message_at: new Date().toISOString(),
-    last_message_preview: body.slice(0, 200),
+    threadUpdate.bot_paused_until = new Date(now.getTime() + pauseMinutes * 60_000).toISOString()
   }
 
   // §9 operator override: clear the workflow run lock so the bot can resume
   // normal operation when the run's wait expires, and pause the active run
-  // with a 24-hour auto-resume timer.
-  const runId = (thread as { controlled_by_run_id?: string | null }).controlled_by_run_id ?? null
-  if (runId) {
-    threadUpdate.controlled_by_run_id = null
-    const resumeAt = new Date(Date.now() + WORKFLOW_RESUME_MS).toISOString()
+  // with a 24-hour auto-resume timer. Only on a delivered message.
+  const runId = sendError
+    ? null
+    : ((thread as { controlled_by_run_id?: string | null }).controlled_by_run_id ?? null)
 
-    // Read the run's current state, merge the pause reason, then write back.
-    // Race window is acceptable — operator override is a rare, manual event.
-    const { data: runRow } = await admin
-      .from('workflow_runs')
-      .select('state')
-      .eq('id', runId)
-      .in('status', ['running', 'waiting'])
-      .maybeSingle<{ state: Record<string, unknown> }>()
-    if (runRow) {
-      await admin
-        .from('workflow_runs')
-        .update({
-          status: 'waiting',
-          next_run_at: resumeAt,
-          state: { ...runRow.state, waiting_for: 'operator_took_over' },
-        })
-        .eq('id', runId)
-    }
+  if (!sendError) {
+    threadUpdate.last_outbound_at = now.toISOString()
+    threadUpdate.last_message_at = now.toISOString()
+    threadUpdate.last_message_preview = body.slice(0, 200)
+    if (runId) threadUpdate.controlled_by_run_id = null
   }
 
-  await supabase
-    .from('messenger_threads')
-    .update(threadUpdate)
-    .eq('id', thread.id)
+  await afterResponse(context, async () => {
+    const writes: PromiseLike<unknown>[] = []
+    if (Object.keys(threadUpdate).length > 0) {
+      writes.push(supabase.from('messenger_threads').update(threadUpdate).eq('id', thread.id))
+    }
+    if (runId) writes.push(pauseWorkflowRun(admin, runId))
+    await Promise.all(writes)
+  })
 
-  return { ok: true }
+  return sendError ? { ok: false, error: sendError } : { ok: true }
+}
+
+/**
+ * Park an active workflow run that an operator just spoke over, with a 24-hour
+ * auto-resume. Reads the run's state, merges the pause reason, writes it back —
+ * the race window is acceptable because operator override is a rare manual event.
+ */
+async function pauseWorkflowRun(admin: SupabaseClient, runId: string): Promise<void> {
+  const { data: runRow } = await admin
+    .from('workflow_runs')
+    .select('state')
+    .eq('id', runId)
+    .in('status', ['running', 'waiting'])
+    .maybeSingle<{ state: Record<string, unknown> }>()
+  if (!runRow) return
+  await admin
+    .from('workflow_runs')
+    .update({
+      status: 'waiting',
+      next_run_at: new Date(Date.now() + WORKFLOW_RESUME_MS).toISOString(),
+      state: { ...runRow.state, waiting_for: 'operator_took_over' },
+    })
+    .eq('id', runId)
 }
 
 export async function replyAsOperatorFor(

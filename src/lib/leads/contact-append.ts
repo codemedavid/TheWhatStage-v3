@@ -134,3 +134,26 @@ export function extractContactsFromSubmission(
     emails: [...new Set(emails)],
   }
 }
+
+/**
+ * Stack every phone/email found in an inbound message body onto the lead.
+ *
+ * Called from two places on purpose, because neither covers the other's gap:
+ *  * the FB webhook, which sees every inbound message — including threads where
+ *    the bot is muted or an operator took over, which never enqueue a worker job
+ *    and so never reach the reply worker at all; and
+ *  * the reply worker, which runs after the lead row exists — the webhook has no
+ *    `lead_id` yet on a brand-new thread's first message.
+ * `append_lead_contacts` dedups on (lead_id, kind, value), so the overlap is free.
+ */
+export async function captureContactsFromMessage(
+  admin: SupabaseClient,
+  leadId: string,
+  text: string,
+): Promise<void> {
+  if (!text) return
+  const phones = extractPhones(text)
+  const emails = extractEmails(text)
+  if (!phones.length && !emails.length) return
+  await appendLeadContacts(admin, leadId, { phones, emails, source: 'messenger' })
+}

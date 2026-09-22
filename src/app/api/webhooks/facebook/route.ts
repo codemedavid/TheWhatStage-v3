@@ -8,6 +8,9 @@ import { isBotPaused } from '@/lib/chatbot/takeover'
 import { takeThreadControl } from '@/lib/facebook/messenger'
 import { decryptToken } from '@/lib/facebook/crypto'
 import { bumpThreadOnInbound } from '@/lib/messenger/inbound-counters'
+import { captureContactsFromMessage } from '@/lib/leads/contact-append'
+import { notifyInboundMessage } from '@/lib/push/notify'
+import { afterResponse } from '@/lib/server/after'
 import {
   DEFAULT_MESSAGE_DEBOUNCE_SECONDS,
   MAX_MESSAGE_DEBOUNCE_SECONDS,
@@ -505,7 +508,7 @@ async function handleEvent(
       { page_id: page.id, user_id: userId, psid },
       { onConflict: 'page_id,psid', ignoreDuplicates: false },
     )
-    .select('id, auto_reply_enabled, bot_paused_until, lead_id')
+    .select('id, auto_reply_enabled, bot_paused_until, lead_id, full_name')
     .single()
 
   if (threadErr || !thread) {
@@ -548,6 +551,30 @@ async function handleEvent(
   // the inbound pipeline. Runs once per unique message — a redelivery dedups on
   // fb_message_id and returns above before reaching here.
   await bumpThreadOnInbound(admin, thread.id, text)
+
+  // Stack any phone/email the lead just typed onto their profile. Done here
+  // rather than only in the reply worker so capture never depends on the bot
+  // answering: a muted thread with auto-classify off enqueues no job at all,
+  // and an operator-handled conversation is exactly when numbers get shared.
+  if (thread.lead_id && text) {
+    const leadIdForContacts = thread.lead_id
+    await afterResponse('lead.contacts', () =>
+      captureContactsFromMessage(admin, leadIdForContacts, text),
+    )
+  }
+
+  // Ping the operator's phone. Deferred past the response: Meta times the
+  // webhook out at 20s and Expo's push service is a third-party hop that must
+  // never sit on that clock. notifyInboundMessage swallows its own failures.
+  await afterResponse('push.inbound', () =>
+    notifyInboundMessage(admin, {
+      userId,
+      threadId: thread.id,
+      leadId: thread.lead_id ?? null,
+      contactName: (thread as { full_name?: string | null }).full_name ?? null,
+      preview: text,
+    }),
+  )
 
   // Enqueue if the bot is on for this thread, OR if global auto-classify is
   // enabled for this user (the worker will skip the reply step and only

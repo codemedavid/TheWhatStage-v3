@@ -17,6 +17,7 @@ vi.mock('@/lib/facebook/messenger', () => ({
   sendMessengerUtilityTemplate: (a: Args) => sendMessengerUtilityTemplate(a),
   isHumanAgentUnapprovedError: (e: unknown) =>
     e instanceof Error && e.message.includes('2018276'),
+  isOutsideWindowError: (e: unknown) => e instanceof Error && e.message.includes('2018278'),
 }))
 
 import { sendOutbound } from './outbound'
@@ -35,6 +36,12 @@ const OUT_OF_WINDOW = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString()
 const IN_WINDOW = new Date(Date.now() - 60_000).toISOString()
 
 const baseThread = { id: 't1', psid: 'psid-1' }
+
+// Verbatim Graph rejections the fallback keys off.
+const TAG_UNAPPROVED =
+  'Graph 400 (code 100): {"error":{"message":"(#100) Cannot tag messages with \'HUMAN_AGENT\' without prior approval.","code":100,"error_subcode":2018276}}'
+const OUTSIDE_WINDOW =
+  'Graph 400 (code 10): {"error":{"message":"This message is sent outside of allowed window.","code":10,"error_subcode":2018278}}'
 
 beforeEach(() => {
   sendMessengerText.mockClear()
@@ -88,12 +95,8 @@ describe('sendOutbound — operator media/button HUMAN_AGENT tagging', () => {
     )
   })
 
-  it('degrades to sent:false when Meta has not approved the HUMAN_AGENT tag', async () => {
-    sendMessengerText.mockRejectedValueOnce(
-      new Error(
-        "Graph 400 (code 100): {\"error\":{\"message\":\"(#100) Cannot tag messages with 'HUMAN_AGENT' without prior approval.\",\"code\":100,\"error_subcode\":2018276}}",
-      ),
-    )
+  it('retries untagged when Meta has not approved the HUMAN_AGENT tag', async () => {
+    sendMessengerText.mockRejectedValueOnce(new Error(TAG_UNAPPROVED))
     const r = await sendOutbound({
       admin: adminStub(),
       thread: { ...baseThread, last_inbound_at: OUT_OF_WINDOW },
@@ -101,7 +104,40 @@ describe('sendOutbound — operator media/button HUMAN_AGENT tagging', () => {
       payload: { kind: 'text', text: 'hi' },
       kind: 'operator',
     })
-    expect(r).toEqual({ sent: false, reason: 'human_agent_unapproved' })
+    // Our last_inbound_at said "out of window", but Meta accepted the untagged
+    // send — i.e. the customer really had written recently and our mirror lagged.
+    expect(r).toEqual({ sent: true, messageId: 'text-1', parts: [{ message_id: 'text-1', text: 'hi' }] })
+    expect(sendMessengerText).toHaveBeenCalledTimes(2)
+    const retryArg = sendMessengerText.mock.calls[1][0]
+    expect(retryArg.tag).toBeUndefined()
+    expect(retryArg.messagingType).toBeUndefined()
+  })
+
+  it('reports the window (not tag approval) when the untagged retry is also refused', async () => {
+    sendMessengerText.mockRejectedValueOnce(new Error(TAG_UNAPPROVED))
+    sendMessengerText.mockRejectedValueOnce(new Error(OUTSIDE_WINDOW))
+    const r = await sendOutbound({
+      admin: adminStub(),
+      thread: { ...baseThread, last_inbound_at: OUT_OF_WINDOW },
+      pageToken: 'tok',
+      payload: { kind: 'text', text: 'hi' },
+      kind: 'operator',
+    })
+    expect(r).toEqual({ sent: false, reason: 'window' })
+  })
+
+  it('rethrows a transient failure on the untagged retry so the caller can requeue', async () => {
+    sendMessengerText.mockRejectedValueOnce(new Error(TAG_UNAPPROVED))
+    sendMessengerText.mockRejectedValueOnce(new Error('Graph 503: upstream unavailable'))
+    await expect(
+      sendOutbound({
+        admin: adminStub(),
+        thread: { ...baseThread, last_inbound_at: OUT_OF_WINDOW },
+        pageToken: 'tok',
+        payload: { kind: 'text', text: 'hi' },
+        kind: 'operator',
+      }),
+    ).rejects.toThrow('upstream unavailable')
   })
 
   it('does NOT tag an in-window operator image send (RESPONSE window suffices)', async () => {

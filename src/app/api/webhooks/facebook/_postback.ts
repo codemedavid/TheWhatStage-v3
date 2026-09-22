@@ -26,11 +26,62 @@ function pageOwnerId(page: FbPageRow): string | null {
   return user ?? null
 }
 
+/** Longest reply a saved-message button may speak on the customer's behalf. */
+const SAY_REPLY_MAX = 900
+
+/** What a recognised payload turns into: an inbound message the bot answers. */
+interface SyntheticInbound {
+  body: string
+  attachments: Record<string, unknown>
+  /** Thread-list preview; defaults to the body when a payload has nothing better. */
+  preview?: string
+}
+
 /**
- * Handle an inbound Messenger postback event. Today we only know the
- * `rec_inquire:<slug>` payload (Inquire button on a property recommendation
- * card). Returns the enqueued job id when one was created, or null when the
- * event was malformed, dedup'd, or pointed at an unknown property.
+ * `rec_inquire:<slug>` — the Inquire button on a property recommendation card.
+ * Speaks for the customer using the property's own title.
+ */
+async function inquirePostback(
+  admin: AdminClient,
+  userId: string,
+  slug: string,
+): Promise<SyntheticInbound | null> {
+  const { data: property, error: propErr } = await admin
+    .from('business_items')
+    .select('id, title')
+    .eq('user_id', userId)
+    .eq('kind', 'property')
+    .eq('slug', slug)
+    .maybeSingle<{ id: string; title: string }>()
+  if (propErr || !property) {
+    console.warn('[fb.webhook] postback property not found', { slug, err: propErr?.message })
+    return null
+  }
+  return {
+    body: `I'd like more info on ${property.title}`,
+    attachments: { kind: 'inquire_postback', property_id: property.id, property_slug: slug },
+    preview: `📩 Inquire · ${property.title}`,
+  }
+}
+
+/**
+ * `btn_say:<text>` — a saved-message button configured to trigger a bot reply.
+ * The operator wrote the text when building the button, so it is recorded
+ * verbatim as if the customer had typed it and the normal job pipeline answers.
+ */
+function sayPostback(text: string): SyntheticInbound | null {
+  const body = text.trim().slice(0, SAY_REPLY_MAX)
+  if (!body) {
+    console.warn('[fb.webhook] postback btn_say carried no text')
+    return null
+  }
+  return { body, attachments: { kind: 'button_reply' } }
+}
+
+/**
+ * Handle an inbound Messenger postback event. Returns the enqueued job id when
+ * one was created, or null when the event was malformed, dedup'd, or pointed
+ * at something that no longer exists.
  */
 export async function handlePostback(
   admin: AdminClient,
@@ -53,7 +104,7 @@ export async function handlePostback(
   const prefix = payload.slice(0, colonIdx)
   const arg = payload.slice(colonIdx + 1)
 
-  if (prefix !== 'rec_inquire') {
+  if (prefix !== 'rec_inquire' && prefix !== 'btn_say') {
     console.warn('[fb.webhook] postback unknown prefix', { prefix })
     return null
   }
@@ -77,17 +128,9 @@ export async function handlePostback(
     return null
   }
 
-  const { data: property, error: propErr } = await admin
-    .from('business_items')
-    .select('id, title')
-    .eq('user_id', userId)
-    .eq('kind', 'property')
-    .eq('slug', arg)
-    .maybeSingle<{ id: string; title: string }>()
-  if (propErr || !property) {
-    console.warn('[fb.webhook] postback property not found', { slug: arg, err: propErr?.message })
-    return null
-  }
+  const inbound =
+    prefix === 'rec_inquire' ? await inquirePostback(admin, userId, arg) : sayPostback(arg)
+  if (!inbound) return null
 
   // Upsert thread (mirror of handleEvent — if it doesn't exist yet we create it).
   const { data: thread, error: threadErr } = await admin
@@ -104,7 +147,6 @@ export async function handlePostback(
   }
 
   const fbMessageId = syntheticId(psid, timestamp, payload)
-  const body = `I'd like more info on ${property.title}`
 
   const { data: inserted, error: insertErr } = await admin
     .from('messenger_messages')
@@ -114,8 +156,8 @@ export async function handlePostback(
       direction: 'inbound',
       sender: 'user',
       fb_message_id: fbMessageId,
-      body,
-      attachments: { kind: 'inquire_postback', property_id: property.id, property_slug: arg },
+      body: inbound.body,
+      attachments: inbound.attachments,
     })
     .select('id')
     .maybeSingle()
@@ -127,7 +169,7 @@ export async function handlePostback(
   }
   if (!inserted) return null
 
-  const previewText = `📩 Inquire · ${property.title}`.slice(0, 200)
+  const previewText = (inbound.preview ?? inbound.body).slice(0, 200)
   const nowIso = new Date().toISOString()
   await admin
     .from('messenger_threads')
@@ -153,6 +195,6 @@ export async function handlePostback(
     return null
   }
 
-  console.log('[fb.webhook] postback received', { prefix, slug: arg, threadId: thread.id })
+  console.log('[fb.webhook] postback received', { prefix, threadId: thread.id })
   return job.id
 }

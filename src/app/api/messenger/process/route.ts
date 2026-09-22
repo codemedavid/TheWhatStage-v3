@@ -30,7 +30,7 @@ import { deeplinkActionPageUrl } from '@/lib/action-pages/urls'
 import { fetchPublicCatalogProducts, type PublicProductCard } from '@/lib/business/public-dto'
 import type { MessengerGenericElement } from '@/lib/facebook/messenger'
 import { parseRealestateConfig } from '@/app/a/[slug]/_kinds/realestate/schema'
-import { appendLeadContacts, extractEmails, extractPhones } from '@/lib/leads/contact-append'
+import { captureContactsFromMessage } from '@/lib/leads/contact-append'
 import {
   answer,
   shouldRollSummary,
@@ -570,18 +570,14 @@ async function runJob(admin: AdminClient, job: JobRow): Promise<void> {
     }
 
     // Auto-detect phone numbers and emails shared by the lead — defer; the
-    // bot's reply doesn't depend on persisting these.
+    // bot's reply doesn't depend on persisting these. The webhook captures the
+    // same values per message; this pass covers a brand-new thread whose lead
+    // row did not exist yet when the webhook ran. Appends dedup server-side.
     if (thread.lead_id) {
-      const detectedPhones = extractPhones(message)
-      const detectedEmails = extractEmails(message)
-      if (detectedPhones.length || detectedEmails.length) {
-        const leadIdForContacts = thread.lead_id
-        void appendLeadContacts(admin, leadIdForContacts, {
-          phones: detectedPhones,
-          emails: detectedEmails,
-          source: 'messenger',
-        }).catch((e) => console.warn('[messenger.worker] appendLeadContacts failed', e))
-      }
+      const leadIdForContacts = thread.lead_id
+      void captureContactsFromMessage(admin, leadIdForContacts, message).catch((e) =>
+        console.warn('[messenger.worker] captureContactsFromMessage failed', e),
+      )
     }
 
     // Parallel context preload: chatbot_configs, pipeline_stages, lead row,

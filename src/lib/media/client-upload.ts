@@ -2,7 +2,7 @@
 
 import { createClient } from '@/lib/supabase/client'
 import { MEDIA_ASSETS_BUCKET } from '@/lib/messenger/attachments'
-import type { UploadIntentEntry } from '@/app/api/media/upload-intent/route'
+import type { UploadIntentEntry } from '@/lib/media/upload-intent'
 
 export interface UploadedMediaAsset {
   id: string

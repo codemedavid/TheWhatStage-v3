@@ -86,6 +86,21 @@ export function isHumanAgentUnapprovedError(error: unknown): boolean {
   )
 }
 
+// Graph error_subcode for "This message is sent outside of allowed window" —
+// Meta's own verdict that the 24h standard-messaging window has closed. It is
+// the authoritative answer (our `last_inbound_at` is only a local mirror), so
+// callers use it to distinguish "genuinely too late" from "our bookkeeping was
+// stale" after an untagged retry.
+const OUTSIDE_WINDOW_SUBCODE = 2018278
+
+export function isOutsideWindowError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false
+  return (
+    error.message.includes(String(OUTSIDE_WINDOW_SUBCODE)) ||
+    error.message.includes('outside of allowed window')
+  )
+}
+
 function graphRetryDelayMs(attempt: number, retryAfter: string | null): number {
   if (retryAfter) {
     const secs = Number(retryAfter)
@@ -369,18 +384,40 @@ export async function sendMessengerTextSequence(
 }
 
 /**
- * Send a Messenger button-template message — a one-line text plus a single
- * URL button. Used by the bot to surface action pages with a CTA.
- *
- * `cta_label` is hard-trimmed to 20 chars (Messenger button title limit) and
- * `text` is trimmed to 640 chars (template body limit).
+ * One button on a template. A button is exactly one action: open a URL, dial a
+ * number, or post a payload back to our webhook.
  */
-export async function sendMessengerButton(args: {
+export type MessengerButtonSpec =
+  | { title: string; url: string }
+  | { title: string; phone: string }
+  | { title: string; postback: string }
+
+const BUTTON_TITLE_MAX = 20
+const BUTTON_TEMPLATE_TEXT_MAX = 640
+/** Meta caps a template at 3 buttons; extras are dropped rather than rejected. */
+const BUTTONS_PER_TEMPLATE = 3
+
+/** Map one button onto the Send API's shape, trimming the title to its limit. */
+function toGraphButton(button: MessengerButtonSpec): Record<string, unknown> {
+  const title = button.title.slice(0, BUTTON_TITLE_MAX)
+  if ('url' in button) return { type: 'web_url', url: button.url, title }
+  if ('phone' in button) return { type: 'phone_number', payload: button.phone, title }
+  return { type: 'postback', payload: button.postback, title }
+}
+
+/**
+ * Send a Messenger button-template message — a short text plus up to three
+ * buttons. Used by the bot to surface action pages with a CTA, and by operator
+ * saved messages that carry their own buttons.
+ *
+ * Button titles are hard-trimmed to 20 chars and `text` to 640 chars, both
+ * Messenger limits.
+ */
+export async function sendMessengerButtonTemplate(args: {
   pageAccessToken: string
   recipientPsid: string
   text: string
-  url: string
-  ctaLabel: string
+  buttons: MessengerButtonSpec[]
   messagingType?: 'RESPONSE' | 'UPDATE' | 'MESSAGE_TAG'
   tag?: 'HUMAN_AGENT'
 }): Promise<{ message_id: string }> {
@@ -394,20 +431,28 @@ export async function sendMessengerButton(args: {
         type: 'template',
         payload: {
           template_type: 'button',
-          text: args.text.slice(0, 640),
-          buttons: [
-            {
-              type: 'web_url',
-              url: args.url,
-              title: args.ctaLabel.slice(0, 20),
-            },
-          ],
+          text: args.text.slice(0, BUTTON_TEMPLATE_TEXT_MAX),
+          buttons: args.buttons.slice(0, BUTTONS_PER_TEMPLATE).map(toGraphButton),
         },
       },
     },
   }
   if (args.tag) body.tag = args.tag
   return postJson<{ message_id: string }>(url.toString(), body)
+}
+
+/** Single-URL-button convenience wrapper over `sendMessengerButtonTemplate`. */
+export async function sendMessengerButton(args: {
+  pageAccessToken: string
+  recipientPsid: string
+  text: string
+  url: string
+  ctaLabel: string
+  messagingType?: 'RESPONSE' | 'UPDATE' | 'MESSAGE_TAG'
+  tag?: 'HUMAN_AGENT'
+}): Promise<{ message_id: string }> {
+  const { url, ctaLabel, ...rest } = args
+  return sendMessengerButtonTemplate({ ...rest, buttons: [{ title: ctaLabel, url }] })
 }
 
 /**
@@ -451,9 +496,8 @@ export async function sendMessengerReaction(args: {
   })
 }
 
-export type MessengerGenericButton =
-  | { title: string; url: string }
-  | { title: string; postback: string }
+/** Generic-template cards take the same buttons as a button template. */
+export type MessengerGenericButton = MessengerButtonSpec
 
 export interface MessengerGenericElement {
   title: string
@@ -467,8 +511,8 @@ export interface MessengerGenericElement {
  * Send a Messenger generic-template carousel (horizontally scrollable cards).
  * Up to 10 elements; each element supports an image, title (80c), subtitle
  * (80c), a default web_url tap target, and up to 3 buttons (titles trimmed
- * to 20c). Buttons are either URL (`web_url`) or postback. Used to surface
- * a product or property catalog inline in chat.
+ * to 20c). Used to surface a product or property catalog inline in chat, and
+ * by operator saved messages built as a card or carousel.
  */
 export async function sendMessengerGenericTemplate(args: {
   pageAccessToken: string
@@ -487,11 +531,7 @@ export async function sendMessengerGenericTemplate(args: {
       out.default_action = { type: 'web_url', url: el.defaultActionUrl }
     }
     if (el.buttons && el.buttons.length) {
-      out.buttons = el.buttons.slice(0, 3).map((b) => {
-        const title = b.title.slice(0, 20)
-        if ('url' in b) return { type: 'web_url', url: b.url, title }
-        return { type: 'postback', payload: b.postback, title }
-      })
+      out.buttons = el.buttons.slice(0, BUTTONS_PER_TEMPLATE).map(toGraphButton)
     }
     return out
   })

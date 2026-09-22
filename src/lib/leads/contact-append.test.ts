@@ -1,5 +1,9 @@
 import { describe, it, expect, vi } from 'vitest'
-import { appendLeadContacts, extractContactsFromSubmission } from './contact-append'
+import {
+  appendLeadContacts,
+  captureContactsFromMessage,
+  extractContactsFromSubmission,
+} from './contact-append'
 
 function makeAdmin() {
   const rpc = vi.fn().mockResolvedValue({ data: null, error: null })
@@ -85,5 +89,35 @@ describe('extractContactsFromSubmission (booking + catalog)', () => {
     const result = extractContactsFromSubmission('catalog', data, {})
     expect(result.phones).toEqual(['09292992'])
     expect(result.emails).toEqual(['david@example.com'])
+  })
+})
+
+describe('captureContactsFromMessage', () => {
+  it('stacks every phone and email found in the message body', async () => {
+    const admin = makeAdmin()
+    await captureContactsFromMessage(
+      admin,
+      'lead-1',
+      'hi po, 09171234567 or 0917-765-4321, email jane@Example.com',
+    )
+    const rpc = admin.rpc as ReturnType<typeof vi.fn>
+    expect(rpc).toHaveBeenCalledWith('append_lead_contacts', {
+      p_lead_id: 'lead-1',
+      p_phones: ['09171234567', '09177654321'],
+      p_emails: ['jane@example.com'],
+      p_source: 'messenger',
+    })
+  })
+
+  it('skips the RPC when the message carries no contact details', async () => {
+    const admin = makeAdmin()
+    await captureContactsFromMessage(admin, 'lead-1', 'how much po?')
+    expect(admin.rpc as ReturnType<typeof vi.fn>).not.toHaveBeenCalled()
+  })
+
+  it('ignores an empty body', async () => {
+    const admin = makeAdmin()
+    await captureContactsFromMessage(admin, 'lead-1', '')
+    expect(admin.rpc as ReturnType<typeof vi.fn>).not.toHaveBeenCalled()
   })
 })
