@@ -1,9 +1,11 @@
 import { Ionicons } from '@expo/vector-icons'
 import { useEffect, useMemo, useState } from 'react'
 import { ActivityIndicator, FlatList, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { PageStatCard } from '@/components/submissions/page-stat-card'
 import { SubmissionDetailSheet } from '@/components/submissions/submission-detail-sheet'
 import { SubmissionListRow } from '@/components/submissions/submission-row'
+import { KeyboardView } from '@/components/ui/keyboard-view'
 import { EmptyState, Pill, Skeleton } from '@/components/ui/primitives'
 import { ScreenHeader } from '@/components/ui/screen-header'
 import { Segmented } from '@/components/ui/segmented'
@@ -28,6 +30,7 @@ const SEARCH_DEBOUNCE_MS = 250
  * range up per page so an empty page is as visible as a busy one.
  */
 export default function SubmissionsScreen() {
+  const insets = useSafeAreaInsets()
   const [mode, setMode] = useState<Mode>('people')
   const [preset, setPreset] = useState<DatePreset>('all')
   const [pageId, setPageId] = useState<string | null>(null)
@@ -73,8 +76,13 @@ export default function SubmissionsScreen() {
     setMode('people')
   }
 
+  // The gesture bar sits over the last row otherwise — this screen is pushed,
+  // so no tab bar reserves that space for it. Memoised so the lists are not
+  // handed a fresh content style on every keystroke in the search box.
+  const listPad = useMemo(() => ({ paddingBottom: insets.bottom + spacing.xxl }), [insets.bottom])
+
   return (
-    <View style={styles.screen}>
+    <KeyboardView style={styles.screen}>
       <ScreenHeader back title="Submissions" bordered={false}>
         <View style={{ gap: spacing.sm, marginTop: spacing.sm }}>
           <Segmented
@@ -105,7 +113,7 @@ export default function SubmissionsScreen() {
         <FlatList
           data={stats.data ?? []}
           keyExtractor={(s) => s.action_page_id}
-          contentContainerStyle={styles.list}
+          contentContainerStyle={[styles.list, listPad]}
           refreshing={stats.isRefetching}
           onRefresh={() => stats.refetch()}
           ListEmptyComponent={
@@ -130,7 +138,7 @@ export default function SubmissionsScreen() {
         <FlatList
           data={feed.rows}
           keyExtractor={(s) => s.id}
-          contentContainerStyle={feed.rows.length === 0 ? styles.list : undefined}
+          contentContainerStyle={feed.rows.length === 0 ? [styles.list, listPad] : listPad}
           refreshing={feed.isRefetching && !feed.isFetchingNextPage}
           onRefresh={() => feed.refetch()}
           onEndReached={feed.loadMore}
@@ -209,7 +217,7 @@ export default function SubmissionsScreen() {
       )}
 
       <SubmissionDetailSheet row={open} onClose={() => setOpen(null)} />
-    </View>
+    </KeyboardView>
   )
 }
 
@@ -258,7 +266,7 @@ function Stat({ value, label }: { value: number; label: string }) {
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.page },
   strip: { gap: 8, paddingRight: spacing.lg },
-  list: { padding: spacing.lg, gap: 10, paddingBottom: 60 },
+  list: { padding: spacing.lg, gap: 10 },
   sep: { height: StyleSheet.hairlineWidth, backgroundColor: colors.borderSubtle, marginLeft: 68 },
   summary: {
     flexDirection: 'row',

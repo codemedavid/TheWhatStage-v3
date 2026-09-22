@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons'
 import { useLocalSearchParams, useRouter } from 'expo-router'
 import { useEffect, useMemo, useState } from 'react'
-import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { LeadContacts } from '@/components/leads/lead-contacts'
 import { LeadFields, CONTACT_FIELDS, draftFromLead, type FieldDraft } from '@/components/leads/lead-fields'
@@ -10,6 +10,7 @@ import { LeadSubmissions } from '@/components/leads/lead-submissions'
 import { LeadTimeline } from '@/components/leads/lead-timeline'
 import { NewProjectSheet } from '@/components/leads/new-project-sheet'
 import { Button } from '@/components/ui/button'
+import { KeyboardView } from '@/components/ui/keyboard-view'
 import { Card, EmptyState, SectionLabel, Skeleton, StageChip } from '@/components/ui/primitives'
 import { IconButton, ScreenHeader } from '@/components/ui/screen-header'
 import { StagePickerSheet } from '@/components/ui/stage-picker-sheet'
@@ -129,7 +130,7 @@ export default function LeadDetailScreen() {
   const hasThread = !!thread.data
 
   return (
-    <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+    <KeyboardView style={styles.screen}>
       <ScreenHeader
         back
         title={editing ? 'Edit lead' : row.name}
@@ -245,7 +246,7 @@ export default function LeadDetailScreen() {
           }
         }}
       />
-    </KeyboardAvoidingView>
+    </KeyboardView>
   )
 }
 

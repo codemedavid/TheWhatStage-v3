@@ -2,17 +2,7 @@ import { Ionicons } from '@expo/vector-icons'
 import * as Haptics from 'expo-haptics'
 import { useLocalSearchParams, useRouter } from 'expo-router'
 import { useMemo, useState } from 'react'
-import {
-  Alert,
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native'
+import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { ButtonList } from '@/components/saved/button-list'
 import { CardList } from '@/components/saved/card-list'
@@ -20,6 +10,7 @@ import { Field } from '@/components/saved/field'
 import { LayoutPicker } from '@/components/saved/layout-picker'
 import { SavedMessagePreview } from '@/components/saved/saved-message-preview'
 import { Button } from '@/components/ui/button'
+import { KeyboardView } from '@/components/ui/keyboard-view'
 import { Skeleton } from '@/components/ui/primitives'
 import { ScreenHeader } from '@/components/ui/screen-header'
 import {
@@ -179,7 +170,7 @@ export default function SavedMessageEditor() {
   }
 
   return (
-    <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+    <KeyboardView style={styles.screen}>
       <ScreenHeader
         back
         title={isNew ? 'New saved message' : 'Edit saved message'}
@@ -328,7 +319,7 @@ export default function SavedMessageEditor() {
           )}
         </ScrollView>
       )}
-    </KeyboardAvoidingView>
+    </KeyboardView>
   )
 }
 

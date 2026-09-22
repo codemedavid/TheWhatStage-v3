@@ -1,17 +1,10 @@
 import { Ionicons } from '@expo/vector-icons'
 import { useState } from 'react'
-import {
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native'
+import { ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { BrandMark } from '@/components/ui/brand-mark'
 import { Button } from '@/components/ui/button'
+import { KeyboardView } from '@/components/ui/keyboard-view'
 import { useAuth } from '@/providers/auth'
 import { colors, radius, spacing, type } from '@/theme/tokens'
 
@@ -36,8 +29,8 @@ export default function SignInScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.safe}>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+    <KeyboardView style={styles.safe}>
+      <SafeAreaView style={{ flex: 1 }}>
         <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
           <BrandMark size={64} style={styles.logo} />
           <Text style={type.display}>WhatStage</Text>
@@ -95,8 +88,8 @@ export default function SignInScreen() {
             Use the same email and password as the WhatStage dashboard.
           </Text>
         </ScrollView>
-      </KeyboardAvoidingView>
-    </SafeAreaView>
+      </SafeAreaView>
+    </KeyboardView>
   )
 }
 

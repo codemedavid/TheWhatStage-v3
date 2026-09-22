@@ -2,8 +2,10 @@ import { Ionicons } from '@expo/vector-icons'
 import { useLocalSearchParams, useRouter } from 'expo-router'
 import { useMemo, useState } from 'react'
 import { Alert, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Avatar } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
+import { KeyboardView } from '@/components/ui/keyboard-view'
 import { Card, EmptyState, Row, SectionLabel, Skeleton, StageChip } from '@/components/ui/primitives'
 import { IconButton, ScreenHeader } from '@/components/ui/screen-header'
 import { StagePickerSheet } from '@/components/ui/stage-picker-sheet'
@@ -56,6 +58,7 @@ function diff(p: ProjectRow, d: Draft): ProjectPatch {
 export default function ProjectDetailScreen() {
   const { projectId } = useLocalSearchParams<{ projectId: string }>()
   const router = useRouter()
+  const insets = useSafeAreaInsets()
   const project = useProject(projectId)
   const p = project.data ?? null
   const stages = useProjectStages(p?.workspace_id)
@@ -141,7 +144,7 @@ export default function ProjectDetailScreen() {
   }
 
   return (
-    <View style={styles.screen}>
+    <KeyboardView style={styles.screen}>
       <ScreenHeader
         back
         title={editing ? 'Edit project' : 'Project'}
@@ -160,7 +163,10 @@ export default function ProjectDetailScreen() {
           )
         }
       />
-      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+      <ScrollView
+        contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + spacing.xxxl }]}
+        keyboardShouldPersistTaps="handled"
+      >
         {p.archived_at && (
           <View style={styles.banner}>
             <Ionicons name="archive-outline" size={16} color={colors.warning} />
@@ -316,7 +322,7 @@ export default function ProjectDetailScreen() {
           )
         }
       />
-    </View>
+    </KeyboardView>
   )
 }
 
@@ -331,7 +337,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.page },
-  content: { padding: spacing.lg, paddingBottom: 60 },
+  content: { padding: spacing.lg },
   banner: {
     flexDirection: 'row',
     alignItems: 'center',

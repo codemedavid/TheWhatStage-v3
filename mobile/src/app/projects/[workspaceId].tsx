@@ -12,6 +12,7 @@ import {
   View,
   type ListRenderItemInfo,
 } from 'react-native'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { BoardView, type BoardColumn } from '@/components/board/board-view'
 import { ProjectCard } from '@/components/projects/project-card'
 import { ProjectListRow } from '@/components/projects/project-list-row'
@@ -200,7 +201,7 @@ interface ListModeProps {
 type ListItem = { kind: 'header'; id: string; name: string; count: number } | { kind: 'row'; project: ProjectRow }
 
 const listItemKey = (it: ListItem) => (it.kind === 'header' ? `h:${it.id}` : it.project.id)
-const LIST_CONTENT = { paddingBottom: 40 }
+const LIST_BOTTOM_GAP = 40
 
 function flatten(columns: BoardColumn<ProjectRow>[]): ListItem[] {
   return columns.flatMap((c) => [
@@ -213,6 +214,8 @@ function ListMode({ columns, stageById, refreshing, onRefresh, onOpen }: ListMod
   // Rebuilding this inline on every render handed the list a brand-new `data`
   // array each time, which invalidated every mounted row.
   const items = useMemo(() => flatten(columns), [columns])
+  const insets = useSafeAreaInsets()
+  const listPad = useMemo(() => ({ paddingBottom: insets.bottom + LIST_BOTTOM_GAP }), [insets.bottom])
   const renderItem = useCallback(
     ({ item }: ListRenderItemInfo<ListItem>) =>
       item.kind === 'header' ? (
@@ -231,7 +234,7 @@ function ListMode({ columns, stageById, refreshing, onRefresh, onOpen }: ListMod
       keyExtractor={listItemKey}
       refreshing={refreshing}
       onRefresh={onRefresh}
-      contentContainerStyle={LIST_CONTENT}
+      contentContainerStyle={listPad}
       renderItem={renderItem}
     />
   )

@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons'
 import { useRouter } from 'expo-router'
 import { Alert, FlatList, Pressable, StyleSheet, Text, View } from 'react-native'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { LayoutChip } from '@/components/saved/layout-chip'
 import { Button } from '@/components/ui/button'
 import { EmptyState, Skeleton } from '@/components/ui/primitives'
@@ -10,9 +11,14 @@ import type { SavedMessage } from '@/data/types'
 import { truncate } from '@/lib/format'
 import { colors, radius, shadow, spacing, type } from '@/theme/tokens'
 
+// Enough room under the last row for the floating button, which is itself
+// lifted clear of the gesture bar.
+const FAB_CLEARANCE = 96
+
 /** The library. Creating and editing happen in the full-screen editor. */
 export default function SavedMessagesScreen() {
   const router = useRouter()
+  const insets = useSafeAreaInsets()
   const list = useSavedMessages()
   const remove = useDeleteSavedMessage()
 
@@ -42,7 +48,7 @@ export default function SavedMessagesScreen() {
       <FlatList
         data={list.data ?? []}
         keyExtractor={(m) => m.id}
-        contentContainerStyle={{ padding: spacing.lg, gap: 10, paddingBottom: 100 }}
+        contentContainerStyle={{ padding: spacing.lg, gap: 10, paddingBottom: insets.bottom + FAB_CLEARANCE }}
         refreshing={list.isRefetching}
         onRefresh={() => list.refetch()}
         ListEmptyComponent={
@@ -91,7 +97,7 @@ export default function SavedMessagesScreen() {
         accessibilityRole="button"
         accessibilityLabel="New saved message"
         onPress={openNew}
-        style={[styles.fab, shadow.fab]}
+        style={[styles.fab, { bottom: insets.bottom + spacing.lg }, shadow.fab]}
       >
         <Ionicons name="add" size={28} color="#fff" />
       </Pressable>
@@ -124,7 +130,6 @@ const styles = StyleSheet.create({
   fab: {
     position: 'absolute',
     right: spacing.xl,
-    bottom: spacing.xxl,
     width: 56,
     height: 56,
     borderRadius: 28,

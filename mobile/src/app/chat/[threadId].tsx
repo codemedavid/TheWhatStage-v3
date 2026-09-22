@@ -5,7 +5,6 @@ import { useLocalSearchParams, useRouter } from 'expo-router'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   FlatList,
-  KeyboardAvoidingView,
   Platform,
   Pressable,
   StyleSheet,
@@ -22,6 +21,7 @@ import { GROUP_GAP_MS, MessageBubble, type BubbleMeta } from '@/components/chat/
 import { SavedMessagesSheet } from '@/components/chat/saved-messages-sheet'
 import { isTakenOver, threadDisplayName } from '@/components/chat/thread-row'
 import { Avatar } from '@/components/ui/avatar'
+import { KeyboardView, useKeyboardVisible } from '@/components/ui/keyboard-view'
 import { EmptyState, Skeleton, StageChip } from '@/components/ui/primitives'
 import { IconButton, ScreenHeader } from '@/components/ui/screen-header'
 import { StagePickerSheet } from '@/components/ui/stage-picker-sheet'
@@ -109,6 +109,7 @@ export default function ChatScreen() {
   const { threadId } = useLocalSearchParams<{ threadId: string }>()
   const router = useRouter()
   const insets = useSafeAreaInsets()
+  const keyboardVisible = useKeyboardVisible()
   const qc = useQueryClient()
 
   const thread = useThread(threadId)
@@ -274,7 +275,7 @@ export default function ChatScreen() {
         }
       />
 
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={0}>
+      <KeyboardView style={{ flex: 1 }}>
         <FlatList
           data={rows}
           inverted
@@ -312,7 +313,9 @@ export default function ChatScreen() {
           </View>
         )}
 
-        <View style={{ paddingBottom: insets.bottom }}>
+        {/* The keyboard covers the gesture bar, so the inset only applies while
+            it is down — keeping it would float the composer above the keys. */}
+        <View style={{ paddingBottom: keyboardVisible ? 0 : insets.bottom }}>
           <Composer
             disabled={!!thread.data && !leadId}
             disabledNote="This chat isn't linked to a lead yet."
@@ -325,7 +328,7 @@ export default function ChatScreen() {
             onOpenMedia={() => setMediaOpen(true)}
           />
         </View>
-      </KeyboardAvoidingView>
+      </KeyboardView>
 
       <SavedMessagesSheet
         visible={savedOpen}

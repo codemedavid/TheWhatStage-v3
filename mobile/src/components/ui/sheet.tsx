@@ -1,16 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import {
-  Animated,
-  Dimensions,
-  KeyboardAvoidingView,
-  Modal,
-  Platform,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native'
+import { Animated, Dimensions, Modal, Pressable, StyleSheet, Text, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import { KeyboardView } from '@/components/ui/keyboard-view'
 import { colors, radius, shadow, spacing, type } from '@/theme/tokens'
 
 interface SheetProps {
@@ -61,10 +52,7 @@ export function Sheet({ visible, onClose, title, subtitle, height = 'auto', chil
 
   return (
     <Modal visible={visible} transparent animationType="none" onRequestClose={close} statusBarTranslucent>
-      <KeyboardAvoidingView
-        style={styles.container}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      >
+      <KeyboardView style={styles.container}>
         <Animated.View style={[styles.backdrop, { opacity: fade }]}>
           <Pressable style={styles.fill} onPress={close} accessibilityLabel="Close sheet" />
         </Animated.View>
@@ -91,7 +79,7 @@ export function Sheet({ visible, onClose, title, subtitle, height = 'auto', chil
           )}
           {children}
         </Animated.View>
-      </KeyboardAvoidingView>
+      </KeyboardView>
     </Modal>
   )
 }
