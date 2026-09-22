@@ -69,6 +69,12 @@
         "projectId": "ca6cd0c3-5e26-413e-b082-81ce77801629"
       }
     },
-    "owner": "itscodemedavid"
+    "owner": "itscodemedavid",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/ca6cd0c3-5e26-413e-b082-81ce77801629"
+    }
   }
 }
