@@ -22,7 +22,6 @@ function ctx(): BulkContext {
     lastInboundByThread: new Map(),
     optinByThread: new Map(),
     otnByThread: new Map(),
-    cooldownThreadIds: new Set(),
     dailyCapUsed: 0,
     projectInstructionsByLead: new Map(),
   }

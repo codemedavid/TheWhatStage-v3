@@ -3,7 +3,6 @@ import type { BulkContext } from './types'
 import { STAGE_EMBED } from '@/lib/projects/stage-embed'
 import { fetchAllPages, fetchByIdChunks } from './batch'
 
-const COOLDOWN_HOURS = 48
 const DEFAULT_DAILY_CAP = 5000
 // Sends per user per rolling 24h across all campaigns. Env-tunable so a
 // large "send to everyone" run isn't silently paused at an arbitrary number.
@@ -23,20 +22,18 @@ export async function loadContext(
       lastInboundByThread: new Map(),
       optinByThread: new Map(),
       otnByThread: new Map(),
-      cooldownThreadIds: new Set(),
       dailyCapUsed: 0,
       projectInstructionsByLead: new Map(),
     }
   }
 
   const now = new Date().toISOString()
-  const cooldownCutoff = new Date(Date.now() - COOLDOWN_HOURS * 3600_000).toISOString()
   const dailyCutoff = new Date(Date.now() - 24 * 3600_000).toISOString()
 
   // Every `.in(thread_id, …)` lookup is chunked (see batch.ts): thousands of
   // UUIDs in one GET would blow the URL limit, and a single response can't
   // carry more than max_rows anyway.
-  const [lastInboundRows, optinRows, otnRows, cooldownRows, capRows, threadRows] =
+  const [lastInboundRows, optinRows, otnRows, capRows, threadRows] =
     await Promise.all([
       // Newest inbound message body per thread, via DISTINCT ON in SQL so a
       // chatty thread can't crowd the others out of the page.
@@ -77,18 +74,6 @@ export async function loadContext(
           return data ?? []
         },
       ),
-
-      // Threads that received a campaign send in the last 48h (cooldown)
-      fetchByIdChunks<{ thread_id: string }>(threadIds, async (ids) => {
-        const { data, error } = await admin
-          .from('agent_campaign_messages')
-          .select('thread_id')
-          .in('thread_id', ids)
-          .eq('status', 'sent')
-          .gte('sent_at', cooldownCutoff)
-        if (error) throw new Error(`loadContext: cooldown lookup failed — ${error.message}`)
-        return data ?? []
-      }),
 
       // Daily cap: fetch user's campaign IDs first, then count sent messages.
       // Paged, because a user who runs campaigns regularly will pass max_rows
@@ -136,8 +121,6 @@ export async function loadContext(
     }
   }
 
-  const cooldownThreadIds = new Set<string>(cooldownRows.map((r) => r.thread_id))
-
   // Second pass: count sent campaign messages in last 24h for this user's
   // campaigns. Chunked like every other `.in()` here, and it throws rather
   // than defaulting to 0 — a swallowed error used to report an empty budget
@@ -166,7 +149,6 @@ export async function loadContext(
     lastInboundByThread,
     optinByThread,
     otnByThread,
-    cooldownThreadIds,
     dailyCapUsed,
     projectInstructionsByLead,
   }

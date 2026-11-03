@@ -11,8 +11,6 @@ import {
 import { renderTemplate, type TemplateButton } from '@/lib/messenger-templates/types'
 import { deeplinkActionPageUrl } from '@/lib/action-pages/urls'
 
-const COOLDOWN_HOURS = 48
-
 interface CampaignJob {
   id: string
   thread_id: string
@@ -143,27 +141,8 @@ export async function handleCampaignSend(
     return
   }
 
-  // Re-resolve send policy (state may have changed since preview).
-  // 48h cooldown check.
-  const cooldownCutoff = new Date(Date.now() - COOLDOWN_HOURS * 3600_000).toISOString()
-  const { data: recentCampaign } = await admin
-    .from('agent_campaign_messages')
-    .select('id')
-    .eq('thread_id', job.thread_id)
-    .eq('status', 'sent')
-    .gte('sent_at', cooldownCutoff)
-    .neq('id', campaignMessageId)
-    .limit(1)
-    .maybeSingle<{ id: string }>()
-
-  if (recentCampaign) {
-    await updateMessage(admin, campaignMessageId, { status: 'skipped', skip_reason: 'cooldown' })
-    await bumpCounter(admin, msg.campaign_id, 'skipped')
-    await markJobDone(admin, job.id, 'skipped')
-    return
-  }
-
-  // Determine which send kind to use based on re-resolved window.
+  // Re-resolve the send kind from the current window (state may have changed
+  // since preview).
   const insideWindow = isInsideWindow(thread.last_inbound_at)
   const sendKind = insideWindow ? 'bot' : 'workflow_human_agent'
 

@@ -1091,7 +1091,6 @@ export function AgentClient({ stages, templates, actionPages, categories, pendin
                       {paused ? (
                         <span style={{ fontSize:13, color:S.ink4, fontStyle:'italic' }}>
                           {row.policy === 'paused:window' && 'Outside 24h window — no opt-in or OTN token.'}
-                          {row.policy === 'paused:cooldown' && 'Contacted within the last 48 hours.'}
                           {row.policy === 'paused:cap' && 'Daily send cap reached.'}
                           {row.policy === 'paused:optin' && 'No marketing opt-in on file.'}
                         </span>

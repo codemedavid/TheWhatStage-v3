@@ -26,7 +26,6 @@ export interface BulkContext {
   lastInboundByThread: Map<string, string>
   optinByThread: Map<string, { opted_out_at: string | null }>
   otnByThread: Map<string, { token: string; requested_at: string }>
-  cooldownThreadIds: Set<string>
   dailyCapUsed: number
   // Per-customer (lead_id) project AI-instructions, used to align the draft to
   // the active project for that customer. Empty when the lead has no project.
@@ -37,7 +36,7 @@ export type PolicyResult =
   | { policy: 'RESPONSE' }
   | { policy: 'MARKETING_MESSAGE' }
   | { policy: 'OTN'; token: string }
-  | { policy: 'paused'; reason: 'cooldown' | 'window' | 'optin' | 'cap' }
+  | { policy: 'paused'; reason: 'window' | 'optin' | 'cap' }
 
 export interface DraftRow {
   lead_id: string

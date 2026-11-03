@@ -72,9 +72,6 @@ function makeAdmin({ draftText, leadName }: FakeOptions) {
   const admin = {
     rpc: vi.fn(async () => ({ error: null })),
     from(table: string) {
-      // The cooldown probe reads agent_campaign_messages with .neq() — it must
-      // come back empty or the send is skipped before the text is built.
-      let isCooldownProbe = false
       let isUpdate = false
       let updateValues: Record<string, unknown> = {}
 
@@ -89,14 +86,11 @@ function makeAdmin({ draftText, leadName }: FakeOptions) {
         },
         eq: () => chain,
         gte: () => chain,
-        neq: () => { isCooldownProbe = true; return chain },
+        neq: () => chain,
         limit: () => chain,
         is: () => chain,
         single: async () => ({ data: rowFor(table), error: null }),
-        maybeSingle: async () => ({
-          data: isCooldownProbe ? null : rowFor(table),
-          error: null,
-        }),
+        maybeSingle: async () => ({ data: rowFor(table), error: null }),
         then: (resolve: (v: unknown) => void) => {
           if (isUpdate) updates.push({ table, values: updateValues })
           return resolve({ data: null, error: null })

@@ -11,6 +11,11 @@ export const PAGE_SIZE = 1000
 // keeps a GET request comfortably under typical 8-16KB URL limits.
 export const IN_CHUNK_SIZE = 200
 
+// Chunk queries in flight at once. A "send to everyone" audience is hundreds
+// of chunks per lookup; firing them all together saturated the database and
+// tripped statement_timeout on every one.
+export const CHUNK_CONCURRENCY = 6
+
 export function chunk<T>(items: readonly T[], size: number): T[][] {
   if (size <= 0) throw new Error(`chunk: size must be > 0 (got ${size})`)
   const out: T[][] = []
@@ -38,13 +43,25 @@ export async function fetchAllPages<T>(
   return pages.flat()
 }
 
-// Fan a list of ids out over several `.in()` queries and concatenate the rows.
+// Fan a list of ids out over several `.in()` queries and concatenate the rows,
+// in input order, with at most `concurrency` queries running at a time.
 export async function fetchByIdChunks<T>(
   ids: readonly string[],
   fetchChunk: (ids: string[]) => Promise<T[]>,
   size: number = IN_CHUNK_SIZE,
+  concurrency: number = CHUNK_CONCURRENCY,
 ): Promise<T[]> {
   if (ids.length === 0) return []
-  const results = await Promise.all(chunk(ids, size).map((c) => fetchChunk(c)))
+  const chunks = chunk(ids, size)
+  const results: T[][] = new Array(chunks.length)
+  let next = 0
+  const worker = async () => {
+    while (next < chunks.length) {
+      const i = next++
+      results[i] = await fetchChunk(chunks[i])
+    }
+  }
+  const workers = Math.max(1, Math.min(concurrency, chunks.length))
+  await Promise.all(Array.from({ length: workers }, worker))
   return results.flat()
 }

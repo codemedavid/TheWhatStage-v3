@@ -50,6 +50,28 @@ describe('fetchByIdChunks', () => {
     expect(fetchChunk).toHaveBeenCalledTimes(3)
   })
 
+  it('never runs more than `concurrency` chunk queries at once', async () => {
+    // Arrange
+    let inFlight = 0
+    let peak = 0
+    const fetchChunk = vi.fn(async (ids: string[]) => {
+      inFlight++
+      peak = Math.max(peak, inFlight)
+      await new Promise((r) => setTimeout(r, 1))
+      inFlight--
+      return ids
+    })
+    const ids = Array.from({ length: 20 }, (_, i) => String(i))
+
+    // Act
+    const rows = await fetchByIdChunks(ids, fetchChunk, 2, 3)
+
+    // Assert
+    expect(rows).toEqual(ids)
+    expect(fetchChunk).toHaveBeenCalledTimes(10)
+    expect(peak).toBe(3)
+  })
+
   it('does not query at all for an empty id list', async () => {
     const fetchChunk = vi.fn(async () => [])
     expect(await fetchByIdChunks([], fetchChunk)).toEqual([])

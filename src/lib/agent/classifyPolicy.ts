@@ -4,11 +4,11 @@ import { DAILY_CAP } from './loadContext'
 
 // Policy outcome for shared-template campaigns. An approved utility
 // template lets us bypass the 24h window via the UTILITY_MESSAGE tag, so
-// the only "paused" reasons that still apply are cooldown and cap.
+// the only "paused" reason that still applies is the daily cap.
 export type TemplatePolicyResult =
   | { policy: 'RESPONSE' }
   | { policy: 'UTILITY_MESSAGE' }
-  | { policy: 'paused'; reason: 'cooldown' | 'cap' }
+  | { policy: 'paused'; reason: 'cap' }
 
 const WINDOW_MS = 24 * 60 * 60 * 1000
 
@@ -26,10 +26,6 @@ export function classifyPolicy(
 
   if (remaining <= 0) {
     return { policy: 'paused', reason: 'cap' }
-  }
-
-  if (ctx.cooldownThreadIds.has(lead.thread_id)) {
-    return { policy: 'paused', reason: 'cooldown' }
   }
 
   if (isInsideWindow(lead.last_inbound_at)) {
@@ -63,7 +59,7 @@ export function isPausedPolicy(p: PolicyResult): boolean {
 /**
  * Policy classifier for shared-template campaigns. Skips the opt-in/OTN
  * checks because an approved utility template carries its own permission.
- * Cooldown and daily-cap still apply.
+ * The daily cap still applies.
  */
 export function classifyTemplatePolicy(
   lead: AudienceLead,
@@ -72,9 +68,6 @@ export function classifyTemplatePolicy(
 ): TemplatePolicyResult {
   const remaining = dailyCapRemaining ?? DAILY_CAP - ctx.dailyCapUsed
   if (remaining <= 0) return { policy: 'paused', reason: 'cap' }
-  if (ctx.cooldownThreadIds.has(lead.thread_id)) {
-    return { policy: 'paused', reason: 'cooldown' }
-  }
   if (isInsideWindow(lead.last_inbound_at)) return { policy: 'RESPONSE' }
   return { policy: 'UTILITY_MESSAGE' }
 }
